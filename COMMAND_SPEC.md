@@ -2,6 +2,34 @@
 
 Every command compiles to a typed AST node `{"cmd": ..., ... , "_loc": {file,line,col}}` (see `engine/script/ast_nodes.py`). Source `.rpy` is direct, no YAML leak — Ren'Py itself does NOT use YAML/JSON (`renpy/parser.py` → `renpy.ast`).
 
+## Declarative forms (canonical, M15)
+
+```rpy
+state:                       # typed, saved variables
+    affection: int = 0
+character e:                 # declarative character definition
+    name "Eileen"
+    color "#c8ffc8"
+image "bg classroom" = "backgrounds/classroom.png"
+audio theme = "music/theme.ogg"
+stage classroom_3d = "stages/classroom.blend"
+set affection += 1           # canonical assignment ($ is a legacy alias)
+menu:
+    choice "Help Eileen":    # declarative choice form
+        set affection += 1
+    end
+end                           # optional explicit block terminator
+```
+
+| Form | AST / effect | Notes |
+| --- | --- | --- |
+| `state:` block | `defaults` + `types` (→ `VNState.declared_types`) | types: int, float, str/string, bool, list; value must be a literal of that type |
+| `character id:` block | `characters[id] = {name, color}` | same registry as `define … Character(…)` |
+| `image/audio/stage name = path` | `assets[images|audio|stages][name] = path` | resolved via `VNState.resolve_asset`; events keep declared name |
+| `set target op expr` | `{"cmd":"assign", ...}` | identical to `$`; type-checked against `state:` |
+| `choice "Text":` | menu choice (with `id`) | bare `"Text":` still valid |
+| `end` | closes label/menu/if/state/character/choice | optional; must match the block's indent |
+
 ## Dialogue
 
 ```rpy

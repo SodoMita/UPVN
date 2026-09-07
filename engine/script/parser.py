@@ -52,6 +52,7 @@ Each label's value is list[ASTNode.to_dict()] — JSON-serialisable
 and suitable for interpreter + golden-trace tests.
 """
 from __future__ import annotations
+import ast
 import re
 from typing import List, Dict, Any, Optional, Tuple
 from .lexer import group_logical_lines, LogicalLine, extract_quoted
@@ -95,6 +96,26 @@ _re_nar = re.compile(r'^"(.*)"\s*$')
 _re_char_name_tr = re.compile(r'_\(\s*"(.*?)"\s*\)')
 _re_color = re.compile(r'color\s*=\s*["\'](.*?)["\']')
 
+# ------------------------------------------------------------------ declarative forms (M15)
+# `set` -- canonical assignment (declarative); `$` remains a legacy alias
+_re_set = re.compile(r"^set\s+(\w+)\s*(\+=|-=|\*=|/=|=)\s*(.+)\s*$")
+# `state:` block with typed declarations
+_re_state = re.compile(r"^state\s*:\s*$")
+_re_state_var_typed = re.compile(r"^(\w+)\s*:\s*(int|float|str|string|bool|list)(?:\s*=\s*(.+))?\s*$")
+_re_state_var_plain = re.compile(r"^(\w+)\s*=\s*(.+)\s*$")
+# `character` block -- declarative character definition
+_re_character = re.compile(r"^character\s+(\w+)\s*:\s*$")
+_re_char_prop_name = re.compile(r'^name\s+(?:"([^"]+)"|\'([^\']+)\')\s*$')
+_re_char_prop_color = re.compile(r'^color\s+(?:"([^"]+)"|\'([^\']+)\')\s*$')
+# declarative asset manifest
+_re_image = re.compile(r'^image\s+(?:"([^"]+)"|([A-Za-z_][\w ]*?))\s*=\s*(?:"([^"]+)"|\'([^\']+)\'|(\S+))\s*$')
+_re_audio = re.compile(r'^audio\s+(\w+)\s*=\s*(?:"([^"]+)"|\'([^\']+)\'|(\S+))\s*$')
+_re_stage = re.compile(r'^stage\s+(\w+)\s*=\s*(?:"([^"]+)"|\'([^\']+)\'|(\S+))\s*$')
+# `choice` keyword inside menus (declarative alternative to bare quoted choice)
+_re_choice = re.compile(r'^choice\s+(?:"([^"]+)"|\'([^\']+)\')\s*:\s*$')
+# explicit block terminator
+_re_end = re.compile(r"^end\s*$")
+
 def _parse_character_args(inner: str) -> Tuple[str, str, dict]:
     # inner is inside Character(...)
     # Try translatable first
@@ -125,6 +146,8 @@ class Parser:
         self.labels: Dict[str, List[dict]] = {}
         self.defaults: Dict[str, Any] = {}
         self.characters: Dict[str, dict] = {}
+        self.types: Dict[str, str] = {}  # declarative `state:` type declarations
+        self.assets: Dict[str, Dict[str, str]] = {"images": {}, "audio": {}, "stages": {}}
         # current label being filled
         self._current_label: Optional[str] = None
         self._current_list: Optional[List[dict]] = None
@@ -157,6 +180,8 @@ class Parser:
             "labels": self.labels,
             "characters": self.characters,
             "defaults": self.defaults,
+            "types": self.types,
+            "assets": self.assets,
         }
 
     # ---------------------------- top-level dispatch
@@ -196,6 +221,39 @@ class Parser:
             self.pos += 1
             return
 
+        # state: block — declarative typed variable declarations
+        if _re_state.match(t):
+            self._parse_state_block(ll)
+            return
+
+        # character block — declarative character definition
+        m = _re_character.match(t)
+        if m:
+            self._parse_character_block(ll, m.group(1))
+            return
+
+        # declarative asset manifest: image / audio / stage
+        m = _re_image.match(t)
+        if m:
+            name = m.group(1) if m.group(1) is not None else (m.group(2) or "").strip()
+            path = m.group(3) or m.group(4) or m.group(5)
+            if not name:
+                raise ParseError("image declaration needs a name", ll.filename, ll.lineno, 1, ll.raw,
+                                 hint='use: image "bg classroom" = "backgrounds/classroom.png"')
+            self.assets["images"][name] = path
+            self.pos += 1
+            return
+        m = _re_audio.match(t)
+        if m:
+            self.assets["audio"][m.group(1)] = m.group(2) or m.group(3) or m.group(4)
+            self.pos += 1
+            return
+        m = _re_stage.match(t)
+        if m:
+            self.assets["stages"][m.group(1)] = m.group(2) or m.group(3) or m.group(4)
+            self.pos += 1
+            return
+
         # label
         m = _re_label.match(t)
         if m:
@@ -208,9 +266,15 @@ class Parser:
             self.pos += 1
             # parse its indented block
             self._parse_block(parent_indent=0, out=self._current_list)
+            self._consume_end(0, "label")
             self._current_label = None
             self._current_list = None
             return
+
+        # explicit end at top level with no open label
+        if _re_end.match(t):
+            raise ParseError("unexpected 'end' — no open block to close", ll.filename, ll.lineno, 1, ll.raw,
+                             hint="remove this 'end', or it may be mis-indented")
 
         # friendly hint for common top-level mistakes
         if t.startswith("label ") and not t.strip().endswith(":"):
@@ -221,11 +285,135 @@ class Parser:
             raise ParseError(f'define syntax error: {t!r}',
                              ll.filename, ll.lineno, 1, ll.raw,
                              hint='use: define e = Character("Eileen", color="#c8ffc8")')
+        if t.startswith("character") and not t.strip().endswith(":"):
+            raise ParseError(f'character block needs a colon — got: {t!r}',
+                             ll.filename, ll.lineno, 1, ll.raw,
+                             hint='use: character e:\n    name "Eileen"\n    color "#c8ffc8"')
+        if t.startswith("state") and not t.strip().endswith(":"):
+            raise ParseError(f'state block needs a colon — got: {t!r}',
+                             ll.filename, ll.lineno, 1, ll.raw,
+                             hint='use: state:\n    affection: int = 0')
         raise ParseError(
-            f'expected "label", "define" or "default" at top level, got: {t!r}',
+            f'expected "label", "define", "default", "state", "character", "image", "audio" or "stage" at top level, got: {t!r}',
             ll.filename, ll.lineno, 1, ll.raw,
             hint='example:\nlabel start:\n    "Hello."\ndefine e = Character("Eileen")'
         )
+
+    # ---------------------------- declarative blocks (M15)
+    def _consume_end(self, indent: int, kind: str) -> bool:
+        """Consume an optional explicit `end` at the given indent. Returns True if consumed."""
+        if self.pos < len(self.lines):
+            nxt = self.lines[self.pos]
+            if _re_end.match(nxt.text) and nxt.indent == indent:
+                self.pos += 1
+                return True
+        return False
+
+    def _parse_state_block(self, ll: LogicalLine):
+        """`state:` block — typed variable declarations at indent+4, optional `end`."""
+        self.pos += 1
+        block_indent = ll.indent + 4
+        seen: Dict[str, str] = {}
+        while self.pos < len(self.lines):
+            nxt = self.lines[self.pos]
+            if nxt.indent <= ll.indent:
+                break
+            if nxt.indent != block_indent:
+                raise ParseError(
+                    f"state declaration must be indented {block_indent} spaces, got {nxt.indent}",
+                    nxt.filename, nxt.lineno, nxt.indent + 1, nxt.raw,
+                    hint=f"indent this line to {block_indent} spaces (4 per level)",
+                )
+            if _re_end.match(nxt.text):
+                raise ParseError("unexpected 'end' inside state block", nxt.filename, nxt.lineno, 1, nxt.raw,
+                                 hint="end closes the whole state block — it must be dedented to the same level as 'state:'")
+            t = nxt.text
+            m = _re_state_var_typed.match(t)
+            if m:
+                var, type_name, val_expr = m.group(1), m.group(2), m.group(3)
+                typ = "str" if type_name == "string" else type_name
+                if val_expr is not None:
+                    val = self._eval_literal(val_expr.strip(), nxt)
+                    self._check_declared_type(var, typ, val, nxt)
+                else:
+                    val = {"int": 0, "float": 0.0, "str": "", "bool": False, "list": []}[typ]
+                if var in self.defaults:
+                    raise ParseError(f"duplicate variable declaration {var!r}", nxt.filename, nxt.lineno, 1, nxt.raw,
+                                     hint="declare each variable once in state:")
+                self.defaults[var] = val
+                self.types[var] = typ
+                seen[var] = typ
+                self.pos += 1
+                continue
+            m = _re_state_var_plain.match(t)
+            if m:
+                var, val_expr = m.group(1), m.group(2).strip()
+                val = self._eval_literal(val_expr, nxt)
+                if var in self.defaults:
+                    raise ParseError(f"duplicate variable declaration {var!r}", nxt.filename, nxt.lineno, 1, nxt.raw,
+                                     hint="declare each variable once in state:")
+                self.defaults[var] = val
+                self.pos += 1
+                continue
+            raise ParseError(f"invalid state declaration: {t!r}", nxt.filename, nxt.lineno, 1, nxt.raw,
+                             hint='use: name: type = value   e.g. affection: int = 0  (types: int, float, str, bool, list)')
+        self._consume_end(ll.indent, "state")
+
+    def _parse_character_block(self, ll: LogicalLine, cid: str):
+        """`character id:` block — name/color properties at indent+4, optional `end`."""
+        self.pos += 1
+        block_indent = ll.indent + 4
+        name = cid
+        color = "#ffffff"
+        props: Dict[str, str] = {}
+        while self.pos < len(self.lines):
+            nxt = self.lines[self.pos]
+            if nxt.indent <= ll.indent:
+                break
+            if nxt.indent != block_indent:
+                raise ParseError(
+                    f"character property must be indented {block_indent} spaces, got {nxt.indent}",
+                    nxt.filename, nxt.lineno, nxt.indent + 1, nxt.raw,
+                    hint=f"indent this line to {block_indent} spaces (4 per level)",
+                )
+            t = nxt.text
+            m = _re_char_prop_name.match(t)
+            if m:
+                name = m.group(1) if m.group(1) is not None else m.group(2)
+                self.pos += 1
+                continue
+            m = _re_char_prop_color.match(t)
+            if m:
+                color = m.group(1) if m.group(1) is not None else m.group(2)
+                self.pos += 1
+                continue
+            raise ParseError(f"unknown character property: {t!r}", nxt.filename, nxt.lineno, 1, nxt.raw,
+                             hint='character properties: name "..." and color "#..."')
+        if cid in self.characters:
+            raise ParseError(f'duplicate character "{cid}"', ll.filename, ll.lineno, 1, ll.raw,
+                             hint="define each character once")
+        self.characters[cid] = {"name": name, "color": color, "extra": props}
+        self._consume_end(ll.indent, "character")
+
+    def _check_declared_type(self, var: str, typ: str, val, ll: LogicalLine):
+        """Validate a state: literal against its declared type."""
+        ok = False
+        if typ == "int":
+            ok = (not isinstance(val, bool)) and isinstance(val, int)
+        elif typ == "float":
+            ok = (not isinstance(val, bool)) and isinstance(val, (int, float))
+        elif typ == "str":
+            ok = isinstance(val, str)
+        elif typ == "bool":
+            ok = isinstance(val, bool)
+        elif typ == "list":
+            ok = isinstance(val, list)
+        if not ok:
+            raise ParseError(
+                f"type mismatch: {var!r} is declared {typ}, but value is {type(val).__name__}",
+                ll.filename, ll.lineno, 1, ll.raw,
+                hint=f"declare it with a {typ} value, e.g. {var}: {typ} = 0",
+            )
 
     # ---------------------------- block parsing (indent-sensitive)
     def _parse_block(self, parent_indent: int, out: List[dict]):
@@ -428,16 +616,24 @@ class Parser:
             self.pos += 1
             return
 
-        # ---- assignment: $ x = ... or $ x += 1
-        m = _re_assign.match(t)
+        # ---- assignment: set x = ... / set x += 1  (canonical) or legacy `$ x += 1`
+        m = _re_set.match(t)
+        assign_kind = "set"
+        if not m:
+            m = _re_assign.match(t)
+            assign_kind = "$"
         if m:
             expr = m.group(1).strip()
-            # split target / op / value
-            am = re.match(r"(\w+)\s*(\+=|-=|\*=|/=|=)\s*(.+)", expr)
-            if not am:
-                raise ParseError(f"invalid assignment: {expr!r}", ll.filename, ll.lineno, 1, ll.raw,
-                                 hint='example: $ book = True  or  $ affection += 1')
-            target, op, val_expr = am.group(1), am.group(2), am.group(3)
+            if assign_kind == "set":
+                # regex already split target/op/value
+                target, op, val_expr = m.group(1), m.group(2), m.group(3).strip()
+            else:
+                # split target / op / value
+                am = re.match(r"(\w+)\s*(\+=|-=|\*=|/=|=)\s*(.+)", expr)
+                if not am:
+                    raise ParseError(f"invalid assignment: {expr!r}", ll.filename, ll.lineno, 1, ll.raw,
+                                     hint='example: set book = True  or  set affection += 1')
+                target, op, val_expr = am.group(1), am.group(2), am.group(3)
             out.append(ASTNode("assign", {"target": target, "op": op, "expr": val_expr},
                                SourceLocation(ll.filename, ll.lineno, ll.indent+1)).to_dict())
             self.pos += 1
@@ -468,6 +664,23 @@ class Parser:
                 #     "Ask right away.":
                 #         jump ...
                 ct = choice_ll.text
+                # `choice "Text":` — declarative keyword form (M15)
+                m_choice = _re_choice.match(ct)
+                if m_choice:
+                    choice_text = m_choice.group(1) if m_choice.group(1) is not None else m_choice.group(2)
+                    self.pos += 1  # step past choice line
+                    choice_block: List[dict] = []
+                    if self.pos < len(self.lines) and self.lines[self.pos].indent > choice_ll.indent:
+                        if self.lines[self.pos].indent != choice_ll.indent + 4:
+                            raise ParseError(
+                                f"choice body must be indented {choice_ll.indent+4} spaces",
+                                self.lines[self.pos].filename, self.lines[self.pos].lineno, 1, self.lines[self.pos].raw
+                            )
+                        self._parse_block(parent_indent=choice_ll.indent, out=choice_block)
+                    self._consume_end(choice_ll.indent, "choice")
+                    menu_node["choices"].append({"text": choice_text, "block": choice_block, "_loc": {"file": choice_ll.filename, "line": choice_ll.lineno}})
+                    continue
+
                 colon = ct.endswith(":")
                 if colon:
                     choice_text_raw = ct[:-1].strip()
@@ -510,6 +723,9 @@ class Parser:
 
                 menu_node["choices"].append({"text": choice_text, "block": choice_block, "_loc": {"file": choice_ll.filename, "line": choice_ll.lineno}})
 
+            # optional explicit `end` closing the menu
+            self._consume_end(menu_indent, "menu")
+
             if not menu_node["choices"]:
                 raise ParseError("menu has no choices", ll.filename, ll.lineno, 1, ll.raw)
 
@@ -548,6 +764,10 @@ class Parser:
             return
 
         # ---- fallback
+        if _re_end.match(t):
+            raise ParseError(f"unexpected 'end' — no open block to close at this indentation",
+                             ll.filename, ll.lineno, 1, ll.raw,
+                             hint="'end' must be dedented to the same level as the block it closes (label/menu/if/state/character/choice)")
         raise ParseError(f"unknown statement: {t!r}", ll.filename, ll.lineno, 1, ll.raw,
                          hint=self._hint_for_unknown(t))
 
@@ -594,6 +814,10 @@ class Parser:
                         raise ParseError("else body must be indented 4 spaces", self.lines[self.pos].filename, self.lines[self.pos].lineno, 1, self.lines[self.pos].raw)
                     self._parse_block(parent_indent=nxt.indent, out=blk3)
                 branches.append({"cond": None, "block": blk3})
+                continue  # re-loop: an explicit `end` may close the chain
+            if _re_end.match(nxt.text):
+                # explicit `end` closes the if-chain
+                self.pos += 1
                 break
             else:
                 break
@@ -604,28 +828,13 @@ class Parser:
 
     # ---------------------------------------------------------------- helpers
     def _eval_literal(self, expr: str, ll: LogicalLine):
-        """Safe literal eval for `default` values."""
+        """Safe literal eval for `default` / `state:` values (no code execution)."""
         expr = expr.strip()
-        if expr == "True":
-            return True
-        if expr == "False":
-            return False
-        if expr == "None":
-            return None
-        # quoted string
-        if (expr.startswith('"') and expr.endswith('"')) or (expr.startswith("'") and expr.endswith("'")):
-            try:
-                return expr[1:-1].encode("utf-8").decode("unicode_escape")
-            except Exception:
-                return expr[1:-1]
-        # integer
         try:
-            if "." in expr:
-                return float(expr)
-            return int(expr)
-        except ValueError:
-            raise ParseError(f'default value must be a literal (got {expr!r})', ll.filename, ll.lineno, 1, ll.raw,
-                             hint='use: True, False, 0, 3.14, "text"')
+            return ast.literal_eval(expr)
+        except (ValueError, SyntaxError, MemoryError, RecursionError):
+            raise ParseError(f'value must be a literal (got {expr!r})', ll.filename, ll.lineno, 1, ll.raw,
+                             hint='use: True, False, None, 0, 3.14, "text", [1, 2]')
 
     def _hint_for_unknown(self, t: str) -> str:
         if t.startswith("jump ") and t.endswith(":"):
@@ -640,6 +849,14 @@ class Parser:
             return 'character definitions must start with define — e.g. define e = Character("Eileen")'
         if t.startswith("$") and "=" not in t:
             return 'assignment after $ needs = or += — e.g. $ affection += 1'
+        if t.startswith("set ") and "=" not in t:
+            return 'set needs an operator — e.g. set affection += 1'
+        if t.startswith("choice"):
+            return '`choice "Text":` is only valid inside a menu: block'
+        if t.startswith(("image", "audio", "stage")) and "=" in t:
+            return 'image/audio/stage declarations are top-level only (no indentation)'
+        if t.startswith(("state", "character")):
+            return 'state: and character blocks are top-level only (no indentation)'
         return 'check spelling and indentation (4 spaces per level, spaces not tabs)'
 
 

@@ -1,4 +1,9 @@
+import pytest
+from pathlib import Path
 from engine.core.vn_controller import VNController
+
+# The Question lives in an external Ren'Py source checkout (not vendored).
+TQ_SCRIPT = Path("/home/user/renpy_src/the_question/game/script.rpy")
 
 def test_00_headless():
     c = VNController("examples/00_minimal_dialogue/script.rpy")
@@ -32,20 +37,21 @@ def test_03_neutral_route():
     assert c.state.variables["affection"] == 0
     assert c.state.variables["route"] == "neutral"
 
+@pytest.mark.skipif(not TQ_SCRIPT.exists(), reason="renpy_src checkout not present")
 def test_the_question_paths():
     # path 0,0 = ask rightaway -> game -> marry, book False
-    c = VNController("/home/user/renpy_src/the_question/game/script.rpy")
+    c = VNController(str(TQ_SCRIPT))
     c.run_headless(choices=[0,0])
     assert c.state.variables["book"] is False
     assert any("Good Ending" in e.get("text","") for e in c.state.history)
 
     # path 0,1 = ask rightaway -> book -> marry, book True
-    c = VNController("/home/user/renpy_src/the_question/game/script.rpy")
+    c = VNController(str(TQ_SCRIPT))
     c.run_headless(choices=[0,1])
     assert c.state.variables["book"] is True
 
     # path 1 = ask later -> bad ending
-    c = VNController("/home/user/renpy_src/the_question/game/script.rpy")
+    c = VNController(str(TQ_SCRIPT))
     c.run_headless(choices=[1])
     assert any("Bad Ending" in e.get("text","") for e in c.state.history)
 

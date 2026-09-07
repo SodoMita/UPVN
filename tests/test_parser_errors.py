@@ -15,6 +15,12 @@ EXPECTED = {
     "bad_default_call.rpy": "must be a literal",
     "bad_assign_no_op.rpy": "invalid assignment",
     "bad_unknown.rpy": "unknown statement",
+    # declarative forms (M15)
+    "bad_state_type.rpy": "type mismatch",
+    "bad_character_no_colon.rpy": "character block needs a colon",
+    "bad_set_no_op.rpy": "set needs an operator",
+    "bad_end_unexpected.rpy": "unexpected 'end'",
+    "bad_choice_outside_menu.rpy": "only valid inside a menu",
 }
 
 def test_gallery_all_fail_with_hint():

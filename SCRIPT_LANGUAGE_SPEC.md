@@ -13,17 +13,23 @@
 ## Top-level statements (indent 0)
 
 ```ebnf
-file := (define | default | label)*
+file := (define | default | state | character | image | audio | stage | label)*
 define := "define" ID "=" "Character" "(" char_args ")" newline
 default := "default" ID "=" literal newline
-label := "label" ID ":" newline block
+state := "state" ":" newline (typed_var | var)* "end"?
+typed_var := ID ":" TYPE ("=" literal)? newline
+character := "character" ID ":" newline (name | color)* "end"?
+image := "image" image_name "=" path newline
+audio := "audio" ID "=" path newline
+stage := "stage" ID "=" path newline
+label := "label" ID ":" newline block "end"?
 ```
 
 `define`/`default` may appear in any order but must be top-level. Missing `label start:` is an error.
 
-`literal` for `default`: `True` | `False` | `None` | INT | FLOAT | `"..."` | `'...'`.
+`literal` for `default` / `state:`: `True` | `False` | `None` | INT | FLOAT | `"..."` | `'...'` | `[...]` (evaluated via `ast.literal_eval`, never code).
 
-Example:
+Example (legacy forms — still supported):
 
 ```rpy
 define e = Character("Eileen", color="#c8ffc8")
@@ -32,6 +38,79 @@ default book = False
 label start:
     ...
 ```
+
+## Declarative forms (canonical — what the editor generates)
+
+The language is **declarative**: no `python:` blocks, no `$` required. The
+legacy Ren'Py-like forms above still parse (for compatibility with existing
+scripts and *The Question*), but the canonical forms below are preferred.
+
+```rpy
+# assets — explicit manifest (no filename guessing)
+image "bg classroom" = "backgrounds/classroom.png"
+image eileen happy = "characters/eileen/happy.png"
+audio theme = "music/theme.ogg"
+stage classroom_3d = "stages/classroom.blend"
+
+# characters — declarative block
+character e:
+    name "Eileen"
+    color "#c8ffc8"
+
+# typed state — declared, saved, rollback-safe
+state:
+    affection: int = 0
+    route: str = "none"
+    has_key: bool = False
+    inventory: list = []
+
+label start:
+    scene bg classroom with fade
+    show eileen happy at center
+    e "Hi. Affection is [affection]."
+
+    menu:
+        choice "Help Eileen":
+            set affection += 1
+            set route = "good"
+        end
+        choice "Ignore her":
+            set route = "neutral"
+        end
+    end
+
+    if affection >= 1:
+        jump good
+    else:
+        jump neutral
+    end
+    return
+end
+```
+
+Rules:
+
+- `state:` variables become `VNState.variables` with their type in
+  `VNState.declared_types`. Assigning a value of the wrong type (`set`) is a
+  runtime error. Types: `int`, `float`, `str` (or `string`), `bool`, `list`.
+- `set` is the canonical assignment (`$` is a legacy alias — same AST).
+- `character e:` compiles to the same `characters` registry as
+  `define e = Character(...)`. Properties: `name`, `color`.
+- `image`/`audio`/`stage` populate `VNState.assets` (kind: `images`/`audio`/`stages`);
+  `VNState.resolve_asset(kind, name)` returns the path (falls back to the name).
+  Script events still carry the *declared* name, so golden traces are unchanged.
+- `choice "Text":` is the declarative menu choice form; the bare `"Text":`
+  form still works (including the single-caption rule).
+- `end` is an **optional** explicit block terminator. It may close
+  `label`, `menu`, `if`, `state`, `character`, and `choice` blocks. It must
+  be dedented to the same indent as the block it closes. Indentation-only
+  blocks without `end` remain valid.
+- Expressions (in `if`/`elif`/`set`/`$`) are evaluated by an AST whitelist
+  (`engine/script/expr_eval.py`): literals, names, arithmetic, comparisons,
+  `and`/`or`/`not`, `in`/`not in`, ternary, list/tuple/dict/set literals, and
+  the pure functions `len,int,float,str,bool,abs,min,max`. Attribute access,
+  subscripts, comprehensions, lambdas and arbitrary calls are **errors** — no
+  sandbox escape, no arbitrary Python.
 
 ## Blocks
 

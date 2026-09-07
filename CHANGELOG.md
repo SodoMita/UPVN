@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.5.0 — 2026-09-08 Declarative script language (M15)
+- **Declarative `.rpy` forms** (canonical), with legacy Ren'Py-like forms kept as aliases:
+  - `state:` block — typed variable declarations (`affection: int = 0`); types `int/float/str/bool/list`, recorded in `VNState.declared_types`
+  - `set affection += 1` — canonical assignment (`$` still parses)
+  - `character e:` block (`name`/`color`) — canonical character definition (`define … = Character(…)` still parses)
+  - `image` / `audio` / `stage` asset manifest → `VNState.assets` + `VNState.resolve_asset(kind, name)`
+  - `choice "Text":` inside `menu:` (bare `"Text":` still parses)
+  - optional explicit `end` terminators for label/menu/if/state/character/choice (indentation-only blocks still work)
+- **Safe expression evaluator** `engine/script/expr_eval.py` — AST-whitelisted (literals, names, arithmetic, comparisons, and/or/not, in/not in, ternary, containers, pure fn allowlist). Replaces raw `eval`; blocks attribute access, subscripts, comprehensions, lambdas, imports (`().__class__…` escape is closed).
+- **Typed state enforcement** at runtime: assigning a value that mismatches a `state:`-declared type raises a friendly runtime error.
+- **Editor-built UI events** `engine/ui/pointer.py` — pure-Python hotspot/hover/click tracker (object names → choice indices), no screen DSL; menu choices now carry stable `id`s.
+- Parser literal eval switched to `ast.literal_eval`; example `examples/05_declarative_script`; syntax-error gallery +5 cases; tests `test_declarative.py`, `test_expr_eval.py`, `test_pointer.py`.
+- Ren'Py-dependent tests now skip when `~/renpy_src` is absent (72 passed, 2 skipped out of the box).
+
 ## 0.1.0 — 2026-09-07 Tier 1 Kinetic
 - Initial scaffold: `engine/core`, `engine/script`, `engine/render`, `engine/ui`, `engine/audio`, `engine/save`, `bge_frontend`
 - Direct .rpy parser (no YAML — answers question: Ren'Py does NOT use yaml/json internally)
