@@ -21,3 +21,8 @@ pytest tests/test_parser_errors.py -v
 - `bad_default_call.rpy` — `default foo = some_func()`
 - `bad_assign_no_op.rpy` — `$ affection`
 - `bad_unknown.rpy` — unknown statement `foo bar`
+- `bad_state_type.rpy` — `state:` declares `int` but the value is a string
+- `bad_character_no_colon.rpy` — `character e` missing the `:` block marker
+- `bad_set_no_op.rpy` — `set affection` missing an operator
+- `bad_end_unexpected.rpy` — stray `end` with no open block
+- `bad_choice_outside_menu.rpy` — `choice "A":` used outside a `menu:` block

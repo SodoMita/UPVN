@@ -32,38 +32,58 @@ from .vn_errors import ScriptRuntimeError, LabelNotFoundError
 def safe_eval(expr: str, variables: dict):
     """
     Evaluate a Python expression with only variables + safe builtins.
-    No __import__, no open, no exec.
+    No attribute access, no subscripts, no comprehensions, no imports,
+    no open, no exec — enforced by an AST whitelist (see expr_eval.py).
     """
-    # whitelist of builtins / functions we allow in if conditions
-    allowed_builtins = {
-        "True": True, "False": False, "None": None,
-        "len": len, "int": int, "float": float, "str": str, "bool": bool,
-        "abs": abs, "min": min, "max": max,
-    }
-    # variables shadow builtins
-    env = {**allowed_builtins, **variables}
+    from ..script.expr_eval import evaluate
     try:
-        # empty globals, env as locals
-        return eval(expr, {"__builtins__": {}}, env)
-    except Exception as e:
+        return evaluate(expr, variables)
+    except ScriptRuntimeError as e:
         raise ScriptRuntimeError(f"expression error: {expr!r} -> {e}")
 
 
-def safe_exec_assign(target: str, op: str, expr: str, variables: dict):
+# declarative type coercion for `state:`-declared variables (M15)
+_TYPE_COERCERS = {
+    "int": lambda v: v if (not isinstance(v, bool) and isinstance(v, int)) else None,
+    "float": lambda v: float(v) if (not isinstance(v, bool) and isinstance(v, (int, float))) else None,
+    "str": lambda v: v if isinstance(v, str) else None,
+    "string": lambda v: v if isinstance(v, str) else None,
+    "bool": lambda v: v if isinstance(v, bool) else None,
+    "list": lambda v: v if isinstance(v, list) else None,
+}
+
+
+def _coerce_declared(target: str, value, type_name: str):
+    """Validate/coerce a value against a declared type. Raises on mismatch."""
+    if type_name not in _TYPE_COERCERS:
+        return value  # unknown type name — leave as-is
+    out = _TYPE_COERCERS[type_name](value)
+    if out is None:
+        raise ScriptRuntimeError(
+            f"type error: {target!r} is declared {type_name}, "
+            f"but got {type(value).__name__} ({value!r})"
+        )
+    return out
+
+
+def safe_exec_assign(target: str, op: str, expr: str, variables: dict, declared_types: dict | None = None):
     val = safe_eval(expr, variables)
     old = variables.get(target, 0 if op in ("+=", "-=", "*=", "/=") else None)
     if op == "=":
-        variables[target] = val
+        new = val
     elif op == "+=":
-        variables[target] = (old or 0) + val
+        new = (old or 0) + val
     elif op == "-=":
-        variables[target] = (old or 0) - val
+        new = (old or 0) - val
     elif op == "*=":
-        variables[target] = (old or 0) * val
+        new = (old or 0) * val
     elif op == "/=":
-        variables[target] = (old or 0) / val
+        new = (old or 0) / val
     else:
         raise ScriptRuntimeError(f"unknown assign op {op!r}")
+    if declared_types and target in declared_types:
+        new = _coerce_declared(target, new, declared_types[target])
+    variables[target] = new
 
 
 # ------------------------------------------------------------------ text substitution
@@ -111,6 +131,13 @@ class VNInterpreter:
         if not self.state.characters and script.get("characters"):
             for cid, cdata in script["characters"].items():
                 self.state.characters[cid] = CharacterDef(id=cid, **cdata)
+        # declarative declarations are always applied (they are schema, not state)
+        if script.get("types"):
+            self.state.declared_types.update(copy.deepcopy(script["types"]))
+        if script.get("assets"):
+            for kind in ("images", "audio", "stages"):
+                if kind in script["assets"]:
+                    self.state.assets.setdefault(kind, {}).update(copy.deepcopy(script["assets"][kind]))
 
         # execution pointer stack for call/return
         self._call_stack: List[Tuple[str, int]] = []  # (label, next_index)
@@ -405,7 +432,7 @@ class VNInterpreter:
 
         elif cmd == "assign":
             target, op, expr = node.get("target"), node.get("op"), node.get("expr")
-            safe_exec_assign(target, op, expr, self.state.variables)
+            safe_exec_assign(target, op, expr, self.state.variables, self.state.declared_types)
             return {"type": "assign", "target": target, "op": op, "expr": expr, "value": self.state.variables[target], "wait": False, "_loc": loc}
 
         elif cmd == "if":
@@ -444,7 +471,12 @@ class VNInterpreter:
             # Yield menu event, wait for choice. Filtering of conditional choices not yet implemented (Tier3)
             # caption is optional
             caption = node.get("caption")
-            choices = [{"text": c["text"], "block": c.get("block", [])} for c in node.get("choices", [])]
+            # stable per-event choice ids so editor-built UI can bind hover/click
+            # (object "choice_0" -> controller.choose(0), etc.)
+            choices = [
+                {"text": c["text"], "block": c.get("block", []), "id": i}
+                for i, c in enumerate(node.get("choices", []))
+            ]
             return {"type": "menu", "caption": caption, "choices": choices, "wait": True, "_loc": loc}
 
         # 3D stubs — record state, yield event for frontend

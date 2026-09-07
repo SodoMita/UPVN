@@ -1,4 +1,4 @@
-# Current Status — 2026-09-07 21:09 (M14 ship)
+# Current Status — 2026-09-08 (M15 declarative language)
 
 ## Last completed
 - M00 Harness done: parser, interpreter, state, headless runner, UPBGE 0.50 download verified (408 MB, Blender 5.0.1), The Question parses and runs 3 paths
@@ -15,17 +15,18 @@
 - M11 Blender Editor Tools DONE (2026-09-08 late): `blend/upvn_editor_addon.py` (View3D/Text Editor UPVN panels, 9 operators: Create Project, Add Character/Scene/Dialogue/Show/Menu, Validate, Preview, Save Demo), `UPVN_GameBuilder` API (add_character/scene/say/show/menu/camera/stage/show3d/write/validate/preview), `tools/upvn_game_creator.py` quick_game 3-line minimal coding + arbitrary saves demo, `examples/99_creator_demo` generated
 - M13 Hybrid 3D DONE (2026-09-08): load_stage/show3d/anim/preset, hybrid 2D over 3D, no black fallback, 4 tests
 - M14 Ship DONE (2026-09-07 21:09): `tools/package_game.py` (522 lines, textwrap+validate+locale+POT+JSON+a11y+copy+build_info hash+playable_check+zip) + `examples/10_full_sample_game/script.rpy` 8 labels 59 events + `dist/` (locale/template.pot+json 36 strings, ACCESSIBILITY.md/json, 10_full_sample_game/ with run.py absolute Path + README_PLAY 36 strings + build_info.json hash 5a26c72e1404 + playable_check + saves/ + zip 308KB) + headless run.py --choices 0 0 0 (59 events, saves arbitrary 1..∞) verified from any cwd + long showcase screenshots 27 PNGs (engine+showcase hybrid 3D ZOOM/CAM badges) via start_process startup_wait 10s + http preview 8011
+- M15 Declarative language DONE (2026-09-08, branch feat/declarative-rpy): parser `state:` typed block / `character` block / `image`/`audio`/`stage` manifest / `set` / `choice` keyword / optional `end` terminators; `engine/script/expr_eval.py` AST-whitelist evaluator replaces raw `eval` (attribute/subscript/comprehension/import escapes blocked); typed-state runtime enforcement; `engine/ui/pointer.py` hotspot hover/click for editor-built UI; menu choice `id`s; `ast.literal_eval` for default/state literals; example 05; tests test_declarative/test_expr_eval/test_pointer; +5 syntax gallery cases; renpy_src tests skip when absent → 72 passed, 2 skipped
 
 ## Currently failing / todo
-- None blocker — M14 done, 44 tests green, packaging verified. Polish only:
-- blend/UPVN_Template.blend 96K via long Blender 5.0.1 background (tools/make_template.py) — includes 3D stage placeholder (hybrid verified via headless, screenshots showcase_15_say ZOOM 1.46x CAM + 3D capsules), next: LibLoad real .blend classroom mesh for full UPBGE test
-- DLC perf: 44 tests + 109+20+27 screenshots <1s headless, zip 308KB
-- Optional polish: addon asset browser for sprite assignment, _builder_from_file preserve labels, publish 10_full_sample_game.zip as release
+- None blocker — M15 done, 72 passed + 2 skipped (renpy_src absent), 0 failures
+- `dist/` tree deleted from working tree (left by prior agent cleanup, uncommitted) — rebuild via `tools/package_game.py` when shipping; don't commit the deletion into a feature commit
+- Next up (not blockers): make `UPVN_GameBuilder` emit declarative forms (`character`/`state`/`set`/`choice`) instead of legacy `define`/`$`; wire `VNState.resolve_asset` into renderers so scene/show/play_music actually resolve manifest paths; wire `engine/ui/pointer.py` into `bge_frontend/frontend.py` (raycast object under cursor → `PointerTracker.update` → `controller.choose(i)`)
+- DLC perf: 72 tests <1s headless
 
 ## Recommended next task
-- Polish/DLC: LibLoad real .blend classroom mesh (hybrid stage now headless floor+wall+capsules, need real mesh), addon asset browser, side images/sprite loops
-- Publish: `dist/10_full_sample_game.zip` as release + CI pytest + package_game
-- No MVP blockers — all Milestones M00-M14 done
+- Wire `engine/ui/pointer.py` into `bge_frontend/frontend.py` + `VNController` (hover/click over editor-built choice objects → `controller.choose`) — the UI/input half of M15
+- Update `UPVN_GameBuilder.build_rpy()` to emit the canonical declarative forms (and update `test_arbitrary_saves.py::test_blender_builder_minimal_coding`)
+- Polish/DLC: LibLoad real .blend classroom mesh, addon asset browser, publish release + CI
 
 ## Notes
 - Parser requires 4 spaces, spaces not tabs, BOM stripped. Caption inside menu: bare quoted line — see SCRIPT_LANGUAGE_SPEC. Friendly hints for define/jump/menu/label. New: camera zoom 1.2 duration 1.0 with ease, show with move.
@@ -37,3 +38,4 @@
 - Blender editor: blend/upvn_editor_addon.py (UPVN_GameBuilder API + 9 operators + 2 panels), tools/upvn_game_creator.py quick_game 3-line minimal coding, examples/99_creator_demo generated, UPVN_GameBuilder validates/previews headlessly without bpy.
 - Hybrid: state.stage + stage_objects + camera preset/zoom, headless_renderer draw_stage floor+wall+capsules, 2D sprites over 3D, VNController stage_mgr.update per frame.
 - Packaging: tools/package_game.py validates per-file+combined parse, extracts locale regex _() + parsed say/menu/define, creates ACCESSIBILITY.md/json, copies engine/bge_frontend/blend/tools + game/scripts → build, run.py uses Path(__file__).parent absolute (works from any cwd), build_info.json hash, playable_check 59 events, zip 308KB, dist/locale/template.pot+json 36 strings
+- Declarative language (M15): `state:` → defaults+types (VNState.declared_types), `character e:` block, `image/audio/stage` → VNState.assets (+resolve_asset), `set` canonical assign (typed-checked), `choice` keyword + optional `end`; expr_eval.py AST whitelist (no eval escapes); pointer.py hotspot hover/click for editor UI; menu choices carry stable `id`s
