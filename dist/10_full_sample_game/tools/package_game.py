@@ -340,6 +340,11 @@ def package_project(project: Path, out: Path, do_zip: bool = True):
 
     # accessibility
     create_accessibility_manifest(out)
+    # copy LICENSE to dist root as well (I-3)
+    try:
+        if (ROOT / "LICENSE").exists():
+            shutil.copy2(ROOT / "LICENSE", out / "LICENSE")
+    except: pass
 
     # build dir
     # safe name: folder name
@@ -354,7 +359,12 @@ def package_project(project: Path, out: Path, do_zip: bool = True):
     for folder in ["engine", "bge_frontend", "tools", "blend"]:
         src = ROOT / folder
         if src.exists():
-            shutil.copytree(src, build / folder, dirs_exist_ok=True)
+            shutil.copytree(src, build / folder, dirs_exist_ok=True, ignore=shutil.ignore_patterns('__pycache__', '*.pyc', '*.pyo', '.pytest_cache', '*.blend1', '*.blend2'))
+    # include LICENSE and README at build root (I-3)
+    for fname in ["LICENSE", "README.md", "CHANGELOG.md", "STATUS.md", "ROADMAP.md"]:
+        src = ROOT / fname
+        if src.exists():
+            shutil.copy2(src, build / fname)
     # copy project as game/
     game_dest = build / "game"
     game_dest.mkdir(parents=True, exist_ok=True)
@@ -490,11 +500,14 @@ def package_project(project: Path, out: Path, do_zip: bool = True):
     # copy saves dir placeholder
     (build / "saves").mkdir(exist_ok=True)
 
-    # zip
+    # zip — exclude compiled bytecode (I-2)
     if do_zip:
         zip_path = out / f"{name}.zip"
         with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as z:
             for f in build.rglob("*"):
+                # skip __pycache__ and *.pyc (I-2 hygiene)
+                if "__pycache__" in f.parts or f.suffix in (".pyc", ".pyo") or f.name.startswith("."):
+                    continue
                 z.write(f, f.relative_to(out))
         print(f"Zip: {zip_path} ({zip_path.stat().st_size/1024:.1f} KB)")
         return zip_path

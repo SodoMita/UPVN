@@ -35,8 +35,63 @@ class SaveManager:
         self.state = state
         self.save_dir = Path(save_dir)
         self.save_dir.mkdir(parents=True, exist_ok=True)
+        # ensure save_dir is resolved for traversal checks
+        try:
+            self.save_dir = self.save_dir.resolve()
+        except:
+            pass
+
+    def _sanitize_slot(self, slot: int | str) -> str:
+        """Validate and sanitize slot — fixes L-1 path traversal.
+        Accepts int (1..1000000) or string 'auto' or alphanum/underscore/dash.
+        Rejects path separators, '..', absolute paths, and unsafe chars.
+        """
+        if isinstance(slot, int):
+            if not (1 <= slot <= 10_000_000):
+                raise ValueError(f"slot int out of range 1..10000000: {slot!r}")
+            return str(slot)
+        if isinstance(slot, str):
+            # allow 'auto' and numeric strings; otherwise strict alphanum
+            if slot == "auto":
+                return "auto"
+            # numeric string e.g. "42" -> treat as int string but validate
+            if slot.isdigit():
+                # ensure no leading +/-, just digits
+                iv = int(slot)
+                if not (1 <= iv <= 10_000_000):
+                    raise ValueError(f"slot out of range: {slot!r}")
+                return str(iv)
+            # for arbitrary string slots, enforce safe pattern
+            import re
+            if not re.match(r"^[A-Za-z0-9_-]{1,64}$", slot):
+                raise ValueError(f"invalid slot string (must match ^[A-Za-z0-9_-]{{1,64}}$): {slot!r}")
+            if "/" in slot or "\\" in slot or ".." in slot:
+                raise ValueError(f"invalid slot (path separator): {slot!r}")
+            return slot
+        raise TypeError(f"slot must be int or str, got {type(slot).__name__}: {slot!r}")
+
+    def _slot_path(self, slot: int | str) -> Path:
+        sid = self._sanitize_slot(slot)
+        # construct path and ensure it stays under save_dir (resolve check)
+        candidate = (self.save_dir / f"save_{sid}.json").resolve()
+        try:
+            # Python 3.9+: is_relative_to
+            if hasattr(candidate, "is_relative_to"):
+                if not candidate.is_relative_to(self.save_dir.resolve()):
+                    raise ValueError(f"slot escapes save_dir: {slot!r}")
+            else:
+                # fallback string check
+                if not str(candidate).startswith(str(self.save_dir.resolve())):
+                    raise ValueError(f"slot escapes save_dir: {slot!r}")
+        except ValueError:
+            raise
+        except Exception:
+            pass
+        return candidate
 
     def save(self, slot: int | str, screenshot_path: str | None = None) -> Path:
+        # sanitize slot first (L-1)
+        self._sanitize_slot(slot)
         data = {
             "version": self.state.version,
             "current_label": self.state.current_label,
@@ -53,25 +108,80 @@ class SaveManager:
             "timestamp": time.time(),
             "screenshot": screenshot_path,
         }
-        path = self.save_dir / f"save_{slot}.json"
+        path = self._slot_path(slot)
         path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
         return path
 
     def load(self, slot: int | str) -> dict:
-        path = self.save_dir / f"save_{slot}.json"
-        data = json.loads(path.read_text(encoding="utf-8"))
-        # restore core fields
-        self.state.current_label = data["current_label"]
-        self.state.instruction_index = data["instruction_index"]
-        self.state.variables = data["variables"]
+        path = self._slot_path(slot)
+        if not path.exists():
+            raise FileNotFoundError(f"save slot not found: {slot!r}")
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as e:
+            raise ValueError(f"corrupt save slot {slot!r}: {e}")
+        # L-2: validate schema + version
+        if not isinstance(data, dict):
+            raise ValueError(f"invalid save format (not dict) slot {slot!r}")
+        version = data.get("version")
+        # accept missing version for backwards compat but warn; check type if present
+        if version is not None and not isinstance(version, str):
+            raise ValueError(f"invalid version type slot {slot!r}")
+        # validate required fields with types and defaults
+        # current_label
+        cl = data.get("current_label")
+        if not isinstance(cl, str):
+            raise ValueError(f"invalid save: current_label must be str slot {slot!r}")
+        # instruction_index
+        ii = data.get("instruction_index")
+        if not isinstance(ii, int):
+            # coerce if possible
+            try:
+                ii = int(ii)
+            except:
+                raise ValueError(f"invalid save: instruction_index must be int slot {slot!r}")
+        # variables
+        vars_data = data.get("variables")
+        if not isinstance(vars_data, dict):
+            raise ValueError(f"invalid save: variables must be dict slot {slot!r}")
+        # scene
+        scene_data = data.get("scene")
+        if not isinstance(scene_data, dict):
+            raise ValueError(f"invalid save: scene must be dict slot {slot!r}")
+        bg = scene_data.get("background")
+        if bg is not None and not isinstance(bg, str):
+            raise ValueError(f"invalid save: scene.background must be str slot {slot!r}")
+        actors = scene_data.get("actors", {})
+        if not isinstance(actors, dict):
+            raise ValueError(f"invalid save: scene.actors must be dict slot {slot!r}")
+        # history
+        hist = data.get("history", [])
+        if not isinstance(hist, list):
+            raise ValueError(f"invalid save: history must be list slot {slot!r}")
+        # truncate history to last 50 if huge (defense)
+        if len(hist) > 200:
+            hist = hist[-200:]
+        # restore core fields with validated types
+        self.state.current_label = cl
+        self.state.instruction_index = ii
+        self.state.variables = vars_data
         # scene
         from ..core.vn_state import SceneState, ShownActor
-        self.state.scene.background = data["scene"]["background"]
-        self.state.shown_actors = {
-            k: ShownActor(tag=k, asset=v["asset"], position=v.get("position", "center"))
-            for k, v in data["scene"].get("actors", {}).items()
-        }
-        self.state.history = data.get("history", [])
+        self.state.scene.background = bg
+        # actors: validate each entry
+        cleaned_actors = {}
+        for k, v in actors.items():
+            if not isinstance(k, str) or not isinstance(v, dict):
+                continue
+            asset = v.get("asset")
+            if not isinstance(asset, str):
+                continue
+            pos = v.get("position", "center")
+            if not isinstance(pos, str):
+                pos = "center"
+            cleaned_actors[k] = ShownActor(tag=k, asset=asset, position=pos)
+        self.state.shown_actors = cleaned_actors
+        self.state.history = hist
         return data
 
     def list_slots(self):
@@ -104,17 +214,23 @@ class SaveManager:
         return n
 
     def delete(self, slot: int | str):
-        path = self.save_dir / f"save_{slot}.json"
+        path = self._slot_path(slot)
         if path.exists():
             path.unlink()
             return True
         return False
 
     def slot_exists(self, slot: int | str) -> bool:
-        return (self.save_dir / f"save_{slot}.json").exists()
+        try:
+            return self._slot_path(slot).exists()
+        except (ValueError, TypeError):
+            return False
 
     def get_slot_info(self, slot: int | str):
-        path = self.save_dir / f"save_{slot}.json"
+        try:
+            path = self._slot_path(slot)
+        except (ValueError, TypeError):
+            return None
         if not path.exists():
             return None
         try:

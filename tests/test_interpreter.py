@@ -1,3 +1,4 @@
+import pytest
 from engine.core.vn_controller import VNController
 
 def test_00_headless():
@@ -33,19 +34,23 @@ def test_03_neutral_route():
     assert c.state.variables["route"] == "neutral"
 
 def test_the_question_paths():
+    import pathlib as _pl
+    _p = _pl.Path("/home/user/renpy_src/the_question/game/script.rpy")
+    if not _p.exists():
+        pytest.skip("Ren'Py source not cloned at /home/user/renpy_src/the_question — skip")
     # path 0,0 = ask rightaway -> game -> marry, book False
-    c = VNController("/home/user/renpy_src/the_question/game/script.rpy")
+    c = VNController(str(_p))
     c.run_headless(choices=[0,0])
     assert c.state.variables["book"] is False
     assert any("Good Ending" in e.get("text","") for e in c.state.history)
 
     # path 0,1 = ask rightaway -> book -> marry, book True
-    c = VNController("/home/user/renpy_src/the_question/game/script.rpy")
+    c = VNController(str(_p))
     c.run_headless(choices=[0,1])
     assert c.state.variables["book"] is True
 
     # path 1 = ask later -> bad ending
-    c = VNController("/home/user/renpy_src/the_question/game/script.rpy")
+    c = VNController(str(_p))
     c.run_headless(choices=[1])
     assert any("Bad Ending" in e.get("text","") for e in c.state.history)
 

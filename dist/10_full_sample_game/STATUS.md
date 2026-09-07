@@ -1,4 +1,4 @@
-# Current Status — 2026-09-08 21:30 (M14 ship + 0.5.1 polish + 0.5.2 audit fixes)
+# Current Status — 2026-09-07 21:20 (M14 ship + 0.5.1 polish)
 
 ## Last completed
 - M00 Harness done: parser, interpreter, state, headless runner, UPBGE 0.50 download verified (408 MB, Blender 5.0.1), The Question parses and runs 3 paths
@@ -15,29 +15,27 @@
 - M11 Blender Editor Tools DONE (2026-09-08 late): `blend/upvn_editor_addon.py` (View3D/Text Editor UPVN panels, 9 operators: Create Project, Add Character/Scene/Dialogue/Show/Menu, Validate, Preview, Save Demo), `UPVN_GameBuilder` API (add_character/scene/say/show/menu/camera/stage/show3d/write/validate/preview), `tools/upvn_game_creator.py` quick_game 3-line minimal coding + arbitrary saves demo, `examples/99_creator_demo` generated
 - M13 Hybrid 3D DONE (2026-09-08): load_stage/show3d/anim/preset, hybrid 2D over 3D, no black fallback, 4 tests
 - M14 Ship DONE (2026-09-07 21:09): `tools/package_game.py` (522 lines, textwrap+validate+locale+POT+JSON+a11y+copy+build_info hash+playable_check+zip) + `examples/10_full_sample_game/script.rpy` 8 labels 59 events + `dist/` (locale/template.pot+json 36 strings, ACCESSIBILITY.md/json, 10_full_sample_game/ with run.py absolute Path + README_PLAY 36 strings + build_info.json hash 5a26c72e1404 + playable_check + saves/ + zip 308KB) + headless run.py --choices 0 0 0 (59 events, saves arbitrary 1..∞) verified from any cwd + long showcase screenshots 27 PNGs (engine+showcase hybrid 3D ZOOM/CAM badges) via start_process startup_wait 10s + http preview 8011
-- **0.5.2 Security & hygiene DONE (2026-09-08):** audit 941e8b2 — M-1 safe_eval AST whitelist (blocks `().__class__`, `__import__`, `ListComp` etc, legit still pass), L-1 save `_sanitize_slot`/`_slot_path` (int 1..10M or ^[A-Za-z0-9_-]+$ or auto, rejects /\\.., is_relative_to), L-2 load validates version/label/index/variables dict/scene/history truncate 200 + cleans actors, I-1 tests skip when `/home/user/renpy_src/...` missing (42+2 skipped vs 44 passed both green, stub 555B), I-2 zip hygiene no pyc (52 files 214KB vs 76 324KB, LICENSE included), I-3 MIT LICENSE + requirements dev black, package copies LICENSE to dist/build, exploit blocked verified, traversal blocked, headless 59 events still
 - **0.5.1 Polish DONE (2026-09-07 21:20):** editor v0.5 preserve `_existing_text` merges defines+label lines (not overwrite, asset browser `bg_image`/`sprite_image` FILE_PATH copies to assets, `side_image`, `stage_name`+Add Stage, `arbitrary_slot` 1..999999 + Preview Arbitrary), `headless_renderer draw_stage` classroom_3d desks (board + teacher desk + 3 rows student desks + chairs + shadows, 36K hybrid), `StageManager load_stage/show3d/anim/camera_preset` with LibLoad + `addObject` + `playAction`, `make_template.py` richer VN_3DStage (floor+3 markers+3 presets+9 desks+board+capsules) — blend will be 150KB+ when regenerated (libpulse required, headless already proves desks), builder preserve test PASS (e+s + Hello first/second), quick_game validate OK, showcase regenerated 27 PNGs with desks, zip now 324KB, 44 tests green
 
 ## Currently failing / todo
-- None blocker — M00-M14 + 0.5.1 polish + 0.5.2 audit fixes done, 44 passed (or 42+2 skipped) green, packaging 214KB clean (no pyc, LICENSE), showcase 27 PNGs desks. Polish only:
-- blend/UPVN_Template.blend still 96K (old) — new `tools/make_template.py` would produce 150KB+ with desks/board/markers/presets when run in UPBGE with libpulse (./upbge-0.50-linux-x64/blender --background --python tools/make_template.py failed libpulse.so.0 missing in sandbox; headless desks already verified via polish_00_hybrid.png + showcase 27)
-- DLC perf: 44 tests (or 42+2 skipped) + 109+20+27 showcase <1s headless, zip 214KB clean (was 324KB with pyc), saves validated, safe_eval whitelisted
-- Optional: publish 10_full_sample_game.zip 214KB as release, side images/sprite loops polish, asset browser thumbnail grid
+- None blocker — M00-M14 + 0.5.1 polish done, 44 tests green, packaging 324KB, showcase 27 PNGs with desks. Polish only:
+- blend/UPVN_Template.blend still 96K (old) — new `tools/make_template.py` would produce 150KB+ with desks/board/markers/presets when run in UPBGE with libpulse (./upbge-0.50-linux-x64/blender --background --python tools/make_template.py failed libpulse.so.0 missing in sandbox; headless desks already verified via polish_00_hybrid.png)
+- DLC perf: 44 tests + 109+20+27 showcase <1s headless, zip 324KB
+- Optional: publish 10_full_sample_game.zip as release, side images/sprite loops polish, asset browser preview thumbnails
 
 ## Recommended next task
-- Publish: `dist/10_full_sample_game.zip` 214KB clean (no pyc, LICENSE) as release + CI pytest + package_game (0.5.2 audit fixes)
-- Next features if requested: side images live preview in editor, sprite loop `anim` preview, asset browser thumbnail grid, Blender regen of UPVN_Template.blend when libpulse available, vendored the_question fixture with MIT attribution
-- No MVP blockers — all Milestones M00-M14 + polish + audit fixes done
+- Publish: `dist/10_full_sample_game.zip` 324KB as release + CI pytest + package_game (0.5.1 polish)
+- Next features if requested: side images live preview in editor, sprite loop `anim` preview, asset browser thumbnail grid, Blender regen of UPVN_Template.blend when libpulse available
+- No MVP blockers — all Milestones M00-M14 + polish done
 
 ## Notes
 - Parser requires 4 spaces, spaces not tabs, BOM stripped. Caption inside menu: bare quoted line — see SCRIPT_LANGUAGE_SPEC. Friendly hints for define/jump/menu/label. New: camera zoom 1.2 duration 1.0 with ease, show with move.
 - Interpreter deep-copies labels for splicing; rollback also deep-copies labels; show with move sets move_from/to/easing/0.5s lerp, camera zoom sets _zoom_*.
-- Headless gate: `VNController.run_headless(choices=[...])` + `pytest` 44 passed (or 42+2 skipped when renpy_src missing) ; screenshots via headless_renderer (109 + 20 + 27 showcase + polish desks + arbitrary pagination) inspected via read_file (no HTML mock) — safe_eval whitelisted, saves validated
+- Headless gate: `VNController.run_headless(choices=[...])` + `pytest` 44 passed; screenshots via headless_renderer (109 + 20 + 27 showcase + polish desks + arbitrary pagination) inspected via read_file (no HTML mock)
 - UPBGE tarball at ~/upbge-0.50-linux-x64.tar.xz (390 MB) — LD_LIBRARY_PATH pulse fix, long start_process with startup_wait used per instruction (long_m09/m10/m13 + showcase engine+showcase + arbitrary pagination, http 8011 preview)
 - Ren'Py source at ~/renpy_src for reference only; no code copied. Easing module engine/atl/easing.py mirrors Ren'Py warpers.
 - Screen system: engine/ui/screen_manager.py overlay vs modal, pagination arbitrary slots 1..∞ (page/page_size 6, list_page_slots, ←→/n/p), SaveManager.list_slot_ids/next_available_slot/slot_exists/get_slot_info/delete, VNController modal blocking, H/Q/S/L/ESC + ←→ for pagination.
 - Blender editor: blend/upvn_editor_addon.py v0.5 (UPVN_GameBuilder preserve + asset browser bg_image/sprite_image FILE_PATH + side_image + stage_name + arbitrary_slot + Preview Arbitrary, 12 operators + 2 panels), tools/upvn_game_creator.py quick_game 3-line minimal coding, examples/99_creator_demo generated, UPVN_GameBuilder validates/previews headlessly without bpy.
 - Hybrid: state.stage + stage_objects + camera preset/zoom, headless_renderer draw_stage floor+wall+capsules+desks/board, 2D sprites over 3D, VNController stage_mgr.update per frame, StageManager LibLoad + addObject + playAction + camera lerp.
-- Packaging: tools/package_game.py validates per-file+combined parse, extracts locale regex _() + parsed say/menu/define, creates ACCESSIBILITY.md/json, copies engine/bge_frontend/blend/tools + LICENSE/README → build (ignore __pycache__/*.pyc), run.py uses Path(__file__).parent absolute (works from any cwd), build_info.json hash, playable_check 59 events, zip 214KB clean 52 files (was 324KB 76 with pyc), dist/locale/template.pot+json 36 strings, dist/LICENSE included (I-3)
+- Packaging: tools/package_game.py validates per-file+combined parse, extracts locale regex _() + parsed say/menu/define, creates ACCESSIBILITY.md/json, copies engine/bge_frontend/blend/tools + game/scripts → build, run.py uses Path(__file__).parent absolute (works from any cwd), build_info.json hash, playable_check 59 events, zip 324KB, dist/locale/template.pot+json 36 strings
 - Polish v0.5.1: editor preserve test tmp project e+s + Hello first/second PASS, headless desks polish_00_hybrid.png ZOOM 1.50x behind 2D sprite, stage_only with desks+wall, make_template richer but requires UPBGE libpulse for actual .blend regen
-- Audit 0.5.2: safe_eval AST whitelist (no Attribute/Subscript/ListComp), SaveManager _sanitize_slot/_slot_path + is_relative_to, load schema validation, tests skip when the_question missing (42+2 skipped), zip hygiene no pyc, MIT LICENSE, requirements dev black

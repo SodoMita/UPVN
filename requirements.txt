@@ -1,5 +1,9 @@
+# UPVN — headless test + lint
+# No runtime deps for headless (UPBGE provides bpy/bge/aud/blf at runtime)
+
+# testing
 pytest>=7
-# UPBGE Python stubs for headless pytest (optional but recommended)
 fake-bge-module>=2023.0; python_version < "3.13"
-# For lint/format
+
+# dev / lint (not required to run game)
 black
