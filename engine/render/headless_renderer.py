@@ -155,6 +155,28 @@ def draw_stage(img: Image.Image, draw: ImageDraw.ImageDraw, state):
         draw.line([(x_center, 320), (W//2 + i*40, H-110)], fill=(70,80,95,120), width=1)
     for y in [360, 400, 450, 520]:
         draw.line([(220,y),(W-220,y)], fill=(70,80,95,80), width=1)
+    # richer classroom_3d desks when stage is classroom_3d (polish v0.5)
+    if "classroom" in stage:
+        # 3 rows x 3 cols of desks (wooden) + blackboard at front
+        # blackboard
+        draw.rounded_rectangle([W//2-180, 330, W//2+180, 360], radius=4, fill=(28,55,32), outline=(90,110,90), width=1)
+        draw.text((W//2-42, 338), "BOARD", fill=(180,220,180), font=F_Small)
+        # teacher desk
+        draw.rounded_rectangle([W//2-90, 368, W//2+90, 390], radius=6, fill=(110,85,60), outline=(80,60,40), width=1)
+        draw.line([(W//2, 368), (W//2, 390)], fill=(80,60,40), width=1)
+        # student desks
+        for row, y in enumerate([420, 470, 520]):
+            for col, x in enumerate([W//2-220, W//2-70, W//2+80, W//2+230]):
+                # skip center aisle for some
+                if col == 2 and row == 1:
+                    continue
+                # desk top
+                draw.rounded_rectangle([x-48, y-12, x+48, y+12], radius=5, fill=(125,95,65), outline=(90,70,45), width=1)
+                draw.line([(x, y-12), (x, y+12)], fill=(90,70,45), width=1)
+                # chair
+                draw.rounded_rectangle([x-22, y+18, x+22, y+32], radius=4, fill=(85,75,65), outline=(60,55,45), width=1)
+                # shadow
+                draw.ellipse([x-30, y+32, x+30, y+38], fill=(0,0,0,18))
     txt = f"3D STAGE: {stage}"
     tw = draw.textlength(txt, font=F_Small)
     draw.rounded_rectangle([W//2 - tw//2 - 14, 340, W//2 + tw//2 +14, 360], radius=8, fill=(0,25,35,220), outline=(0,184,195,80))
