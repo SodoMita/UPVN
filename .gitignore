@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+.idea/
+.vscode/
+*.blend1
+*.blend2
+saves/save_*.json
+saves/save_auto.json
+/dist/saves/

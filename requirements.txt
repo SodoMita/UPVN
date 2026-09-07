@@ -1,0 +1,5 @@
+pytest>=7
+# UPBGE Python stubs for headless pytest (optional but recommended)
+fake-bge-module>=2023.0; python_version < "3.13"
+# For lint/format
+black

@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>UPVN Demo — Ren'Py in UPBGE (Tier 1)</title>
+<style>
+  :root{--bg:#0f141f;--panel:#191e2b;--accent:#00b8c3;--text:#e8eef7;--muted:#8a92a6}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;display:flex;flex-direction:column}
+  header{padding:18px 24px;border-bottom:1px solid #26304a;background:linear-gradient(180deg,#131a2a,#0f141f);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px}
+  header h1{font-size:20px;letter-spacing:.02em;display:flex;align-items:center;gap:10px}
+  header h1 span.logo{width:32px;height:32px;border-radius:8px;background:linear-gradient(135deg,#00b8c3,#7c4dff);display:grid;place-items:center;font-weight:800;color:#fff;font-size:18px}
+  header .meta{font-size:12px;color:var(--muted)}
+  .wrap{flex:1;display:grid;grid-template-columns:320px 1fr 340px;gap:16px;padding:16px;max-width:1440px;width:100%;margin:0 auto}
+  @media(max-width:1100px){.wrap{grid-template-columns:1fr;}}
+  .card{background:var(--panel);border:1px solid #242f4a;border-radius:14px;overflow:hidden}
+  .card h2{font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);padding:14px 16px;border-bottom:1px solid #242f4a;background:#1a2236;display:flex;justify-content:space-between;align-items:center}
+  .card h2 span.pill{font-size:11px;background:#0f2330;color:#00d8ff;border:1px solid #00b8c355;padding:3px 8px;border-radius:999px}
+  .list{padding:10px;display:flex;flex-direction:column;gap:8px}
+  .ex{padding:10px 12px;border-radius:10px;border:1px solid #2a3552;background:#131a2f;cursor:pointer;display:flex;flex-direction:column;gap:4px;transition:.15s}
+  .ex:hover{border-color:#3b4a73;transform:translateY(-1px)}
+  .ex.active{border-color:var(--accent);background:#0f2333;box-shadow:0 0 0 1px #00b8c333}
+  .ex b{font-size:14px}
+  .ex small{color:var(--muted);font-size:12px;line-height:1.4}
+  .ex .tag{font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:#7dd3ff}
+  /* stage */
+  .stage{position:relative;background:#0a0f1c;border-radius:14px;overflow:hidden;min-height:520px;display:flex;flex-direction:column}
+  .viewport{flex:1;position:relative;background:linear-gradient(180deg,#0d1324 0%,#0a1a2a 60%,#102a28 100%);display:flex;align-items:center;justify-content:center;overflow:hidden}
+  .bg{position:absolute;inset:0;opacity:.9;transition:1s}
+  .bg.classroom{background:radial-gradient(800px 400px at 50% 20%,#1d2f55 0%,#0d1a33 60%),linear-gradient(180deg,#0d1a33,#0a1420)}
+  .bg.hallway{background:radial-gradient(800px 400px at 30% 30%,#3a2f1a 0%,#1a140d 70%)}
+  .bg.black{background:#020409}
+  .sprite{position:absolute;bottom:90px;width:180px;height:340px;border-radius:14px;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;padding-bottom:18px;font-size:13px;color:#fff;box-shadow:0 20px 60px #0008;border:1px solid #ffffff18;transition:.6s}
+  .sprite.left{left:12%}
+  .sprite.center{left:50%;transform:translateX(-50%)}
+  .sprite.right{right:12%}
+  .sprite.hidden{opacity:0;transform:translateY(40px) scale(.96)}
+  .sprite.eileen{background:linear-gradient(180deg,#2a5d6a,#0f2a32)}
+  .sprite.sylvie{background:linear-gradient(180deg,#3a2a6a,#1a1032)}
+  .sprite b{font-size:13px;margin-bottom:6px}
+  .sprite span{font-size:11px;opacity:.7}
+  .dialogue{position:absolute;bottom:0;left:0;right:0;background:linear-gradient(180deg,#0b1220ee,#060a14f0);border-top:1px solid #1e2a46;padding:18px 18px 14px;min-height:130px;display:flex;flex-direction:column;gap:8px;backdrop-filter:blur(6px)}
+  .name{font-weight:700;font-size:13px;letter-spacing:.02em;padding:4px 10px;border-radius:999px;width:fit-content;background:#0f2a2e;border:1px solid #00b8c355;color:#7eeaff}
+  .name.hidden{visibility:hidden}
+  .text{font-size:18px;line-height:1.55;min-height:54px}
+  .text i,.text b{color:#bdeaff}
+  .hint{font-size:11px;color:var(--muted);display:flex;justify-content:space-between;align-items:center}
+  .hint kbd{background:#1a2338;border:1px solid #2a3552;border-bottom-color:#0f1525;padding:2px 6px;border-radius:5px;font-size:11px}
+  /* choices */
+  .choices{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);display:flex;flex-direction:column;gap:10px;z-index:5;width:min(360px,90%)}
+  .choice{padding:14px 16px;border-radius:12px;background:#0f1a2eee;border:1px solid #2a3a62;color:#e8eef7;font-size:15px;cursor:pointer;text-align:left;transition:.15s;backdrop-filter:blur(8px)}
+  .choice:hover{background:#162447;border-color:#3b5a9a;transform:translateY(-1px)}
+  .dim{position:absolute;inset:0;background:#02050acc;backdrop-filter:blur(2px)}
+  /* right panel */
+  .right{padding:14px;display:flex;flex-direction:column;gap:12px}
+  .kv{display:grid;grid-template-columns:110px 1fr;gap:6px;font-size:12px}
+  .kv dt{color:var(--muted)}
+  .kv dd{font-family:ui-monospace,Menlo,monospace;background:#0c1222;border:1px solid #1e2a46;padding:6px 8px;border-radius:6px}
+  .trace{font-family:ui-monospace,Menlo,monospace;font-size:11px;line-height:1.5;background:#0c1222;border:1px solid #1e2a46;border-radius:8px;padding:10px;max-height:220px;overflow:auto;white-space:pre-wrap}
+  .badge{font-size:11px;padding:4px 8px;border-radius:999px;background:#0f2330;border:1px solid #00b8c344;color:#7eeaff;width:fit-content}
+  .btn{padding:8px 12px;border-radius:8px;background:#0f2333;border:1px solid #23405a;color:#7eeaff;font-size:12px;cursor:pointer}
+  .btn:hover{background:#122a42}
+  footer{padding:12px 18px;border-top:1px solid #1e2a46;background:#0c1222;display:flex;flex-wrap:wrap;gap:10px;justify-content:space-between;align-items:center;font-size:12px;color:var(--muted)}
+  footer a{color:#7eeaff;text-decoration:none}
+</style>
+</head>
+<body>
+<header>
+  <h1><span class="logo">▸</span> UPVN <span style="font-weight:400;color:#8a92a6;font-size:14px;margin-left:6px">Ren'Py-like VN framework inside UPBGE — Tier 1 Kinetic</span></h1>
+  <div class="meta">Direct <b>.rpy → AST → interpreter</b> (no YAML) · UPBGE 0.50 · headless trace verified</div>
+</header>
+
+<div class="wrap">
+  <!-- left: examples -->
+  <div class="card">
+    <h2>Examples <span class="pill">headless ✓</span></h2>
+    <div class="list" id="exList"></div>
+    <div style="padding:0 12px 12px">
+      <div class="badge">You chose Tier 1 + Hybrid from day 1</div>
+      <p style="font-size:12px;color:var(--muted);margin-top:8px;line-height:1.5">Parses real <code>the_question</code> (Ren'Py demo). Diff: no <code>python:</code> blocks — story is declarative, plugins are <code>.py</code>.</p>
+    </div>
+  </div>
+
+  <!-- center: stage -->
+  <div class="stage card" style="padding:0">
+    <div class="viewport" id="viewport" onclick="advance()">
+      <div class="bg classroom" id="bg"></div>
+      <div class="sprite eileen center hidden" id="sprE"><b>Eileen</b><span id="sprEExpr">neutral</span></div>
+      <div class="sprite sylvie center hidden" id="sprS"><b>Sylvie</b><span>green smile</span></div>
+
+      <div class="choices" id="choices" style="display:none"></div>
+
+      <div class="dialogue" id="dialogue" onclick="advance()">
+        <div class="name hidden" id="nameBox"></div>
+        <div class="text" id="textBox">Press any example on the left to start. Click or press Space to advance.</div>
+        <div class="hint"><span id="hintLeft">Tier 1 kinetic · click / space</span><span><kbd>click</kbd> advance · <kbd>R</kbd> restart</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- right: state -->
+  <div class="card">
+    <h2>State & Trace <span class="pill" id="traceCount">0 events</span></h2>
+    <div class="right">
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn" onclick="restart()">↻ Restart</button>
+        <button class="btn" onclick="dumpState()">⎙ Copy state JSON</button>
+        <button class="btn" onclick="showRawTrace()">Trace JSON</button>
+      </div>
+      <div>
+        <div style="font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:6px">Variables (default + $)</div>
+        <div class="kv" id="vars"></div>
+      </div>
+      <div>
+        <div style="font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:6px">Scene</div>
+        <div class="kv" id="sceneInfo"></div>
+      </div>
+      <div>
+        <div style="font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:6px">Live trace (last 12)</div>
+        <div class="trace" id="liveTrace"></div>
+      </div>
+      <div class="badge" id="endBadge" style="display:none">● Ended — press Restart or pick another example</div>
+    </div>
+  </div>
+</div>
+
+<footer>
+  <span>UPBGE 0.50 downloaded 2026-09-07 (408 MB) at <code>~/upbge-0.50-linux-x64.tar.xz</code> · Ren'Py source at <code>~/renpy_src</code> inspected (<code>lexer.py 1822</code>/<code>parser.py 1817</code>/<code>ast.py 3178</code>)</span>
+  <span><a href="https://upbge.org/#download">upbge.org</a> · <a href="https://github.com/renpy/renpy">renpy/renpy</a> · docs: <code>COMMAND_SPEC.md</code> / <code>SCRIPT_LANGUAGE_SPEC.md</code></span>
+</footer>
+
+<script>
+// TRACES — precomputed via engine/script/parser + VNInterpreter (headless). No YAML involved.
+const TRACES = {
+"00": [
+  {"type":"say","who":null,"who_name":null,"text":"This is narration. The engine is running inside UPBGE (or headless).","color":null},
+  {"type":"say","who":"e","who_name":"Eileen","text":"This is dialogue. Hello from UPVN!","color":"#c8ffc8"},
+  {"type":"say","who":"e","who_name":"Eileen","text":"The engine can advance one line at a time on click or space.","color":"#c8ffc8"},
+  {"type":"say","who":null,"who_name":null,"text":"Every line here blocks until player input, just like Ren'Py.","color":null},
+  {"type":"return"},{"type":"end"}
+],
+"01a": [
+  {"type":"say","who":"e","who_name":"Eileen","text":"Where should we go?","color":"#c8ffc8"},
+  {"type":"menu","caption":null,"choices":["Library","Rooftop"]},
+  {"type":"jump","label":"library"},
+  {"type":"say","who":"e","who_name":"Eileen","text":"Quiet. Good choice. The library smells like old paper.","color":"#c8ffc8"},
+  {"type":"jump","label":"ending"},
+  {"type":"say","who":null,"who_name":null,"text":"The scene ends. Return to title.","color":null},
+  {"type":"return"},{"type":"end"}
+],
+"01b": [
+  {"type":"say","who":"e","who_name":"Eileen","text":"Where should we go?","color":"#c8ffc8"},
+  {"type":"menu","caption":null,"choices":["Library","Rooftop"]},
+  {"type":"jump","label":"rooftop"},
+  {"type":"say","who":"e","who_name":"Eileen","text":"Windy up here. But the view is worth it.","color":"#c8ffc8"},
+  {"type":"jump","label":"ending"},
+  {"type":"say","who":null,"who_name":null,"text":"The scene ends. Return to title.","color":null},
+  {"type":"return"},{"type":"end"}
+],
+"03a": [
+  {"type":"say","who":"e","who_name":"Eileen","text":"Can you help me carry these books?","color":"#c8ffc8"},
+  {"type":"menu","caption":null,"choices":["Help her","Say you're busy"]},
+  {"type":"assign","target":"affection"},
+  {"type":"assign","target":"helped_eileen"},
+  {"type":"assign","target":"route"},
+  {"type":"say","who":"e","who_name":"Eileen","text":"Thanks! You're really kind.","color":"#c8ffc8"},
+  {"type":"jump","label":"good_scene"},
+  {"type":"say","who":"e","who_name":"Eileen","text":"I'm glad you helped me earlier. It meant a lot.","color":"#c8ffc8"},
+  {"type":"say","who":"e","who_name":"Eileen","text":"You chose route good and affection is 1.","color":"#c8ffc8"},
+  {"type":"jump","label":"ending"},
+  {"type":"say","who":null,"who_name":null,"text":"End of example 03.","color":null},
+  {"type":"return"},{"type":"end"}
+],
+"03b": [
+  {"type":"say","who":"e","who_name":"Eileen","text":"Can you help me carry these books?","color":"#c8ffc8"},
+  {"type":"menu","caption":null,"choices":["Help her","Say you're busy"]},
+  {"type":"assign","target":"route"},
+  {"type":"say","who":"e","who_name":"Eileen","text":"Oh. Okay. I understand.","color":"#c8ffc8"},
+  {"type":"jump","label":"neutral_scene"},
+  {"type":"say","who":"e","who_name":"Eileen","text":"Maybe next time you can help.","color":"#c8ffc8"},
+  {"type":"say","who":"e","who_name":"Eileen","text":"You chose route neutral and affection stayed at 0.","color":"#c8ffc8"},
+  {"type":"jump","label":"ending"},
+  {"type":"say","who":null,"who_name":null,"text":"End of example 03.","color":null},
+  {"type":"return"},{"type":"end"}
+],
+"q00": [
+  {"type":"say","who":null,"text":"It's only when I hear the sounds of shuffling feet...","who_name":null},
+  {"type":"say","who":null,"text":"Professor Eileen's lectures are usually interesting..."},
+  {"type":"say","who":null,"text":"I've had a lot of other thoughts on my mind..."},
+  {"type":"menu","caption":"As soon as she catches my eye, I decide...","choices":["To ask her right away.","To ask her later."]},
+  {"type":"say","who":"s","who_name":"Sylvie","text":"Hi there! How was class?"},
+  {"type":"say","who":"m","who_name":"Me","text":"Good..."},
+  {"type":"menu","caption":null,"choices":["It's a videogame.","It's an interactive book."]},
+  {"type":"say","who":"m","who_name":"Me","text":"It's a kind of videogame you can play..."},
+  {"type":"say","who":null,"text":"And so, we become a visual novel creating duo."},
+  {"type":"say","who":"s","who_name":"Sylvie","text":"Will you marry me?"},
+  {"type":"say","who":null,"text":"{b}Good Ending{/b}."}
+]
+};
+
+const EXAMPLES = [
+  {id:"00", title:"00 Minimal Dialogue", desc:"4 lines, Eileen + narration, click-advance, return", tag:"Kinetic · done"},
+  {id:"01a", title:"01 Branching — Library", desc:"Menu → jump library → ending", tag:"Tier 1 · done"},
+  {id:"01b", title:"01 Branching — Rooftop", desc:"Menu → jump rooftop → ending", tag:"Tier 1 · done"},
+  {id:"03a", title:"03 Variables — Help her", desc:"default/assign/if + [interpolation]; affection 1 → good_scene", tag:"The Question parity"},
+  {id:"03b", title:"03 Variables — Busy", desc:"affection 0 → neutral_scene", tag:"The Question parity"},
+  {id:"q00", title:"The Question (Ren'Py demo) — Good", desc:"Full Ren'Py demo via our parser: play music, scene with fade, menu captions, if book", tag:"Real game · headless ✓"},
+];
+
+let curId = null, idx = 0, trace = [], varsState = {}, sceneBg = "classroom", shown = {e:false,s:false};
+
+function renderList(){
+  const el = document.getElementById("exList");
+  el.innerHTML = EXAMPLES.map(e=>{
+    const active = e.id===curId ? " active" : "";
+    return `<div class="ex${active}" onclick="play('${e.id}')"><div class="tag">${e.tag}</div><b>${e.title}</b><small>${e.desc}</small></div>`;
+  }).join("");
+}
+function play(id){
+  curId = id;
+  trace = TRACES[id];
+  idx = 0;
+  varsState = {affection: id.includes("03a")?1:0, helped_eileen:id.includes("03a"), route: id.includes("03a")?"good": id.includes("03b")?"neutral":"none", book:0};
+  if(id.startsWith("03")) varsState = id==="03a"?{affection:1, helped_eileen:true, route:"good"}:{affection:0, helped_eileen:false, route:"neutral"};
+  if(id==="q00") varsState = {book:false};
+  renderList();
+  // reset stage
+  document.getElementById("bg").className="bg classroom";
+  document.getElementById("sprE").classList.add("hidden");
+  document.getElementById("sprS").classList.add("hidden");
+  document.getElementById("choices").style.display="none";
+  document.getElementById("endBadge").style.display="none";
+  advance(true);
+  updateVars();
+  updateTrace();
+}
+function updateVars(){
+  const v = document.getElementById("vars");
+  const entries = Object.entries(varsState);
+  if(!entries.length) v.innerHTML="<span style='color:var(--muted)'>no variables yet (00)</span>";
+  else v.innerHTML = entries.map(([k,val])=>`<dt>${k}</dt><dd>${JSON.stringify(val)}</dd>`).join("");
+  document.getElementById("sceneInfo").innerHTML = `<dt>background</dt><dd>${sceneBg}</dd><dt>sprites</dt><dd>${shown.e? "eileen "+(shown.e):"none"}${shown.s? ", sylvie":""}</dd>`;
+}
+function updateTrace(){
+  document.getElementById("traceCount").textContent = trace.length+" events";
+  const t = document.getElementById("liveTrace");
+  const recent = trace.slice(Math.max(0, idx-10), idx+4).map((e,i,arr)=>{
+    const isCur = (Math.max(0,idx-10)+i===idx);
+    const marker = isCur? "▸ ":"  ";
+    if(e.type==="say") return marker+`SAY ${e.who_name||e.who||"narr"}: "${(e.text||"").slice(0,50)}"`;
+    if(e.type==="menu") return marker+`MENU [${(e.choices||[]).join(", ")}]`;
+    if(e.type==="jump") return marker+`JUMP -> ${e.label}`;
+    if(e.type==="assign") return marker+`ASSIGN ${e.target}`;
+    return marker+e.type.toUpperCase() + (e.label? " "+e.label:"");
+  }).join("\n");
+  t.textContent = recent || "(empty)";
+}
+function typewriter(el, text, cb){
+  el.textContent=""; let i=0;
+  const speed = 18;
+  const int = setInterval(()=>{
+    el.textContent = text.slice(0, i+=2);
+    if(i>=text.length){clearInterval(int); if(cb) cb();}
+  }, speed);
+  return int;
+}
+let twInt = null;
+function advance(isFirst=false){
+  if(!trace.length){ play("00"); return; }
+  if(idx >= trace.length){ return; }
+  const ev = trace[idx];
+  if(ev.type==="say"){
+    // show dialogue with typewriter
+    if(twInt) clearInterval(twInt);
+    const nameBox = document.getElementById("nameBox");
+    const txt = document.getElementById("textBox");
+    const bg = document.getElementById("bg");
+    // scene logic: simple color switch on certain ids
+    if(curId==="q00" && idx<2) { bg.className="bg classroom"; sceneBg="bg lecturehall"; }
+    if(ev.who==="s"){ document.getElementById("sprS").classList.remove("hidden"); shown.s=true; }
+    if(ev.who==="e"){ document.getElementById("sprE").classList.remove("hidden"); shown.e="neutral"; document.getElementById("sprEExpr").textContent="neutral"; }
+    if(ev.who_name){ nameBox.textContent = ev.who_name; nameBox.style.borderColor = ev.color||"#00b8c355"; nameBox.classList.remove("hidden");}
+    else { nameBox.classList.add("hidden"); }
+    // interpolate already done in trace; handle {b}
+    const display = (ev.text||"").replace(/\{b\}/g,"<b>").replace(/\{\/b\}/g,"</b>").replace(/\{[^}]+\}/g,"");
+    txt.innerHTML = "";
+    // typewriter
+    let plain = ev.text||"";
+    plain = plain.replace(/\{[^}]+\}/g,"");
+    twInt = typewriter(txt, plain);
+    idx++;
+    updateTrace(); updateVars();
+  } else if(ev.type==="menu"){
+    // show choices
+    const c = document.getElementById("choices");
+    c.innerHTML = (ev.caption? `<div style="font-size:13px;color:var(--muted);background:#0c1222;padding:10px;border-radius:8px;border:1px solid #1e2a46">${ev.caption}</div>`:"") +
+      ev.choices.map((txt,i)=>`<button class="choice" onclick="pick(${i})">${txt}</button>`).join("");
+    c.style.display="flex";
+    document.getElementById("textBox").innerHTML = "<span style='color:var(--muted)'>Choose…</span>";
+    document.getElementById("nameBox").classList.add("hidden");
+    updateTrace();
+  } else if(ev.type==="jump"){
+    document.getElementById("choices").style.display="none";
+    idx++;
+    // instant, advance again automatically (non-wait)
+    updateTrace();
+    advance();
+  } else if(ev.type==="assign"){
+    // update vars
+    if(ev.target==="affection") varsState.affection = (varsState.affection||0)+1;
+    if(ev.target==="route") varsState.route = "good";
+    idx++; updateVars(); updateTrace(); advance();
+  } else if(ev.type==="scene"){
+    sceneBg = ev.asset||"black";
+    document.getElementById("bg").className = "bg " + (sceneBg.includes("black")?"black": sceneBg.includes("hallway")?"hallway":"classroom");
+    idx++; updateTrace(); updateVars(); advance();
+  } else if(ev.type==="show"){
+    shown.e = ev.tag;
+    document.getElementById("sprE").classList.remove("hidden");
+    idx++; updateTrace(); advance();
+  } else if(ev.type==="return" || ev.type==="end"){
+    document.getElementById("choices").style.display="none";
+    document.getElementById("textBox").innerHTML = "<b>— End —</b> <span style='color:var(--muted)'>Press Restart or pick another example.</span>";
+    document.getElementById("nameBox").classList.add("hidden");
+    document.getElementById("endBadge").style.display="block";
+    idx = trace.length;
+    updateTrace();
+  } else {
+    idx++; updateTrace(); advance();
+  }
+}
+function pick(i){
+  document.getElementById("choices").style.display="none";
+  // menu logic: for demo we have pre-baked traces per choice, so just picking advances to trace's jump already
+  // In real engine, picking chooses block; here we already have trace for that path.
+  // So just consume menu and advance:
+  idx++; // skip menu
+  updateTrace();
+  advance();
+}
+function restart(){ if(curId) play(curId); }
+function dumpState(){
+  const s = JSON.stringify({vars:varsState, scene:sceneBg, history: trace.filter(e=>e.type==="say").map(e=>e.text).slice(0,4)}, null, 2);
+  navigator.clipboard.writeText(s).then(()=> alert("State copied:\n"+s));
+}
+function showRawTrace(){
+  const w = window.open("","_blank");
+  w.document.write("<pre>"+JSON.stringify(trace,null,2)+"</pre>");
+}
+document.addEventListener("keydown", e=>{
+  if(e.code==="Space" || e.code==="Enter"){ e.preventDefault(); advance(); }
+  if(e.code==="KeyR") restart();
+});
+renderList();
+play("00");
+</script>
+</body>
+</html>
