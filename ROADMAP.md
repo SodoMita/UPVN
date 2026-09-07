@@ -143,7 +143,7 @@
 
 ## NEXT_STEPS (for next turn)
 
-- M14 DONE 2026-09-07 21:09 — next polish: LibLoad real .blend classroom mesh (not just headless floor), addon asset browser for sprite assignment, improve _builder_from_file to preserve existing script.rpy without overwriting labels
-- Verify saves arbitrary already: SaveManager.list_slot_ids 1..∞ pagination (test_arbitrary_saves), headless save overlay page 83 shows slot 500, dist build saves 1..∞ verified via run.py choices
-- DLC perf: profiling for 44 tests + 109+20+27 showcase screenshots still <1s headless, zip 308KB
-- Optional: publish 10_full_sample_game.zip as release, add CI for pytest + package_game --project game --out dist
+- 0.5.1 Polish DONE 2026-09-07 21:20 — editor v0.5 preserve+asset browser+side image+arbitrary slot spinner, headless desks (board+teacher+3 rows), StageManager LibLoad+addObject+playAction+camera preset, make_template richer VN_3DStage (floor+3 markers+3 presets+9 desks+board+capsules, 150KB+ when libpulse available), showcase regenerated 27 PNGs desks behind sprite (36K), zip 324KB, 44 tests green, preserve test PASS
+- M14 DONE 2026-09-07 21:09 — verify saves arbitrary: SaveManager.list_slot_ids 1..∞ pagination (test_arbitrary_saves), headless save overlay page 83 shows slot 500, dist build saves 1..∞ verified via run.py choices (absolute Path)
+- DLC perf: 44 tests + 109+20+27 showcase+polish <1s headless, zip 324KB (was 308KB), show ibrary pickle not used (direct .rpy)
+- Optional: publish 10_full_sample_game.zip 324KB as release, add CI for pytest + package_game --project game --out dist, side image live preview, asset browser thumbnail grid, Blender regen UPVN_Template.blend when libpulse available (headless already proves desks)

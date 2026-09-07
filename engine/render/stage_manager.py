@@ -33,7 +33,9 @@ class StageManager:
 
     def apply_event(self, event: dict):
         t = event.get("type")
-        if t == "show3d":
+        if t == "load_stage":
+            self.load_stage(event["stage"])
+        elif t == "show3d":
             self.spawn(event["asset"], event.get("marker"))
         elif t == "anim":
             self.play_anim(event["target"], event["animation"])
@@ -97,6 +99,25 @@ class StageManager:
             return True
         return (now - cam["_zoom_t0"]) >= cam.get("_zoom_dur",1.0)
 
+    def load_stage(self, stage_name: str):
+        self.state.stage = stage_name
+        if HAS_BGE:
+            try:
+                import bge.logic as logic
+                # try multiple stage locations (project stages/ or blend template)
+                for cand in [f"//stages/{stage_name}.blend", f"//blend/stages/{stage_name}.blend", f"//assets/stages/{stage_name}.blend"]:
+                    path = logic.expandPath(cand)
+                    import os
+                    if os.path.exists(path):
+                        logic.LibLoad(path, "Scene", load_actions=True)  # type: ignore
+                        print(f"[StageManager] LibLoad stage {stage_name} from {path}")
+                        break
+                else:
+                    # fallback: stage already in template collection VN_3DStage
+                    print(f"[StageManager] stage {stage_name} assumed in VN_3DStage collection (template)")
+            except Exception as e:
+                print(f"[StageManager] load_stage failed {e}")
+
     def update(self, dt: float):
         if not HAS_BGE:
             return
@@ -144,15 +165,68 @@ class StageManager:
 
     def spawn(self, asset: str, marker: str | None):
         if HAS_BGE:
-            # scene.addObject(asset, marker_object)
+            try:
+                import bge.logic as logic
+                scene = logic.getCurrentScene()
+                marker_obj = scene.objects.get(marker) if marker else None
+                # asset could be an object name in stage collection, e.g. Char_Eileen_placeholder or eileen
+                # try to find template object
+                template = None
+                for cand in [asset, f"Char_{asset}_placeholder", f"Char_{asset.capitalize()}_placeholder", asset.capitalize()]:
+                    if cand in scene.objectsInactive:
+                        template = cand
+                        break
+                    if cand in scene.objects:
+                        template = cand
+                        break
+                if template and marker_obj:
+                    obj = scene.addObject(template, marker_obj, 0)
+                    # store for later anim
+                    self.state.stage_objects[asset] = {"marker": marker, "anim": "idle", "bge_obj": obj.name}
+                    print(f"[StageManager] spawn {asset} at {marker} -> {obj.name}")
+                elif template:
+                    # spawn at origin if no marker
+                    obj = scene.addObject(template, scene.objects.get("Floor_classroom") or marker_obj, 0)
+                    print(f"[StageManager] spawn {asset} (no marker) -> {obj.name}")
+            except Exception as e:
+                print(f"[StageManager] spawn failed {asset}@{marker}: {e}")
+        else:
+            # headless already handled via VNState.stage_objects in interpreter
             pass
 
     def play_anim(self, target: str, anim: str):
         if HAS_BGE:
-            # obj.playAction(anim, 0, 60)
-            pass
+            try:
+                import bge.logic as logic
+                scene = logic.getCurrentScene()
+                info = self.state.stage_objects.get(target)
+                if info and "bge_obj" in info:
+                    obj = scene.objects.get(info["bge_obj"])
+                    if obj:
+                        # playAction(animName, start, end, layer, priority, blendin, play_mode, layerWeight, ipoFlags, speed)
+                        obj.playAction(anim, 0, 60, 0, 0, 5, logic.KX_ACTION_MODE_LOOP if anim == "idle" else logic.KX_ACTION_MODE_PLAY)
+                        info["anim"] = anim
+            except Exception as e:
+                print(f"[StageManager] play_anim failed {target} {anim}: {e}")
+        else:
+            if target in self.state.stage_objects:
+                self.state.stage_objects[target]["anim"] = anim
 
     def camera_preset(self, name: str):
         if HAS_BGE:
-            # lerp camera to preset empty
-            pass
+            try:
+                import bge.logic as logic
+                scene = logic.getCurrentScene()
+                cam = scene.active_camera
+                preset = scene.objects.get(name) or scene.objects.get(f"preset_{name}") or scene.objects.get(f"Preset_{name}")
+                if cam and preset:
+                    # store lerp target for smooth transition (1 sec)
+                    cam["upvn_cam_target"] = preset.name
+                    cam["upvn_cam_t0"] = __import__("time").time()
+                    # immediate for now; interpolator could be in frontend
+                    cam.worldPosition = preset.worldPosition.copy()
+                    cam.worldOrientation = preset.worldOrientation.copy()
+                    print(f"[StageManager] camera_preset {name} -> {preset.name}")
+            except Exception as e:
+                print(f"[StageManager] camera_preset failed {name}: {e}")
+        # state already set by interpreter
