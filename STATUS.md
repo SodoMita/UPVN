@@ -1,0 +1,39 @@
+# Current Status — 2026-09-07 21:09 (M14 ship)
+
+## Last completed
+- M00 Harness done: parser, interpreter, state, headless runner, UPBGE 0.50 download verified (408 MB, Blender 5.0.1), The Question parses and runs 3 paths
+- M01 Kinetic done: 00_minimal_dialogue headless + UPBGE controller + blf typewriter dt via bge_frontend.frontend
+- M02 Display DONE (2026-09-07 late): engine/render/* real BGE texture + headless_renderer 109 PNGs, positions validated
+- M03 Transitions DONE: fade 0.6s/dissolve 0.45s + alpha tween
+- M04 The Question parity headless DONE: 3 paths
+- M05 Audio+Saves DONE: play music trace, JSON round-trip (19 → 26 tests) — now arbitrary 1..∞ (M09)
+- M06 Validator DONE: 9-file gallery + parser hints + tests/test_parser_errors.py
+- M07 Backlog/skip/auto DONE (2026-09-08): history stores raw/styled/stripped + interpolate [var] + strip_tags {b}/{color}/{i}, seen_history, skip/auto flags + seen-check, VNController.toggle_skip/auto, 4 new tests
+- M08 Rollback-lite DONE (2026-09-08): rollback_stack + rollback_labels_stack, VNController rollback(N)/roll_forward(N), WHEELUP/DOWN, N-step hash equality, long screenshots 109 PNGs
+- M09 Screen system lite UPDATED (2026-09-08 late): **arbitrary slots 1..∞** — SaveManager.list_slot_ids/next_available_slot/slot_exists/get_slot_info/delete + pagination (page/page_size 6, list_slot_ids, ←→ next/prev), SaveScreen/LoadScreen arbitrary, headless save overlay pagination “Arbitrary slots 1..∞” + page indicator, 6 tests + 3 new = 44 total
+- M10 ATL-lite DONE (2026-09-08): camera zoom 1.2 duration 1.0 + easing, show with move lerp not snap, easing module, 5 tests
+- M11 Blender Editor Tools DONE (2026-09-08 late): `blend/upvn_editor_addon.py` (View3D/Text Editor UPVN panels, 9 operators: Create Project, Add Character/Scene/Dialogue/Show/Menu, Validate, Preview, Save Demo), `UPVN_GameBuilder` API (add_character/scene/say/show/menu/camera/stage/show3d/write/validate/preview), `tools/upvn_game_creator.py` quick_game 3-line minimal coding + arbitrary saves demo, `examples/99_creator_demo` generated
+- M13 Hybrid 3D DONE (2026-09-08): load_stage/show3d/anim/preset, hybrid 2D over 3D, no black fallback, 4 tests
+- M14 Ship DONE (2026-09-07 21:09): `tools/package_game.py` (522 lines, textwrap+validate+locale+POT+JSON+a11y+copy+build_info hash+playable_check+zip) + `examples/10_full_sample_game/script.rpy` 8 labels 59 events + `dist/` (locale/template.pot+json 36 strings, ACCESSIBILITY.md/json, 10_full_sample_game/ with run.py absolute Path + README_PLAY 36 strings + build_info.json hash 5a26c72e1404 + playable_check + saves/ + zip 308KB) + headless run.py --choices 0 0 0 (59 events, saves arbitrary 1..∞) verified from any cwd + long showcase screenshots 27 PNGs (engine+showcase hybrid 3D ZOOM/CAM badges) via start_process startup_wait 10s + http preview 8011
+
+## Currently failing / todo
+- None blocker — M14 done, 44 tests green, packaging verified. Polish only:
+- blend/UPVN_Template.blend 96K via long Blender 5.0.1 background (tools/make_template.py) — includes 3D stage placeholder (hybrid verified via headless, screenshots showcase_15_say ZOOM 1.46x CAM + 3D capsules), next: LibLoad real .blend classroom mesh for full UPBGE test
+- DLC perf: 44 tests + 109+20+27 screenshots <1s headless, zip 308KB
+- Optional polish: addon asset browser for sprite assignment, _builder_from_file preserve labels, publish 10_full_sample_game.zip as release
+
+## Recommended next task
+- Polish/DLC: LibLoad real .blend classroom mesh (hybrid stage now headless floor+wall+capsules, need real mesh), addon asset browser, side images/sprite loops
+- Publish: `dist/10_full_sample_game.zip` as release + CI pytest + package_game
+- No MVP blockers — all Milestones M00-M14 done
+
+## Notes
+- Parser requires 4 spaces, spaces not tabs, BOM stripped. Caption inside menu: bare quoted line — see SCRIPT_LANGUAGE_SPEC. Friendly hints for define/jump/menu/label. New: camera zoom 1.2 duration 1.0 with ease, show with move.
+- Interpreter deep-copies labels for splicing; rollback also deep-copies labels; show with move sets move_from/to/easing/0.5s lerp, camera zoom sets _zoom_*.
+- Headless gate: `VNController.run_headless(choices=[...])` + `pytest` 44 passed; screenshots via headless_renderer (109 + 20 + 27 showcase + arbitrary pagination) inspected via read_file (no HTML mock)
+- UPBGE tarball at ~/upbge-0.50-linux-x64.tar.xz (390 MB) — LD_LIBRARY_PATH pulse fix, long start_process with startup_wait used per instruction (long_m09/m10/m13 + showcase engine+showcase + arbitrary pagination, http 8011 preview)
+- Ren'Py source at ~/renpy_src for reference only; no code copied. Easing module engine/atl/easing.py mirrors Ren'Py warpers.
+- Screen system: engine/ui/screen_manager.py overlay vs modal, pagination arbitrary slots 1..∞ (page/page_size 6, list_page_slots, ←→/n/p), SaveManager.list_slot_ids/next_available_slot/slot_exists/get_slot_info/delete, VNController modal blocking, H/Q/S/L/ESC + ←→ for pagination.
+- Blender editor: blend/upvn_editor_addon.py (UPVN_GameBuilder API + 9 operators + 2 panels), tools/upvn_game_creator.py quick_game 3-line minimal coding, examples/99_creator_demo generated, UPVN_GameBuilder validates/previews headlessly without bpy.
+- Hybrid: state.stage + stage_objects + camera preset/zoom, headless_renderer draw_stage floor+wall+capsules, 2D sprites over 3D, VNController stage_mgr.update per frame.
+- Packaging: tools/package_game.py validates per-file+combined parse, extracts locale regex _() + parsed say/menu/define, creates ACCESSIBILITY.md/json, copies engine/bge_frontend/blend/tools + game/scripts → build, run.py uses Path(__file__).parent absolute (works from any cwd), build_info.json hash, playable_check 59 events, zip 308KB, dist/locale/template.pot+json 36 strings
