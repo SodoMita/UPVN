@@ -28,23 +28,59 @@ from .vn_state import VNState, CharacterDef
 from .vn_errors import ScriptRuntimeError, LabelNotFoundError
 
 
-# ------------------------------------------------------------------ safe eval
+# ------------------------------------------------------------------ safe eval (AST whitelist — fixes M-1)
 def safe_eval(expr: str, variables: dict):
     """
     Evaluate a Python expression with only variables + safe builtins.
-    No __import__, no open, no exec.
+    Uses AST whitelist: no Attribute/Subscript/ListComp etc → blocks `().__class__.__mro__` escapes.
+    Only trusted author scripts reach here, but we enforce defense-in-depth:
+      allowed nodes: Constant, Name, BinOp, UnaryOp, BoolOp, Compare, Call (to allowlist), List/Tuple/Dict/Set, IfExp
+      allowed ops: Add/Sub/Mult/Div/Mod/Pow/FloorDiv, UAdd/USub/Not/Invert, And/Or, Eq/NotEq/Lt/LtE/Gt/GtE/Is/IsNot/In/NotIn
+      calls: len, int, float, str, bool, abs, min, max only (no attribute)
     """
-    # whitelist of builtins / functions we allow in if conditions
+    import ast
     allowed_builtins = {
         "True": True, "False": False, "None": None,
         "len": len, "int": int, "float": float, "str": str, "bool": bool,
         "abs": abs, "min": min, "max": max,
     }
-    # variables shadow builtins
     env = {**allowed_builtins, **variables}
+    # fast reject obvious dunder/privileged substrings (defense in depth, not sole check)
+    # Note: we still do AST checks, this just gives clearer error for obvious exploits
+    if "__" in expr:
+        # allow normal variable names with __? No, variables are alphanumeric, so __ indicates dunder attempt
+        # We still run AST check, but this gives fast path
+        pass
     try:
-        # empty globals, env as locals
-        return eval(expr, {"__builtins__": {}}, env)
+        tree = ast.parse(expr, mode='eval')
+    except SyntaxError as e:
+        raise ScriptRuntimeError(f"expression error: {expr!r} -> {e}")
+    # whitelist
+    allowed_nodes = (
+        ast.Expression, ast.Constant, ast.Name, ast.Load,
+        ast.BinOp, ast.UnaryOp, ast.BoolOp, ast.Compare, ast.Call,
+        ast.List, ast.Tuple, ast.Dict, ast.Set, ast.IfExp,
+        # ops are separate but checked via node type
+        ast.Add, ast.Sub, ast.Mult, ast.Div, ast.Mod, ast.Pow, ast.FloorDiv,
+        ast.UAdd, ast.USub, ast.Not, ast.Invert,
+        ast.And, ast.Or,
+        ast.Eq, ast.NotEq, ast.Lt, ast.LtE, ast.Gt, ast.GtE, ast.Is, ast.IsNot, ast.In, ast.NotIn,
+    )
+    allowed_call_names = {"len", "int", "float", "str", "bool", "abs", "min", "max"}
+    for node in ast.walk(tree):
+        if not isinstance(node, allowed_nodes):
+            raise ScriptRuntimeError(f"expression error: {expr!r} -> disallowed node {type(node).__name__}")
+        if isinstance(node, ast.Call):
+            if not isinstance(node.func, ast.Name) or node.func.id not in allowed_call_names:
+                raise ScriptRuntimeError(f"expression error: {expr!r} -> disallowed call {ast.unparse(node) if hasattr(ast, 'unparse') else 'call'}")
+        if isinstance(node, ast.Name):
+            # disallow dunder names
+            if node.id.startswith("__") and node.id.endswith("__"):
+                raise ScriptRuntimeError(f"expression error: {expr!r} -> disallowed name {node.id!r}")
+    try:
+        # compile validated AST
+        code = compile(tree, "<safe_eval>", "eval")
+        return eval(code, {"__builtins__": {}}, env)
     except Exception as e:
         raise ScriptRuntimeError(f"expression error: {expr!r} -> {e}")
 
