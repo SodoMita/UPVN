@@ -87,6 +87,11 @@ class VNState:
     # audio
     audio: AudioState = field(default_factory=AudioState)
 
+    # full-tier presentation toggles (window show/hide/auto, nvl mode)
+    window: str = "auto"
+    nvl: Optional[str] = None
+    nvl_mode: str = "adv"
+
     # 3D stage (hybrid mode stub — LLM can populate via python)
     stage: Optional[str] = None          # e.g. "classroom_3d"
     stage_objects: Dict[str, Any] = field(default_factory=dict)  # id -> {marker, anim}

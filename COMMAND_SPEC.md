@@ -1,6 +1,9 @@
-# Command Specification (draft — Tier 1-2)
+# Command Specification (three tiers, one IR)
 
 Every command compiles to a typed AST node `{"cmd": ..., ... , "_loc": {file,line,col}}` (see `engine/script/ast_nodes.py`). Source `.rpy` is direct, no YAML leak — Ren'Py itself does NOT use YAML/JSON (`renpy/parser.py` → `renpy.ast`).
+
+Three tiers share this IR: `.urpy` (fully declarative, `engine/script/urpy_parser.py`),
+`.rpy` safe subset (`mode='safe'`, default), `.rpy` full (`mode='full'`, drop-in Ren'Py).
 
 ## Declarative forms (canonical, M15)
 
@@ -198,8 +201,30 @@ pause 0.5
 
 ---
 
-## What is NOT in Tier 1 (postponed per doc §10)
+## Full `.rpy` tier (drop-in Ren'Py, `mode='full'`)
 
-- ATL (`transform`, `at`, `parallel`), `screen` language, `translate`, `init python`, `call screen`, `image` declaration, `layeredimage`, video, `call screen` rollback quirks — all explicit anti-goals in `docs/renpy_criticism.md`.
+| Command | AST / effect | Notes |
+| --- | --- | --- |
+| `python:` block | `{"cmd":"python", "code":…}` | exec'd with variables + `renpy`/`store`/defines in scope; results synced back (JSON-safe only) |
+| `init python:` / `init:` / `init offset = N` | `init_python` / parsed as top-level | runs once before the first label |
+| `$ python_stmt` | `assign` (simple) or `python` (arbitrary) | one-line Python |
+| `while cond:` / `break` / `continue` / `pass` | `while` (spliced), `break`, `continue`, `pass` | loop body re-spliced per iteration; `break`/`continue` carry the enclosing loop id |
+| `label name(params):` | `label_params[name]` | params bound to variables (defaults supported), restored on `return` |
+| `call label(args)` | `call` with `args` | positional args mapped to params |
+| `jump/call expression expr` | `jump`/`call` with `expr` | target label computed at runtime |
+| `menu:` choice `"Text" if cond:` | choice `cond` | false choices are filtered out before display |
+| `window show\|hide\|auto` | `window` → `VNState.window` | |
+| `nvl clear\|show\|hide`, `nvl mode nvl\|adv` | `nvl`, `nvl_mode` → `VNState.nvl(_mode)` | |
+| `voice "…"` | `play_voice` | |
+| `queue music\|sound "…"` | `play_music`/`play_sound` with `queue: true` | |
+| `show/hide/call screen x` | `show_screen`/`hide_screen`/`call_screen` | `call_screen` waits for input |
+| `screen:` / `style:` / `transform:` / `translate:` | `screens`/`styles`/`transforms`/`translations` | captured as raw lines for the editor-built UI layer |
+| `renpy.jump/call/quit`, `renpy.loadable`, `renpy.has_label`, `renpy.get_playing`, `renpy.random.*`, `renpy.store.*` | `engine/script/renpy_compat.py` | allowlist stand-in object, not a real import |
+
+In safe mode all of the above raise `ParseError` with hint `parse with mode='full'`.
+
+## What is NOT in the declarative tiers (tiers 1–2)
+
+- ATL (`transform`, `at`, `parallel`), `screen` language, `translate`, `init python`, `call screen`, `image` declaration, `layeredimage`, video — all explicit anti-goals in `docs/renpy_criticism.md`; they exist only in the full tier and are captured (not auto-rendered).
 
 Every command entry follows: **Good / Bad / Error / Test / Migration note**.

@@ -1,0 +1,70 @@
+# ============================================================
+# UPVN — .urpy tier (fully declarative, zero embedded Python)
+#
+# .urpy is the strict declarative language:
+#   - typed `state:` block  (no `$`, no `define`, no `default`)
+#   - `character` blocks    (name/color)
+#   - `image` / `audio` / `stage` asset manifest
+#   - `set` assignment, `choice "..."` menu items
+#   - explicit REQUIRED `end` for every block
+#
+# Run with:  python tools/run_headless.py examples/13_urpy_tier/script.urpy --choices 0
+# ============================================================
+
+state:
+    affection: int = 0
+    route: str = "none"
+    seen_bird: bool = False
+end
+
+character e:
+    name "Eileen"
+    color "#c8ffc8"
+end
+
+character narrator:
+    color "#ffffff"
+end
+
+image "bg classroom" = "backgrounds/classroom.png"
+image "eileen happy" = "characters/eileen/happy.png"
+audio theme = "music/theme.ogg"
+audio chime = "sfx/chime.ogg"
+stage classroom_3d = "stages/classroom.blend"
+
+label start:
+    scene "bg classroom"
+    show "eileen happy"
+    play music theme fadein 1.0
+    e "Welcome to UPVN. This script is fully declarative."
+    set affection = 1
+    menu:
+        choice "Pet the bird.":
+            set route = "bird"
+            jump bird_route
+        end
+        choice "Study quietly.":
+            set route = "study"
+            jump study_route
+        end
+    end
+end
+
+label bird_route:
+    play sound chime
+    set seen_bird = True
+    e "The bird chirps. Affection [affection], route [route]."
+    if seen_bird:
+        e "You saw the bird!"
+    else:
+        e "No bird here."
+    end
+    return
+end
+
+label study_route:
+    load_stage classroom_3d
+    camera zoom 1.3 with ease
+    e "You study. Affection [affection], route [route]."
+    return
+end

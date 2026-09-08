@@ -5,9 +5,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from engine.script.parser import parse_file, ParseError
 
-def validate(path):
+def validate(path, mode="safe"):
     try:
-        d = parse_file(path)
+        d = parse_file(path, mode=mode)
         print(f"OK {path}: {len(d['labels'])} labels, {list(d['labels'].keys())}")
         return True
     except ParseError as e:
@@ -18,13 +18,15 @@ if __name__ == "__main__":
     import argparse
     ap = argparse.ArgumentParser()
     ap.add_argument("paths", nargs="+")
+    ap.add_argument("--mode", choices=("safe", "full"), default="safe",
+                    help="parse mode: safe declarative subset (default) or full drop-in Ren'Py")
     args = ap.parse_args()
     ok = True
     for p in args.paths:
         for q in Path(".").glob(p) if "*" in p else [Path(p)]:
             if q.is_dir():
-                for r in q.rglob("*.rpy"):
-                    ok = validate(str(r)) and ok
+                for r in list(q.rglob("*.rpy")) + list(q.rglob("*.urpy")):
+                    ok = validate(str(r), args.mode) and ok
             else:
-                ok = validate(str(q)) and ok
+                ok = validate(str(q), args.mode) and ok
     sys.exit(0 if ok else 1)

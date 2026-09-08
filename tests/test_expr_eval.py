@@ -18,8 +18,10 @@ def test_containers_and_membership():
     assert evaluate("x in items", v) is True
     assert evaluate("5 not in items", v) is True
     assert evaluate("[1, 2] + [3]", v) == [1, 2, 3]
-    with pytest.raises(ScriptRuntimeError):
-        evaluate("{'a': 1}['a']", {})
+    # container subscripting on plain data is allowed (safe)…
+    assert evaluate("{'a': 1}['a']", {}) == 1
+    assert evaluate("items[0]", v) == 1
+    assert evaluate("'ab'[1]", {}) == 'b'
 
 
 def test_allowed_functions():

@@ -5,18 +5,20 @@ Replaces raw Python `eval` for `if` / `elif` / `set` / `$` expressions.
 
 The story language is declarative, so expressions are limited to a small,
 deterministic subset of Python: literals, names, arithmetic, comparisons,
-boolean operators, `in` / `not in`, ternary, and container literals, plus a
-fixed allowlist of pure functions (``len``, ``int``, ``float``, ``str``,
-``bool``, ``abs``, ``min``, ``max``).
+boolean operators, `in` / `not in`, ternary, container literals and
+*container* subscripting (``items[0]``, ``flags["x"]``), plus a fixed
+allowlist of pure functions (``len``, ``int``, ``float``, ``str``, ``bool``,
+``abs``, ``min``, ``max``).
 
-Attribute access, subscripting, comprehensions, lambdas, and arbitrary calls
-are rejected. This closes the classic sandbox escape
+Attribute access is only permitted on explicitly injected objects
+(``renpy`` / ``store`` in the trusted full tier), never on dunder names,
+and never on arbitrary values. This closes the classic sandbox escape
 (``().__class__.__mro__[1].__subclasses__()...``) and keeps scripts
 analyzable (criticism #6: no arbitrary Python inside story script).
 """
 from __future__ import annotations
 import ast
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from ..core.vn_errors import ScriptRuntimeError
 
@@ -67,7 +69,16 @@ _ALLOWED_NAMES: Dict[str, Any] = {"True": True, "False": False, "None": None}
 
 
 class ExpressionEvaluator:
-    """Evaluate a declarative expression against a variables dict."""
+    """Evaluate a declarative expression against a variables dict.
+
+    ``extra`` maps root names to injected objects (e.g. ``renpy``, ``store``)
+    whose attributes may be read — but ONLY on these injected objects, and
+    never on names starting with ``_``. That keeps the sandbox closed while
+    allowing the trusted full tier to call ``renpy.loadable(...)`` etc.
+    """
+
+    def __init__(self, extra: Optional[Dict[str, Any]] = None):
+        self.extra = extra or {}
 
     def evaluate(self, expr: str, variables: Dict[str, Any]) -> Any:
         try:
@@ -86,6 +97,8 @@ class ExpressionEvaluator:
                 return variables[node.id]
             if node.id in _ALLOWED_NAMES:
                 return _ALLOWED_NAMES[node.id]
+            if node.id in self.extra:
+                return self.extra[node.id]
             raise ScriptRuntimeError(f"unknown variable {node.id!r}")
 
         if isinstance(node, ast.BinOp):
@@ -156,11 +169,13 @@ class ExpressionEvaluator:
         if isinstance(node, ast.Call):
             return self._eval_call(node, variables)
 
-        # explicitly rejected constructs
         if isinstance(node, ast.Attribute):
-            raise ScriptRuntimeError("attribute access ('.') is not allowed in expressions")
+            return self._eval_attribute(node, variables)
+
         if isinstance(node, ast.Subscript):
-            raise ScriptRuntimeError("subscripting ('[]') is not allowed in expressions")
+            return self._eval_subscript(node, variables)
+
+        # explicitly rejected constructs
         if isinstance(node, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)):
             raise ScriptRuntimeError("comprehensions are not allowed in expressions")
         if isinstance(node, ast.Lambda):
@@ -170,25 +185,88 @@ class ExpressionEvaluator:
 
         raise ScriptRuntimeError(f"expression node {type(node).__name__} not allowed")
 
+    # ---------------------------------------------------------------- attribute access
+    def _eval_attribute(self, node: ast.Attribute, variables: Dict[str, Any]) -> Any:
+        name = node.attr
+        if name.startswith("_"):
+            raise ScriptRuntimeError(f"attribute {name!r} is not allowed in expressions")
+        obj = self._eval_attr_base(node.value, variables)
+        try:
+            return getattr(obj, name)
+        except AttributeError:
+            raise ScriptRuntimeError(f"object has no attribute {name!r}")
+
+    def _eval_attr_base(self, node: ast.AST, variables: Dict[str, Any]) -> Any:
+        """Resolve the object an attribute is read from.
+
+        Only injected roots (``renpy`` / ``store``) — and objects reached by
+        walking their attributes — may be traversed. Everything else is
+        rejected, which keeps ``().__class__...`` escapes impossible.
+        """
+        if isinstance(node, ast.Name):
+            if node.id in self.extra:
+                return self.extra[node.id]
+            raise ScriptRuntimeError(
+                f"attribute access is only allowed on injected objects (renpy/store), not {node.id!r}")
+        if isinstance(node, ast.Attribute):
+            return self._eval_attribute(node, variables)
+        raise ScriptRuntimeError("attribute access is not allowed in expressions")
+
+    # ---------------------------------------------------------------- subscripting
+    def _eval_subscript(self, node: ast.Subscript, variables: Dict[str, Any]) -> Any:
+        base = self._eval(node.value, variables)
+        if not isinstance(base, (list, tuple, dict, str)):
+            raise ScriptRuntimeError("subscripting ('[]') is not allowed in expressions")
+        if isinstance(node.slice, ast.Slice):
+            raise ScriptRuntimeError("slices are not allowed in expressions")
+        index = self._eval(node.slice, variables)
+        try:
+            return base[index]
+        except Exception as e:
+            raise ScriptRuntimeError(f"subscript: {e}")
+
+    # ---------------------------------------------------------------- calls
     def _eval_call(self, node: ast.Call, variables: Dict[str, Any]) -> Any:
-        if not isinstance(node.func, ast.Name):
-            raise ScriptRuntimeError("only simple function calls are allowed (e.g. len(x))")
-        name = node.func.id
-        if name not in _ALLOWED_FUNCTIONS:
-            raise ScriptRuntimeError(f"function {name!r} is not allowed")
         if node.keywords:
             raise ScriptRuntimeError("keyword arguments are not allowed in expressions")
         args = [self._eval(a, variables) for a in node.args]
-        try:
-            return _ALLOWED_FUNCTIONS[name](*args)
-        except Exception as e:
-            raise ScriptRuntimeError(f"{name}(...): {e}")
+
+        func = node.func
+        if isinstance(func, ast.Name):
+            name = func.id
+            if name in _ALLOWED_FUNCTIONS:
+                try:
+                    return _ALLOWED_FUNCTIONS[name](*args)
+                except Exception as e:
+                    raise ScriptRuntimeError(f"{name}(...): {e}")
+            if name in self.extra:
+                obj = self.extra[name]
+                if callable(obj):
+                    try:
+                        return obj(*args)
+                    except Exception as e:
+                        raise ScriptRuntimeError(f"{name}(...): {e}")
+            raise ScriptRuntimeError(f"function {name!r} is not allowed")
+
+        if isinstance(func, ast.Attribute):
+            # call on an injected object's attribute (e.g. renpy.loadable(...))
+            callee = self._eval_attribute(func, variables)
+            if not callable(callee):
+                raise ScriptRuntimeError(f"{func.attr!r} is not callable")
+            try:
+                return callee(*args)
+            except ScriptRuntimeError:
+                raise
+            except Exception as e:
+                raise ScriptRuntimeError(f"{func.attr}(...): {e}")
+
+        raise ScriptRuntimeError("only simple function calls are allowed (e.g. len(x))")
 
 
-# module-level singleton for convenience
-_evaluator = ExpressionEvaluator()
+def evaluate(expr: str, variables: Dict[str, Any], extra: Optional[Dict[str, Any]] = None) -> Any:
+    """Evaluate a declarative expression (whitelisted subset of Python).
 
-
-def evaluate(expr: str, variables: Dict[str, Any]) -> Any:
-    """Evaluate a declarative expression (whitelisted subset of Python)."""
-    return _evaluator.evaluate(expr, variables)
+    ``extra`` optionally injects objects (``renpy``/``store``) whose
+    attributes may be read (trusted full tier).
+    """
+    return ExpressionEvaluator(extra).evaluate(expr, variables)

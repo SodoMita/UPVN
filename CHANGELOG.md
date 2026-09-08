@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.6.0 — 2026-09-08 Three language tiers over one IR (M16)
+- **Tier 1 — `.urpy` fully declarative** (`engine/script/urpy_parser.py`): zero embedded Python (`$`/`define`/`default`/`python:`/`init` rejected with hints), typed `state:` block, `character` blocks, `image`/`audio`/`stage` manifest, `set` + `choice` keywords, **required explicit `end`** for every block. Example `examples/13_urpy_tier`.
+- **Tier 2 — `.rpy` safe subset** (unchanged default): now rejects full-tier constructs (`python:`/`init`/`while`/`break`/`continue`/`pass`/`window`/`nvl`/`voice`/`queue`/screens/`jump expression`/`call args`/label params/`transform`/`style`/`translate`/non-Character `define`) with a `parse with mode='full'` hint.
+- **Tier 3 — `.rpy` full / drop-in Ren'Py** (`Parser(full=True)`, `parse_string_full`, `VNController(mode='full')`, `tools/*.py --mode full`): `python:` blocks, `init python:`/`init:`/`init offset = N`, `$` one-liners, `while`/`break`/`continue`/`pass`, `label name(params):` + `call label(args)`, `jump/call expression`, conditional menu choices (`"Text" if cond:`), `window`/`nvl`/`voice`/`queue music|sound`, `show/hide/call screen`, `screen`/`style`/`transform`/`translate` blocks (captured). Example `examples/12_full_rpy_tier`.
+- **`renpy` compat namespace** (`engine/script/renpy_compat.py`): `renpy.jump`/`call`/`quit`, `loadable`, `has_label`, `get_playing`, `random.*`, `store.*` — a small allowlist object usable inside `python:` blocks and `if` conditions (no real import, dunder access blocked).
+- **Interpreter**: executes python/init blocks (results synced back to JSON-safe state), binds/restores label params, splices `while` bodies per-iteration with loop-id tail markers for `break`/`continue`, computes `jump/call expression` targets, filters false conditional menu choices.
+- **Expression sandbox**: container subscripts now allowed (`items[0]`, `flags["x"]`); attribute access allowed only on injected `renpy`/`store` objects (`renpy.loadable(...)`) — escape payloads stay closed.
+- All three tiers produce the same IR; `tests/test_full_rpy.py` (27 tests); **99 passed, 2 skipped**.
+
 ## 0.5.0 — 2026-09-08 Declarative script language (M15)
 - **Declarative `.rpy` forms** (canonical), with legacy Ren'Py-like forms kept as aliases:
   - `state:` block — typed variable declarations (`affection: int = 0`); types `int/float/str/bool/list`, recorded in `VNState.declared_types`
