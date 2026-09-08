@@ -1,6 +1,20 @@
-# Script Language Spec — UPVN `.rpy` subset (Tier 1-2)
+# Script Language Spec — UPVN script language (three tiers, one IR)
 
-**.rpy is parsed directly** — no YAML/JSON is the source. This mirrors Ren'Py's own `renpy/lexer.py` + `renpy/parser.py` → `renpy.ast`. Our `engine/script/lexer.py` + `parser.py` are a 500-line subset with friendlier errors.
+**.rpy is parsed directly** — no YAML/JSON is the source. This mirrors Ren'Py's own `renpy/lexer.py` + `renpy/parser.py` → `renpy.ast`. Our `engine/script/lexer.py` + `parser.py` are a subset with friendlier errors.
+
+## Three language tiers (one internal IR)
+
+All three compile to the **same IR** (`{"labels", "characters", "defaults", "types", "assets", …}`), so the interpreter and the whole engine treat them identically.
+
+| Tier | File | Parser | Embedded Python | Use |
+|------|------|--------|-----------------|-----|
+| 1 — `.urpy` declarative | `.urpy` | `engine/script/urpy_parser.py` | **none** (no `$`, `define`, `default`, `python:`/`init`) | strict, analyzable, editor-authored |
+| 2 — `.rpy` safe subset | `.rpy` | `parser.parse(mode='safe')` (default) | none — full-tier constructs are rejected with guidance | declarative Ren'Py-like scripts |
+| 3 — `.rpy` full | `.rpy` | `parser.parse(mode='full')` / `parse_string_full` | **yes** — `python:`/`init`, `while`, `$`, `renpy.*` compat | drop-in Ren'Py replacement |
+
+Tier 3 additionally populates `label_params`, `defines`, `init_python`, `transforms`, `screens`, `styles`, `translations`, and sets `"full": true` in the IR. Tier 1 sets `"language": "urpy"`.
+
+`VNController(script_path, mode="safe"|"full")`; `tools/run_headless.py` / `tools/validate.py` accept `--mode safe|full`. `.urpy` files are auto-dispatched by extension.
 
 ## Files & encoding
 
@@ -193,10 +207,37 @@ label bad:
 
 ## What is NOT allowed (and errors)
 
-- `python:` / `init python` / `init:` blocks → `ParseError: expected "label", "define" or "default"...` + hint `extension code lives in .py plugins`
-- `image` declarations, `transform`, `screen` → postponed; will be `unknown statement` with `check spelling`
+In **tiers 1–2** (`.urpy` and `.rpy` safe):
+
+- `python:` / `init python` / `init:` blocks → `ParseError` + hint `parse with mode='full'`
+- `while`/`break`/`continue`/`pass`, `window`, `nvl`, `voice`, `queue`, `jump/call expression`, `call label(args)`, label parameters, `show/hide/call screen`, arbitrary `define`, `transform`, `screen`, `style`, `translate` → same guidance
+- In `.urpy`, additionally: `$`, `define`, `default` are rejected with targeted hints (`use set`, `use a character block`, `declare in a state: block`), and every block requires an explicit `end`.
+
+Always (all tiers):
+
 - YAML/JSON scripts → not a `.rpy`. We don't read YAML as story source (answers your question). Internal AST *is* JSON-serialisable (`{"cmd":"say",...}`) for caching/tracing, but that's build artifact, not author file.
 - Orphan `.rpyc`/cache execution → never. We hash source (`VNState.script_hash`) and re-parse.
+
+## Full `.rpy` tier (drop-in Ren'Py)
+
+With `mode='full'` the parser accepts the Ren'Py constructs above and passes them to
+the interpreter:
+
+- `python:` blocks — executed with the variables dict, `renpy`, `store`, and `define`s in scope; results are copied back into the saveable state (only JSON-friendly values).
+- `init python:` / `init:` / `init offset = N` — run once before the first label.
+- `$ expr` — one-line Python (plain assignments still become `assign` nodes).
+- `while cond:` / `break` / `continue` / `pass` — full control flow.
+- `label name(params):` + `call label(args)` — parameters bound into variables (defaults supported); restored on `return`.
+- `jump expression expr` / `call expression expr` — computed targets.
+- `menu:` choices with `"Text" if cond:` — conditions evaluated; false choices are hidden.
+- `window show|hide|auto`, `nvl clear|show|hide`, `nvl mode nvl|adv`, `voice "…"`, `queue music|sound …`.
+- `show screen x` / `hide screen x` / `call screen x` + `screen:` / `style:` / `transform:` / `translate:` blocks (captured into `screens`/`styles`/`transforms`/`translations` for the editor-built UI layer).
+- `renpy.*` compat namespace (`engine/script/renpy_compat.py`): `renpy.jump`/`call`/`quit`, `renpy.loadable`, `renpy.has_label`, `renpy.get_playing`, `renpy.random.*`, `renpy.store.*` — a small allowlist object, not a real import (dunder attributes blocked).
+
+The **expression sandbox** still applies to story expressions, but in full mode attribute
+access is permitted *only* on the injected `renpy`/`store` objects (never `_`-prefixed,
+never on arbitrary values) — so `renpy.loadable("…")` works while
+`().__class__.__mro__…` escapes stay closed.
 
 ## Diagnostics (LLM-friendly)
 

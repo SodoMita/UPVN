@@ -16,8 +16,12 @@ which emits a trace list like:
 This makes agent verification possible with pytest alone (80% of engine
 is verifiable without rendering).
 
-Safety: assignment expressions are evaluated in a restricted environment
-(no imports, no file I/O). Only variables dict is exposed.
+Tiers:
+  - .urpy / .rpy safe subset: expressions go through the AST whitelist
+    (expr_eval.py). No embedded Python is executed.
+  - .rpy full tier (drop-in Ren'Py): `python:` blocks, `init python`,
+    `while`/`break`/`continue`, `renpy.*` compat and label parameters are
+    executed — this tier trusts the author, exactly like Ren'Py does.
 """
 from __future__ import annotations
 import re
@@ -29,15 +33,15 @@ from .vn_errors import ScriptRuntimeError, LabelNotFoundError
 
 
 # ------------------------------------------------------------------ safe eval
-def safe_eval(expr: str, variables: dict):
+def safe_eval(expr: str, variables: dict, extra: Optional[dict] = None):
     """
-    Evaluate a Python expression with only variables + safe builtins.
-    No attribute access, no subscripts, no comprehensions, no imports,
-    no open, no exec — enforced by an AST whitelist (see expr_eval.py).
+    Evaluate an expression with only variables + safe builtins.
+    No attribute access (except injected objects), no comprehensions, no
+    imports, no open, no exec — enforced by an AST whitelist (expr_eval.py).
     """
     from ..script.expr_eval import evaluate
     try:
-        return evaluate(expr, variables)
+        return evaluate(expr, variables, extra)
     except ScriptRuntimeError as e:
         raise ScriptRuntimeError(f"expression error: {expr!r} -> {e}")
 
@@ -66,8 +70,9 @@ def _coerce_declared(target: str, value, type_name: str):
     return out
 
 
-def safe_exec_assign(target: str, op: str, expr: str, variables: dict, declared_types: dict | None = None):
-    val = safe_eval(expr, variables)
+def safe_exec_assign(target: str, op: str, expr: str, variables: dict,
+                     declared_types: dict | None = None, extra: Optional[dict] = None):
+    val = safe_eval(expr, variables, extra)
     old = variables.get(target, 0 if op in ("+=", "-=", "*=", "/=") else None)
     if op == "=":
         new = val
@@ -84,6 +89,17 @@ def safe_exec_assign(target: str, op: str, expr: str, variables: dict, declared_
     if declared_types and target in declared_types:
         new = _coerce_declared(target, new, declared_types[target])
     variables[target] = new
+
+
+def _is_state_value(v) -> bool:
+    """True if a value is JSON-save-friendly (so python blocks don't leak objects)."""
+    if v is None or isinstance(v, (bool, int, float, str)):
+        return True
+    if isinstance(v, (list, tuple, set)):
+        return all(_is_state_value(x) for x in v)
+    if isinstance(v, dict):
+        return all(_is_state_value(k) and _is_state_value(x) for k, x in v.items())
+    return False
 
 
 # ------------------------------------------------------------------ text substitution
@@ -117,14 +133,15 @@ class VNInterpreter:
     For headless testing, use `run_headless(choices=[0,1,...])` which auto-picks menu choices.
     """
 
-    def __init__(self, script: dict, state: Optional[VNState] = None):
-        # script is parser output: {"labels": {...}, "characters": {...}, "defaults": {...}}
+    def __init__(self, script: dict, state: Optional[VNState] = None, base_dir: Optional[str] = None):
+        # script is parser output: {"labels": {...}, "characters": {...}, "defaults": {...}, ...}
         self.script = script
-        # Deep-copy labels so splicing (menu/if) doesn't mutate the original
+        # Deep-copy labels so splicing (menu/if/while) doesn't mutate the original
         # script dict — allows reusing the same parsed dict across tests.
         import copy as _copy
         self.labels: Dict[str, List[dict]] = _copy.deepcopy(script.get("labels", {}))
         self.state = state or VNState()
+        self.base_dir = base_dir
         # initialise defaults + character defs from script if state empty
         if not self.state.variables and script.get("defaults"):
             self.state.variables.update(copy.deepcopy(script["defaults"]))
@@ -139,8 +156,24 @@ class VNInterpreter:
                 if kind in script["assets"]:
                     self.state.assets.setdefault(kind, {}).update(copy.deepcopy(script["assets"][kind]))
 
+        # full-tier metadata
+        self.full: bool = bool(script.get("full"))
+        self.defines: Dict[str, Any] = copy.deepcopy(script.get("defines", {}))
+        self.label_params: Dict[str, List[dict]] = copy.deepcopy(script.get("label_params", {}))
+        self.transforms: Dict[str, dict] = copy.deepcopy(script.get("transforms", {}))
+        self.screens: Dict[str, dict] = copy.deepcopy(script.get("screens", {}))
+        self.styles: Dict[str, dict] = copy.deepcopy(script.get("styles", {}))
+        self.translations: Dict[str, dict] = copy.deepcopy(script.get("translations", {}))
+
+        # renpy compatibility namespace (full tier only)
+        from ..script.renpy_compat import RenpyRuntime, RenpyCompat
+        self._renpy_runtime = RenpyRuntime(self)
+        self._expr_extra = {"renpy": RenpyCompat(self._renpy_runtime, base_dir=base_dir)}
+
         # execution pointer stack for call/return
-        self._call_stack: List[Tuple[str, int]] = []  # (label, next_index)
+        # each entry: (label, next_index, param_saves) where param_saves is
+        # a list of (name, existed_before, old_value) to restore on return.
+        self._call_stack: List[Tuple[str, int, Optional[list]]] = []
         # history for rollback-lite (snapshots at interactions)
         self.rollback_stack: List[dict] = []
         self.rollback_labels_stack: List[Dict[str, List[dict]]] = []  # parallel for label splices (M08)
@@ -149,6 +182,73 @@ class VNInterpreter:
         # internal generator
         self._gen: Optional[Generator] = None
         self._pending_menu: Optional[dict] = None  # last menu event awaiting choice
+
+        # init-time python (full tier): executes before the first label
+        if self.full and script.get("init_python"):
+            self._run_init_python(script["init_python"])
+
+    # ------------------------ init-time python (full tier)
+    def _run_init_python(self, code_lines: List[str]):
+        env = self._python_env()
+        for line in code_lines:
+            try:
+                exec(line, env)
+            except Exception as e:
+                raise ScriptRuntimeError(f"init python error: {e}")
+        self._sync_variables(env)
+
+    def _python_env(self) -> dict:
+        import builtins
+        from ..script.renpy_compat import StoreWrapper
+        env: dict = {"__builtins__": builtins.__dict__}
+        env.update(self.defines)
+        env.update(self.state.variables)
+        env["renpy"] = self._expr_extra["renpy"]
+        env["store"] = StoreWrapper(self.state.variables)
+        return env
+
+    def _sync_variables(self, env: dict):
+        """Copy python-block results back into the saveable variables dict."""
+        skip = {"__builtins__", "renpy", "store"}
+        skip.update(self.defines.keys())
+        before = set(self.state.variables.keys())
+        for k, v in env.items():
+            if k.startswith("_") or k in skip:
+                continue
+            if k in before or _is_state_value(v):
+                self.state.variables[k] = v
+
+    def _eval_expr(self, expr: str):
+        extra = self._expr_extra if self.full else None
+        return safe_eval(expr, self.state.variables, extra)
+
+    # ------------------------ label parameter binding (full tier)
+    def _bind_label_params(self, label: str, provided: dict) -> Optional[list]:
+        """Bind label parameters into variables. Returns undo info (or None)."""
+        params = self.label_params.get(label)
+        if not params:
+            return None
+        saves = []
+        for p in params:
+            name = p["name"]
+            if name in provided:
+                value = provided[name]
+            elif p.get("default") is not None:
+                value = self._eval_expr(p["default"])
+            else:
+                value = None
+            saves.append((name, name in self.state.variables, self.state.variables.get(name)))
+            self.state.variables[name] = value
+        return saves
+
+    def _restore_params(self, saves: Optional[list]):
+        if not saves:
+            return
+        for name, existed, old in reversed(saves):
+            if existed:
+                self.state.variables[name] = old
+            else:
+                self.state.variables.pop(name, None)
 
     # ------------------------ headless helpers
     def run_headless(self, choices: Optional[List[int]] = None, max_steps: int = 10000) -> List[dict]:
@@ -178,7 +278,7 @@ class VNInterpreter:
                                                  self.state.current_label, self.state.instruction_index)
                     event = gen.send(pick)
                 elif event.get("wait"):
-                    # say / pause etc. — auto-advance
+                    # say / pause / call_screen etc. — auto-advance
                     event = gen.send(None)
                 else:
                     event = next(gen)
@@ -207,10 +307,10 @@ class VNInterpreter:
 
             idx = self.state.instruction_index
             if idx >= len(block):
-                # fallthrough: if at end of label without return, try implicit next label? Ren'Py falls through sequentially.
-                # For simplicity, we treat reaching end as return (pop call stack or finish).
+                # fallthrough: reaching end of label = return (pop call stack or finish)
                 if self._call_stack:
-                    ret_label, ret_idx = self._call_stack.pop()
+                    ret_label, ret_idx, saves = self._call_stack.pop()
+                    self._restore_params(saves)
                     self.state.current_label = ret_label
                     self.state.instruction_index = ret_idx
                     continue
@@ -240,7 +340,6 @@ class VNInterpreter:
                 raw = event.get("raw", event.get("text", ""))
                 text = event.get("text", "")  # interpolated, still with tags
                 display = event.get("display_text", text)
-                # also compute stripped version for accessibility
                 stripped = strip_tags(text)
                 self.state.history.append({
                     "who": event.get("who"),
@@ -259,22 +358,18 @@ class VNInterpreter:
 
             self.trace.append(event)
 
-            # Jumps / calls / returns have already mutated state inside _execute_node
-            # They should NOT auto-increment; just yield and continue
-            if event.get("type") in ("jump", "call"):
+            # Jumps / calls / returns / break / continue have already mutated
+            # state inside _execute_node — do NOT auto-increment.
+            if event.get("type") in ("jump", "call", "break", "continue"):
                 yield event
-                # don't increment — state already points to next location
                 continue
             if event.get("type") == "return":
                 yield event
                 if event.get("to") is None:
-                    # top-level return — terminate (next loop would infinite-loop otherwise)
-                    # advance pointer beyond block to trigger end handling
+                    # top-level return — terminate
                     label_block = self.labels.get(label, [])
                     self.state.instruction_index = len(label_block)
-                    # next iteration will yield end
                     continue
-                # called return already popped stack and set pointer
                 continue
 
             if event.get("wait"):
@@ -294,7 +389,7 @@ class VNInterpreter:
                         self.state.instruction_index = resume_index
                     continue
                 else:
-                    # say / pause etc.
+                    # say / pause / call_screen etc.
                     self.state.instruction_index += 1
                     continue
             else:
@@ -313,10 +408,8 @@ class VNInterpreter:
             text_raw = node.get("text", "")
             # interpolation [var]
             text = interpolate(text_raw, self.state.variables)
-            # tags handling — keep raw for display, stripped for accessible
             display = text  # keep tags for frontend to render rich text
             who_name = self.state.get_character_name(who) if who else None
-            # color for dialogue box? from character def
             color = None
             if who and who in self.state.characters:
                 color = self.state.characters[who].color
@@ -335,7 +428,6 @@ class VNInterpreter:
         elif cmd == "scene":
             asset = node.get("asset")
             trans = node.get("transition")
-            # handle `scene black` etc.
             self.state.scene.background = asset
             self.state.scene.transition = trans
             self.state.shown_actors.clear()  # scene clears actors like Ren'Py
@@ -347,16 +439,13 @@ class VNInterpreter:
             pos = node.get("position") or "center"
             trans = node.get("transition")
             # M10 ATL-lite: move/ease transitions interpolate rather than snap
-            move_easings = {"move","ease","easein","easeout","easeinout","linear"}
+            move_easings = {"move", "ease", "easein", "easeout", "easeinout", "linear"}
             from .vn_state import ShownActor
             import time as _t
             if trans in move_easings:
-                # need previous position for this tag
                 prev = self.state.shown_actors.get(tag)
                 from_pos = prev.position if prev else pos
-                # duration default 0.5, easing = trans unless move->ease
                 ease = trans if trans != "move" else "ease"
-                # create actor with move state, but keep position as target for final, and store from/to for interpolation
                 actor = ShownActor(tag=tag, asset=asset, position=pos, transition=trans,
                                    move_from=from_pos, move_to=pos, move_t0=_t.time(),
                                    move_duration=0.5, move_easing=ease)
@@ -364,8 +453,6 @@ class VNInterpreter:
                 return {"type": "show", "asset": asset, "tag": tag, "position": pos, "transition": trans,
                         "from_pos": from_pos, "to_pos": pos, "duration": 0.5, "easing": ease, "wait": False, "_loc": loc}
             else:
-                # expression replacement: if same tag already shown, replace asset
-                from .vn_state import ShownActor
                 self.state.shown_actors[tag] = ShownActor(tag=tag, asset=asset, position=pos, transition=trans)
                 return {"type": "show", "asset": asset, "tag": tag, "position": pos, "transition": trans, "wait": False, "_loc": loc}
 
@@ -377,7 +464,6 @@ class VNInterpreter:
 
         elif cmd == "with":
             trans = node.get("transition")
-            # standalone with — frontend applies transition to last scene/show
             return {"type": "with", "transition": trans, "wait": False, "_loc": loc}
 
         elif cmd == "play_music":
@@ -401,28 +487,39 @@ class VNInterpreter:
 
         elif cmd == "jump":
             label = node.get("label")
+            if label is None and node.get("expr"):
+                label = str(self._eval_expr(node["expr"]))
             if label not in self.labels:
                 raise LabelNotFoundError(f'jump target "{label}" does not exist', self.state.current_label, self.state.instruction_index)
+            self._bind_label_params(label, {})
             self.state.current_label = label
             self.state.instruction_index = 0
-            # jump is non-wait but we need to avoid auto-increment; signal via special event then caller will not increment
-            # We'll return an event and let run() handle pointer reset; indicate jumped
-            # Return a trace event for testing goldens
             return {"type": "jump", "label": label, "wait": False, "_loc": loc}
 
         elif cmd == "call":
             label = node.get("label")
+            if label is None and node.get("expr"):
+                label = str(self._eval_expr(node["expr"]))
             if label not in self.labels:
                 raise LabelNotFoundError(f'call target "{label}" does not exist', self.state.current_label, self.state.instruction_index)
-            # push return address
-            self._call_stack.append((self.state.current_label, self.state.instruction_index + 1))
+            provided: dict = {}
+            args = node.get("args")
+            if args:
+                params = self.label_params.get(label, [])
+                for i, arg_expr in enumerate(args):
+                    if i < len(params):
+                        provided[params[i]["name"]] = self._eval_expr(arg_expr)
+            saves = self._bind_label_params(label, provided)
+            # push return address + param undo info
+            self._call_stack.append((self.state.current_label, self.state.instruction_index + 1, saves))
             self.state.current_label = label
             self.state.instruction_index = 0
             return {"type": "call", "label": label, "wait": False, "_loc": loc}
 
         elif cmd == "return":
             if self._call_stack:
-                ret_label, ret_idx = self._call_stack.pop()
+                ret_label, ret_idx, saves = self._call_stack.pop()
+                self._restore_params(saves)
                 self.state.current_label = ret_label
                 self.state.instruction_index = ret_idx
                 return {"type": "return", "to": ret_label, "wait": False, "_loc": loc}
@@ -432,7 +529,8 @@ class VNInterpreter:
 
         elif cmd == "assign":
             target, op, expr = node.get("target"), node.get("op"), node.get("expr")
-            safe_exec_assign(target, op, expr, self.state.variables, self.state.declared_types)
+            safe_exec_assign(target, op, expr, self.state.variables, self.state.declared_types,
+                             self._expr_extra if self.full else None)
             return {"type": "assign", "target": target, "op": op, "expr": expr, "value": self.state.variables[target], "wait": False, "_loc": loc}
 
         elif cmd == "if":
@@ -443,41 +541,125 @@ class VNInterpreter:
                 if cond is None:
                     chosen = br  # else
                     break
-                if safe_eval(cond, self.state.variables):
+                if self._eval_expr(cond):
                     chosen = br
                     break
             if chosen is None:
                 return None  # no branch taken -> just advance
-            # Execute chosen block inline similar to menu. Need to handle jumps inside.
-            # If block contains only simple statements without jump, we can splice execution by executing them now and reporting events.
-            # For golden traces, we need each inner statement to emit its own event. So we cannot just skip.
-            # Instead, we handle `if` by *expanding* block: push remaining instructions + chosen block into a temporary queue.
-            # Simpler for Tier1: we handle `if` by manually stepping chosen block via _execute_choice_block logic but without menu resume.
-            # We'll create a synthetic label to hold remaining instructions after if, then jump into block.
-            # Easiest: execute first instruction of block as next pointer trick — but block may have multiple nodes.
-            # We'll instead inject block nodes into current label's list temporarily (insert after current idx) and continue.
-            # This is a bit hacky but works for headless.
             label = self.state.current_label
             block_list = self.labels[label]
             idx = self.state.instruction_index
             insert_pos = idx + 1
-            # Insert chosen block nodes at insert_pos
-            # Mark them so we don't re-enter same if
             for n in reversed(chosen.get("block", [])):
                 block_list.insert(insert_pos, n)
             return None  # let loop advance to first inserted node
 
         elif cmd == "menu":
-            # Yield menu event, wait for choice. Filtering of conditional choices not yet implemented (Tier3)
-            # caption is optional
             caption = node.get("caption")
+            # filter conditional choices ("Text" if cond:)
+            kept = []
+            for c in node.get("choices", []):
+                cond = c.get("cond")
+                if cond is not None and not self._eval_expr(cond):
+                    continue
+                kept.append(c)
             # stable per-event choice ids so editor-built UI can bind hover/click
             # (object "choice_0" -> controller.choose(0), etc.)
             choices = [
                 {"text": c["text"], "block": c.get("block", []), "id": i}
-                for i, c in enumerate(node.get("choices", []))
+                for i, c in enumerate(kept)
             ]
             return {"type": "menu", "caption": caption, "choices": choices, "wait": True, "_loc": loc}
+
+        # ---- full-tier flow constructs
+        elif cmd == "python":
+            code = node.get("code", "")
+            env = self._python_env()
+            try:
+                exec(code, env)
+            except ScriptRuntimeError:
+                raise
+            except Exception as e:
+                raise ScriptRuntimeError(f"python block error: {e}", self.state.current_label, self.state.instruction_index)
+            self._sync_variables(env)
+            # honor renpy.jump / renpy.call / renpy.quit from the block
+            if self._renpy_runtime.jump_to:
+                target = self._renpy_runtime.jump_to
+                self._renpy_runtime.reset()
+                if target not in self.labels:
+                    raise LabelNotFoundError(f'renpy.jump target "{target}" does not exist', self.state.current_label, self.state.instruction_index)
+                self._bind_label_params(target, {})
+                self.state.current_label = target
+                self.state.instruction_index = 0
+                return {"type": "jump", "label": target, "wait": False, "_loc": loc}
+            if self._renpy_runtime.call_to:
+                target = self._renpy_runtime.call_to
+                self._renpy_runtime.reset()
+                if target not in self.labels:
+                    raise LabelNotFoundError(f'renpy.call target "{target}" does not exist', self.state.current_label, self.state.instruction_index)
+                saves = self._bind_label_params(target, {})
+                self._call_stack.append((self.state.current_label, self.state.instruction_index + 1, saves))
+                self.state.current_label = target
+                self.state.instruction_index = 0
+                return {"type": "call", "label": target, "wait": False, "_loc": loc}
+            if self._renpy_runtime.quit_requested:
+                self._renpy_runtime.reset()
+                return {"type": "return", "to": None, "wait": False, "_loc": loc}
+            return None
+
+        elif cmd == "while":
+            cond = node.get("cond")
+            loop_id = node.get("loop_id")
+            if self._eval_expr(cond):
+                label = self.state.current_label
+                block_list = self.labels[label]
+                idx = self.state.instruction_index
+                insert_pos = idx + 1
+                tail = {"cmd": "while", "cond": cond, "block": node.get("block", []),
+                        "loop_id": loop_id, "_tail": True}
+                for n in reversed(list(node.get("block", [])) + [tail]):
+                    block_list.insert(insert_pos, n)
+            return None  # advance into spliced block, or past the while node
+
+        elif cmd == "pass":
+            return None
+
+        elif cmd == "break":
+            loop_id = node.get("loop_id")
+            t = self._find_loop_tail(loop_id)
+            if t is None:
+                raise ScriptRuntimeError("break outside while loop", self.state.current_label, self.state.instruction_index)
+            self.state.instruction_index = t + 1
+            return {"type": "break", "wait": False, "_loc": loc}
+
+        elif cmd == "continue":
+            loop_id = node.get("loop_id")
+            t = self._find_loop_tail(loop_id)
+            if t is None:
+                raise ScriptRuntimeError("continue outside while loop", self.state.current_label, self.state.instruction_index)
+            self.state.instruction_index = t
+            return {"type": "continue", "wait": False, "_loc": loc}
+
+        elif cmd == "window":
+            self.state.window = node.get("value", "auto")
+            return {"type": "window", "value": self.state.window, "wait": False, "_loc": loc}
+
+        elif cmd == "nvl":
+            self.state.nvl = node.get("action")
+            return {"type": "nvl", "action": self.state.nvl, "wait": False, "_loc": loc}
+
+        elif cmd == "nvl_mode":
+            self.state.nvl_mode = node.get("mode", "adv")
+            return {"type": "nvl_mode", "mode": self.state.nvl_mode, "wait": False, "_loc": loc}
+
+        elif cmd == "call_screen":
+            return {"type": "call_screen", "screen": node.get("screen"), "wait": True, "_loc": loc}
+
+        elif cmd == "show_screen":
+            return {"type": "show_screen", "screen": node.get("screen"), "wait": False, "_loc": loc}
+
+        elif cmd == "hide_screen":
+            return {"type": "hide_screen", "screen": node.get("screen"), "wait": False, "_loc": loc}
 
         # 3D stubs — record state, yield event for frontend
         elif cmd == "load_stage":
@@ -500,11 +682,9 @@ class VNInterpreter:
             zoom = node.get("zoom")
             dur = node.get("duration", 1.0)
             ease = node.get("easing", "ease")
-            # M10: store zoom interpolation in state.camera
             prev = self.state.camera.get("zoom", 1.0)
             import time as _t
             self.state.camera["zoom"] = zoom
-            # need interpolation state: keep start/target/duration/easing/t0
             self.state.camera["_zoom_from"] = prev
             self.state.camera["_zoom_to"] = zoom
             self.state.camera["_zoom_dur"] = dur
@@ -514,6 +694,15 @@ class VNInterpreter:
 
         else:
             raise ScriptRuntimeError(f"unknown command {cmd!r}", self.state.current_label, self.state.instruction_index)
+
+    def _find_loop_tail(self, loop_id) -> Optional[int]:
+        """Find the spliced tail marker of the innermost matching while loop."""
+        block = self.labels.get(self.state.current_label, [])
+        for i in range(self.state.instruction_index, len(block)):
+            n = block[i]
+            if n.get("cmd") == "while" and n.get("_tail") and n.get("loop_id") == loop_id:
+                return i
+        return None
 
     def _execute_choice_block(self, block: List[dict], resume_label: str, resume_index: int) -> bool:
         """
@@ -528,17 +717,10 @@ class VNInterpreter:
         if not block:
             return False
 
-        # Insert block nodes directly after the menu node.
-        # resume_index is idx+1; after insertion the block occupies
-        # [resume_index, resume_index+len(block)-1] and the original
-        # resume node (if any) is shifted beyond it.
         label_block = self.labels[resume_label]
-        # Defensive: ensure label_block is still the same list object
-        # and idx hasn't shifted since we read it.
         for n in reversed(block):
             label_block.insert(resume_index, n)
 
-        # Point execution to first inserted node
         self.state.current_label = resume_label
         self.state.instruction_index = resume_index
         return True

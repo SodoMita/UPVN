@@ -40,8 +40,9 @@ def test_good_scripts_still_parse():
         # skip gallery (they are bad)
         if "11_syntax" in str(good):
             continue
-        # should not raise
-        d = parse_file(str(good))
+        # full-tier example parses in mode='full'; everything else in safe mode
+        mode = "full" if "12_full" in str(good) else "safe"
+        d = parse_file(str(good), mode=mode)
         assert "start" in d["labels"]
 
 def test_validate_tool():
