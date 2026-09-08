@@ -101,7 +101,11 @@ def test_m17_frontend_script_path_resolution():
     assert fe.ensure_engine_syspath() is True
 
 
-def test_m17_package_addon_zip_selfcontained():
+def test_m17_package_addon_zip_single_folder():
+    """v0.6.2 zip layout: ONE top-level folder (Blender extracts it on install).
+    Simulates the install by extracting into a fake add-ons dir and importing
+    from there — engine must be discovered right next to the add-on. Also checks
+    that a compressed zip WITHOUT extraction yields a helpful message, not a crash."""
     sys.path.insert(0, str(ROOT))
     import tools.package_addon as pkg
 
@@ -109,15 +113,23 @@ def test_m17_package_addon_zip_selfcontained():
         zpath = pkg.build_addon_zip(Path(td), with_template=False)
         assert zpath.exists()
         names = set(zipfile.ZipFile(zpath).namelist())
-        # layout: add-on folder + zip-root engine duplicate
+        # single-folder layout: no zip-root engine/bge_frontend pollution
         assert "upvn_editor_addon/__init__.py" in names
         assert "upvn_editor_addon/engine/script/parser.py" in names
-        assert "engine/script/parser.py" in names
+        assert "upvn_editor_addon/bge_frontend/frontend.py" in names
         assert "upvn_editor_addon/README-INSTALL.txt" in names
+        assert "engine/script/parser.py" not in names          # no zip-root dup
+        assert "bge_frontend/frontend.py" not in names
         assert not any(n.endswith(".pyc") for n in names)
-        assert "upvn_editor_addon_v0.6.0.zip" in zpath.name
+        assert "upvn_editor_addon_v0.6.2.zip" in zpath.name
 
-        # clean-subprocess proof: import add-on + engine straight from the zip
+        # simulate Blender's UI install: extract into a fake addons dir
+        addons_dir = Path(td) / "addons"
+        addons_dir.mkdir()
+        with zipfile.ZipFile(zpath) as zf:
+            zf.extractall(addons_dir)
+
+        # clean-subprocess proof: import the add-on from the extracted dir
         code = (
             "import sys, tempfile, os\n"
             "sys.path.insert(0, %r)\n"
@@ -131,11 +143,26 @@ def test_m17_package_addon_zip_selfcontained():
             "ok, msg = b.validate()\n"
             "assert ok, msg\n"
             "print('ZIP_ADDON_OK')\n"
-        ) % str(zpath)
+        ) % str(addons_dir)
         env = {"PATH": os.environ.get("PATH", ""), "HOME": str(Path.home())}
         r = subprocess.run([PY, "-c", code], capture_output=True, text=True, env=env, cwd=td)
         assert r.returncode == 0, r.stdout + r.stderr
         assert "ZIP_ADDON_OK" in r.stdout
+
+        # importing straight from the compressed archive (drop-into-addons):
+        # engine is nested, so discovery must fail with a helpful hint, not crash
+        code2 = (
+            "import sys\n"
+            "sys.path.insert(0, %r)\n"
+            "import upvn_editor_addon as addon\n"
+            "assert not addon.ENGINE_AVAILABLE\n"
+            "msg = addon.ENGINE_INFO.get('message', '')\n"
+            "assert 'Install from Disk' in msg, msg\n"
+            "print('ZIP_HINT_OK')\n"
+        ) % str(zpath)
+        r2 = subprocess.run([PY, "-c", code2], capture_output=True, text=True, env=env, cwd=td)
+        assert r2.returncode == 0, r2.stdout + r2.stderr
+        assert "ZIP_HINT_OK" in r2.stdout
 
 
 def test_m17_template_builder_and_make_template_import():

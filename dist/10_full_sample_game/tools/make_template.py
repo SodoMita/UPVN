@@ -205,6 +205,13 @@ def main(out_path: Path | None = None):
         print("[make_template] NOTE: no logic bricks in --background mode (bpy.ops.logic "
               "needs the UPBGE UI). Open the .blend in UPBGE, enable the UPVN add-on and "
               "press 'Setup Scene' once — it adds the Always→Python brick and saves.")
+    # interactive runs (xvfb/UI): quit so the calling shell can proceed
+    if not getattr(bpy.app, "background", True):
+        try:
+            bpy.ops.wm.quit_blender()
+        except Exception:
+            pass
+    return out_path
 
 
 if __name__ == "__main__":
