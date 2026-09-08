@@ -74,3 +74,27 @@ File → Save — that wires and persists the Always → Python brick. (Do not h
 sensors/controllers: the operator is idempotent and much harder to get wrong.)
 
 See also `engine/render/*` for how `scene`/`show` events map to plane textures (`bge.texture`). Arbitrary saves: `engine/save/save_manager.py` (`list_slot_ids`, `next_available_slot`, `slot_exists`) and `engine/ui/screen_manager.py` (pagination, any int slot).
+
+## Scene-object contract (how objects connect to interface code)
+
+UPVN renderers do not store object references in the .blend. At runtime they look
+objects up **by name** in the current scene. The authoritative list lives in
+`engine/render/contract.py`; this table is the human-readable copy:
+
+| Name | Kind | Who uses it | What for |
+|---|---|---|---|
+| `BG_Plane` | object | `SceneManager._swap_bge_texture` | plane receiving the background texture on `scene` events |
+| `MABackground` | material | same | material slot of `BG_Plane` receiving the texture |
+| `Sprite_far_left` … `Sprite_far_right` | objects | `SpriteRenderer._bge_show` | one plane per position (`left/center/right/far_left/far_right`); texture swapped on `show` events |
+| `MASprite` | material | same | material slot of every `Sprite_*` plane |
+| `Dialogue_Box` | object | visual only | decorative panel — **dialogue text is NOT a scene Text object**; it is drawn by the blf overlay in `bge_frontend/frontend.py::draw_overlay()` (the game engine cannot edit Text datablocks at runtime) |
+| `VNController` | object | `frontend.main`, launcher | carries `script_path`, `upvn_root`, `upvn_bricks` properties and the `Always → Python` brick |
+| `upvn_launcher` | text | Python controller (SCRIPT mode) | path-bootstrap script |
+| `VN_Backgrounds` / `VN_Characters` / `VN_UI` / `VN_Effects` / `VN_3DStage` | collections | organisation | layer grouping in the outliner |
+| `//assets/backgrounds/…`, `//assets/sprites/…` | file paths | both renderers | texture files relative to the .blend |
+
+Workflow: press **Setup Scene** once (creates all of the above), then **Check Scene
+Wiring** in the UPVN panel — it compares the open scene against `contract.py` and
+writes a report into the `UPVN_WIRING` text datablock listing any missing item, its
+purpose, and the module that expects it. If you rename an object, the renderer will
+silently skip it — always rename through the contract, not ad hoc.

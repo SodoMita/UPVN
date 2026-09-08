@@ -38,9 +38,9 @@ Expected: all 4 examples + *The Question* parse and trace cleanly. No YAML.
 ## Quickstart (in UPBGE — minimal coding, no .rpy typing)
 
 1. Extract `~/upbge-0.50-linux-x64.tar.xz`
-2. **Install the add-on (v0.6.3+, one file — engine is bundled):**
+2. **Install the add-on (v0.6.4+, one file — engine is bundled):**
    Edit → Preferences → Add-ons → **Install from Disk…** (older UI: Install…) → select
-   `dist/upvn_editor_addon_v0.6.3.zip` (or the raw `blend/upvn_editor_addon.py` when
+   `dist/upvn_editor_addon_v0.6.4.zip` (or the raw `blend/upvn_editor_addon.py` when
    working from the repo) → enable **"UPVN — Visual Novel Editor"**.
    The UPVN tab (3D View or Text Editor sidebar, `N`) shows **✓ Engine: OK** when ready —
    if it ever shows ✗, press *Locate Engine…* / *Re-check* (or *Copy engine next to add-on*).
@@ -49,9 +49,12 @@ Expected: all 4 examples + *The Question* parse and trace cleanly. No YAML.
    immediately. (Older templates without bricks: run **Setup Scene** once from the UPVN tab —
    it is idempotent and safe to repeat.)
 4. **One click wiring (UPBGE only, for your own scenes/projects):** UPVN tab → **Setup Scene** —
-   creates/refreshes cameras, collections, `VNController` object (`script_path`, `upvn_root`),
-   the path-bootstrap `upvn_launcher` text and the `Always (True pulse) → Python` brick.
-   Nothing to wire by hand, pressing it twice is safe.
+   creates/refreshes every object the engine expects **by name** (background plane + material,
+   five `Sprite_*` planes + `MASprite` material, `VNController` object with `script_path`/
+   `upvn_root`, the path-bootstrap `upvn_launcher` text and the `Always (True pulse) → Python`
+   brick). Nothing to wire by hand, pressing it twice is safe. **Check Scene Wiring** then
+   compares the scene against `engine/render/contract.py` and writes a missing-items report to
+   the `UPVN_WIRING` text. The full name↔code table is in `blend/README.md` → "Scene-object contract".
 5. **Create game with clicks (no coding):**
    - `Create UPVN Project` → creates `//game/script.rpy` with starter `define` + `scene` + `say`
    - `Add Character` (ID, Name, Color) → writes `define e = Character("Eileen", color="#c8ffc8")`
@@ -62,7 +65,7 @@ Expected: all 4 examples + *The Question* parse and trace cleanly. No YAML.
 6. The frontend reads **`script_path` from the `VNController` object** — exactly what the
    panel's `project_path` writes — so the game you build is the game that plays
    (legacy `//game/script.rpy`, `//script.rpy`, `//examples/…` are fallbacks).
-7. Press `P` to play. **Controls (v0.6.3):** click / Space / Enter advance; **`1`–`9` pick a menu choice** (in-engine input, no extra wiring); `H` history, `Q` quick menu, `Ctrl+S` save, `Ctrl+L` load (arbitrary slots 1..∞, `←`/`→` page, `Esc` close), `S` skip, `A` auto, mouse wheel rollback, **`F1` console state dump, `F12` in-game screenshot** to `//screenshots/upvn_ingame_*.png` (QA/debug helpers).
+7. Press `P` to play. **Controls (v0.6.4):** click / Space / Enter advance; **`1`–`9` pick a menu choice** (in-engine input, no extra wiring); `H` history, `Q` quick menu, `Ctrl+S` save, `Ctrl+L` load (arbitrary slots 1..∞, `←`/`→` page, `Esc` close), `S` skip, `A` auto, mouse wheel rollback, **`F1` console state dump, `F12` in-game screenshot** to `//screenshots/upvn_ingame_*.png` (QA/debug helpers).
 
 ## Troubleshooting (was: "Engine not available")
 
@@ -72,7 +75,7 @@ button died with a bare **"Engine not available"**. Since v0.6:
 | Symptom | Fix |
 |---|---|
 | ✗ Engine NOT found in the UPVN tab | Install the **zip release** (engine is inside it) or press *Locate Engine…* and point at the folder containing `engine/`; press *Re-check*. |
-| `Warning: add-on missing 'bl_info'` for engine/ + bge_frontend/ | Leftovers of the old v0.6.0 zip layout in your add-ons folder — delete `addons/engine` and `addons/bge_frontend` (v0.6.3 zip is a single folder). |
+| `Warning: add-on missing 'bl_info'` for engine/ + bge_frontend/ | Leftovers of the old v0.6.0 zip layout in your add-ons folder — delete `addons/engine` and `addons/bge_frontend` (v0.6.4 zip is a single folder). |
 | Add-on installed from an old single `.py` | Enable, then in Preferences → Add-ons → UPVN press *Copy engine next to add-on* (or reinstall from the zip). |
 | "no game script found" in the console when pressing P | The `script_path` on `VNController` points nowhere — set panel `project_path`, press `Create Project`, then `Setup Scene` again. |
 | Pressing P shows a frozen viewport-like scene, no dialogue | The template had no logic bricks (old file). In the UPVN tab press **Setup Scene** once and File → Save; the committed `blend/UPVN_Template.blend` already includes the bricks. |

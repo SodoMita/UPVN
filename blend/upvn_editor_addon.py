@@ -1,6 +1,6 @@
 """
 UPVN Blender Editor Tools — create visual novel inside Blender with minimal coding
-v0.6.3 (2026-09-08): self-contained engine discovery — no more "Engine not available"
+v0.6.4 (2026-09-08): self-contained engine discovery — no more "Engine not available"
 
 Why v0.6 exists
     Installing the old add-on copied this single .py into Blender's add-ons folder,
@@ -21,7 +21,7 @@ Why v0.6 exists
 
 Install (two supported ways)
   A. Dist zip (recommended):
-        dist/upvn_editor_addon_v0.6.3.zip  → Edit → Preferences → Add-ons →
+        dist/upvn_editor_addon_v0.6.4.zip  → Edit → Preferences → Add-ons →
            Install from Disk… (or Install…) → select the .zip → enable "UPVN".
      Engine, frontend and template travel inside the zip; nothing else needed.
   B. Repo checkout:
@@ -45,7 +45,7 @@ Headless fallback: when bpy unavailable (CI), the module still imports and expos
 bl_info = {
     "name": "UPVN — Visual Novel Editor",
     "author": "UPVN",
-    "version": (0, 6, 3),
+    "version": (0, 6, 4),
     "blender": (4, 2, 0),
     "location": "View3D > Sidebar > UPVN, Text Editor > Sidebar > UPVN",
     "description": "Create Ren'Py-like visual novel inside UPBGE with minimal coding — self-contained engine, one-click scene setup, characters, scenes, dialogue, menus, arbitrary saves, preview",
@@ -843,17 +843,68 @@ except Exception:
         scene.camera = cam_ui
 
         # placeholder planes (only when missing — don't destroy user art)
-        bg = scene.objects.get("BG_Plane")
+        # names/materials follow engine/render/contract.py (single source)
+        try:
+            from engine.render.contract import (BG_PLANE, BG_MATERIAL,
+                                                SPRITE_MATERIAL, SPRITE_POSITIONS,
+                                                POSITIONS, DIALOGUE_PLANE)
+        except Exception:
+            BG_PLANE, BG_MATERIAL = "BG_Plane", "MABackground"
+            SPRITE_MATERIAL, DIALOGUE_PLANE = "MASprite", "Dialogue_Box"
+            SPRITE_POSITIONS = ("far_left", "left", "center", "right", "far_right")
+            POSITIONS = {p: ({"far_left": -5.0, "left": -3.0, "center": 0.0,
+                              "right": 3.0, "far_right": 5.0}[p], 0, 1.2)
+                         for p in SPRITE_POSITIONS}
+
+        def _ensure_material(_b, name, color):
+            mat = _b.data.materials.get(name)
+            if mat is None:
+                mat = _b.data.materials.new(name)
+                mat.use_nodes = True
+                try:
+                    pr = mat.node_tree.nodes.get("Principled BSDF")
+                    if pr:
+                        pr.inputs["Base Color"].default_value = color
+                except Exception:
+                    pass
+            return mat
+
+        mat_bg = _ensure_material(_b, BG_MATERIAL, (0.06, 0.06, 0.09, 1.0))
+        mat_sprite = _ensure_material(_b, SPRITE_MATERIAL, (0.55, 0.5, 0.7, 1.0))
+
+        def _single_material(ob, mat):
+            """Replace the plane's default material with the contract one so the
+            object exposes exactly one material slot, named per the contract."""
+            try:
+                ob.data.materials.clear()
+            except Exception:
+                pass
+            ob.data.materials.append(mat)
+
+        bg = scene.objects.get(BG_PLANE)
         if bg is None:
-            bg = _data_plane("BG_Plane", size=10.0)
+            bg = _data_plane(BG_PLANE, size=10.0)
+            _single_material(bg, mat_bg)
             scene.collection.objects.link(bg)
             collections["VN_Backgrounds"].objects.link(bg)
-        dlg = scene.objects.get("Dialogue_Box")
+        dlg = scene.objects.get(DIALOGUE_PLANE)
         if dlg is None:
-            dlg = _data_plane("Dialogue_Box", size=8.0, color=(0.05, 0.05, 0.12, 1.0))
+            dlg = _data_plane(DIALOGUE_PLANE, size=8.0, color=(0.05, 0.05, 0.12, 1.0))
             dlg.scale = (8 / 2, 8 / 2 * 0.3, 1)
             scene.collection.objects.link(dlg)
             collections["VN_UI"].objects.link(dlg)
+
+        # sprite planes per position (SpriteRenderer looks these up by name)
+        for pos in SPRITE_POSITIONS:
+            name = f"Sprite_{pos}"
+            if scene.objects.get(name) is not None:
+                continue
+            x, _, z = POSITIONS.get(pos, (0.0, 0, 1.2))
+            sp = _data_plane(name, size=2.2, color=(0.3, 0.28, 0.4, 1.0))
+            sp.location = (x, 0, z)
+            _single_material(sp, mat_sprite)
+            scene.collection.objects.link(sp)
+            collections["VN_Characters"].objects.link(sp)
 
         # VNController empty
         ctrl = _b.data.objects.new("VNController", None)
@@ -979,6 +1030,55 @@ except Exception:
                 self.report({"WARNING"}, f"Brick wiring issue: {bricks} — see console.")
                 print("[UPVN] Setup Scene done, but bricks:", bricks)
             print("[UPVN] Setup Scene done. script_path=", p.project_path)
+            return {"FINISHED"}
+
+    class UPVN_OT_CheckWiring(bpy.types.Operator):
+        bl_idname = "upvn.check_wiring"
+        bl_label = "Check Scene Wiring"
+        bl_description = ("Compare the open scene against the engine's object contract "
+                          "(engine/render/contract.py) and report missing items by name")
+
+        def execute(self, context):
+            ok, _info = ensure_engine(retry=True)
+            if not ok:
+                self.report({"ERROR"}, "Engine not found — " + str(ENGINE_INFO.get("message", ""))[:150])
+                return {"FINISHED"}
+            try:
+                from engine.render.contract import check_contract
+            except Exception as e:
+                self.report({"ERROR"}, f"contract import failed: {e}")
+                return {"FINISHED"}
+            scene = context.scene
+            try:
+                obj_names = {ob.name for ob in scene.objects}
+            except Exception:
+                obj_names = {ob.name for ob in bpy.data.objects}
+            mats = {m.name for m in bpy.data.materials}
+            cols = {c.name for c in bpy.data.collections}
+            txts = {t.name for t in bpy.data.texts}
+            res = check_contract(obj_names, mats, cols, txts)
+            total = len(res["present"]) + len(res["missing"])
+            missing = [it["name"] for it in res["missing"]]
+            lines = [f"UPVN wiring report — {len(res['present'])}/{total} items present"]
+            if missing:
+                lines.append("Missing (run Setup Scene to create):")
+                for it in res["missing"]:
+                    lines.append(f"  - {it['kind']} '{it['name']}': {it['purpose']}")
+                for it in res["missing"]:
+                    lines.append(f"    expected by: {it['used_by']}")
+            else:
+                lines.append("All objects, materials, collections and texts required by the engine are present.")
+            tb = bpy.data.texts.get("UPVN_WIRING")
+            if tb is None:
+                tb = bpy.data.texts.new("UPVN_WIRING")
+            tb.clear()
+            tb.write("\n".join(lines) + "\n")
+            print("[UPVN] " + "\n".join(lines))
+            if missing:
+                self.report({"WARNING"},
+                            f"{len(missing)} item(s) missing: {', '.join(missing[:6])} — report in Text editor > UPVN_WIRING")
+            else:
+                self.report({"INFO"}, "Wiring OK — all scene items required by the engine are present.")
             return {"FINISHED"}
 
     class UPVN_OT_CreateProject(bpy.types.Operator):
@@ -1264,7 +1364,11 @@ except Exception:
             if _has_game_support():
                 box = layout.box()
                 box.label(text="Play in UPBGE — run once per project", icon='PLAY')
-                box.operator("upvn.setup_scene", icon='WINDOW')
+                row = box.row(align=True)
+                row.operator("upvn.setup_scene", icon='WINDOW')
+                row.operator("upvn.check_wiring", icon='VIEWZOOM')
+                box.label(text="Setup Scene creates every object the engine expects by name", icon='INFO')
+                box.label(text="Check Wiring compares the scene with engine/render/contract.py", icon='INFO')
                 box.label(text="Then press P in the 3D Viewport", icon='INFO')
                 layout.separator()
             else:
@@ -1306,6 +1410,7 @@ except Exception:
             row = layout.row(align=True)
             row.operator("upvn.validate", icon='CHECKMARK')
             row.operator("upvn.preview", icon='RENDER_RESULT')
+            row.operator("upvn.check_wiring", icon='VIEWZOOM')
             layout.operator("upvn.save_demo", icon='FILE_TICK')
             layout.prop(props, "arbitrary_slot")
             layout.operator("upvn.preview_arbitrary", icon='IMAGE_REFERENCE')
@@ -1334,7 +1439,7 @@ except Exception:
     classes = (UPVN_SceneProps, UPVN_OT_LocateEngine, UPVN_OT_CheckEngine, UPVN_OT_BundleEngine,
                UPVN_OT_CreateProject, UPVN_OT_AddCharacter, UPVN_OT_AddScene,
                UPVN_OT_AddDialogue, UPVN_OT_AddShow, UPVN_OT_AddMenu, UPVN_OT_AddStage,
-               UPVN_OT_SetupScene, UPVN_OT_Validate,
+               UPVN_OT_SetupScene, UPVN_OT_CheckWiring, UPVN_OT_Validate,
                UPVN_OT_Preview, UPVN_OT_SaveSlotDemo, UPVN_OT_QuickPreviewArbitrary,
                UPVN_PT_MainPanel, UPVN_PT_TextPanel)
 

@@ -20,6 +20,7 @@ except ImportError:
     HAS_BGE = False
 
 from ..core.vn_state import VNState
+from .contract import BG_PLANE, BG_MATERIAL, ASSET_BACKGROUNDS
 import time
 
 BACKGROUND_LAYER = 0
@@ -63,18 +64,20 @@ class SceneManager:
             return
         try:
             scene = bge.logic.getCurrentScene()  # type: ignore
-            plane = scene.objects.get("BG_Plane")
+            plane = scene.objects.get(BG_PLANE)
             if not plane:
                 return
             # Use bge.texture to swap image
             import bge.texture as vt
-            mat_id = vt.materialID(plane, "MABackground")
-            tex_path = bge.logic.expandPath(f"//assets/backgrounds/{asset}.png")
+            mat_id = vt.materialID(plane, BG_MATERIAL)
+            if mat_id < 0:
+                mat_id = 0  # first material slot fallback
+            tex_path = bge.logic.expandPath(f"//{ASSET_BACKGROUNDS}/{asset}.png")
             # fallback to jpg
             import os
             if not os.path.exists(tex_path):
                 for ext in (".jpg", ".png", ".webp"):
-                    alt = bge.logic.expandPath(f"//assets/backgrounds/{asset}{ext}")
+                    alt = bge.logic.expandPath(f"//{ASSET_BACKGROUNDS}/{asset}{ext}")
                     if os.path.exists(alt):
                         tex_path = alt
                         break
