@@ -17,16 +17,9 @@ except ImportError:
     HAS_BGE = False
 
 from ..core.vn_state import VNState
+from .contract import (POSITIONS, SPRITE_MATERIAL, SPRITE_FALLBACK_TAG,
+                       SPRITE_TAG_PREFIX, BG_PLANE, ASSET_SPRITES)
 import time
-
-# UPBGE world positions for ortho camera scale 10 (VN_Cam ortho_scale=10)
-POSITIONS = {
-    "left": (-3.0, 0, 1.2),
-    "center": (0, 0, 1.2),
-    "right": (3.0, 0, 1.2),
-    "far_left": (-5.0, 0, 1.2),
-    "far_right": (5.0, 0, 1.2),
-}
 
 # transition durations (seconds)
 TRANS_DUR = {"dissolve": 0.4, "fade": 0.5, None: 0.0}
@@ -68,13 +61,15 @@ class SpriteRenderer:
         try:
             scene = bge.logic.getCurrentScene()  # type: ignore
             # Choose plane object by position; fallback to generic Sprite_%
-            plane_name = f"Sprite_{position}"  # e.g. Sprite_center
-            plane = scene.objects.get(plane_name) or scene.objects.get(f"Sprite_{tag}") or scene.objects.get("Sprite")
+            plane_name = f"{SPRITE_TAG_PREFIX}{position}"  # e.g. Sprite_center
+            plane = (scene.objects.get(plane_name)
+                     or scene.objects.get(f"{SPRITE_TAG_PREFIX}{tag}")
+                     or scene.objects.get(SPRITE_FALLBACK_TAG))
             if not plane:
                 # create on the fly if template missing (LLM can build UI in python)
                 import bge.logic as logic
                 # duplicate a template plane
-                tmpl = scene.objects.get("BG_Plane")
+                tmpl = scene.objects.get(BG_PLANE)
                 if tmpl:
                     plane = scene.addObject(tmpl, tmpl)
                     plane.name = plane_name
@@ -89,8 +84,8 @@ class SpriteRenderer:
             # asset like "eileen happy" -> file assets/sprites/eileen/happy.png or eileen_happy.png
             # search order
             candidates = [
-                bge.logic.expandPath(f"//assets/sprites/{asset.replace(' ', '/')}.png"),
-                bge.logic.expandPath(f"//assets/sprites/{asset.replace(' ', '_')}.png"),
+                bge.logic.expandPath(f"//{ASSET_SPRITES}/{asset.replace(' ', '/')}.png"),
+                bge.logic.expandPath(f"//{ASSET_SPRITES}/{asset.replace(' ', '_')}.png"),
                 bge.logic.expandPath(f"//assets/characters/{tag}/{asset.split()[-1] if ' ' in asset else 'neutral'}.png"),
             ]
             tex_path = None
@@ -101,7 +96,11 @@ class SpriteRenderer:
             if tex_path:
                 img = vt.ImageFFmpeg(tex_path)
                 img.scale = False
-                mat_id = vt.materialID(plane, "MASprite")
+                mat_id = vt.materialID(plane, SPRITE_MATERIAL)
+                if mat_id < 0:
+                    # fallback plane may carry only a generic material — use the
+                    # first slot (note: shared datablocks are a known limitation)
+                    mat_id = 0
                 tex = vt.Texture(plane, mat_id)
                 tex.source = img
                 self.planes[tag] = {"obj": plane, "tex": tex, "asset": asset, "position": position, "t0": time.time(), "transition": transition}

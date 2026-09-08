@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.6.4 — 2026-09-08 Explicit scene↔code contract (M19)
+- **New `engine/render/contract.py`** — single source of truth for the naming
+  convention between interface code and scene objects: every object, material,
+  collection, text datablock and asset directory the renderers expect, with its
+  purpose and the module that uses it, plus a pure `check_contract()` comparator.
+- **Renderers now import their identifiers from the contract** (`scene_manager.py`,
+  `sprite_renderer.py`) instead of hard-coding strings; regression tests guard
+  against re-introducing literals (no silent drift). Sprite texture swap gained a
+  first-material-slot fallback when the named material is absent.
+- **The template lacked every `Sprite_*` plane and the `MASprite` material** — code
+  could not display `show` events even with asset files present. `build_vn_scene()`
+  (Setup Scene) and `tools/make_template.py` now create all five sprite planes at
+  the contract positions with `MASprite`; the shipped `UPVN_Template.blend` is
+  regenerated accordingly (X11 session, bricks preserved).
+- **New operator "Check Scene Wiring"** (`upvn.check_wiring`, UPVN panel): compares
+  the open scene against `contract.py` and writes a report into the `UPVN_WIRING`
+  text datablock — missing items listed with kind, purpose and expected-by module.
+- Docs: `blend/README.md` gains the full "Scene-object contract" table; README
+  quickstart explains the name-based connection and the check operator.
+- Tests: `tests/test_contract.py` (7 tests) → **126 passed, 2 skipped**.
+- Add-on version 0.6.4; dist rebuilt.
+
 ## 0.6.3 — 2026-09-08 Playable menus + QA keys in the real engine (M18)
 - **Menu choices are now playable in UPBGE with number keys `1`–`9`.** The
   engine waited for a pointer/raycast choice-click that the frontend did not
