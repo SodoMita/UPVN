@@ -1,7 +1,10 @@
-import pathlib
 import pytest
+from pathlib import Path
 from engine.script.parser import parse_string, ParseError
 from engine.core.vn_controller import VNController
+
+# The Question lives in an external Ren'Py source checkout (not vendored).
+TQ_SCRIPT = Path("/home/user/renpy_src/the_question/game/script.rpy")
 
 def test_00_parses():
     d = parse_string(open("examples/00_minimal_dialogue/script.rpy").read())
@@ -35,11 +38,9 @@ def test_03_variables():
     # if node present
     assert any(n["cmd"] == "if" for n in d["labels"]["start"])
 
+@pytest.mark.skipif(not TQ_SCRIPT.exists(), reason="renpy_src checkout not present")
 def test_the_question_parses():
-    p = pathlib.Path("/home/user/renpy_src/the_question/game/script.rpy")
-    if not p.exists():
-        pytest.skip("Ren'Py source not cloned at /home/user/renpy_src/the_question — skip (vendor with LICENSE if needed)")
-    d = parse_string(open(p).read())
+    d = parse_string(TQ_SCRIPT.read_text())
     assert {"start","rightaway","game","book","marry","later"} <= set(d["labels"].keys())
     assert d["characters"]["s"]["name"] == "Sylvie"
     assert d["defaults"]["book"] is False

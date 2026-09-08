@@ -130,6 +130,30 @@
     - "locale/template.pot + template.json 36 strings, ACCESSIBILITY.md/json keyboard+typewriter 40cps+arbitrary saves 1..∞+hybrid"
     - "examples/10_full_sample_game 30-min showcase (condensed demo 8 labels, all features: say/Character/scene/show/hide/menu/jump/$/if/play music/with fade/dissolve/move/zoom/ATL/3D stage/editor) validated 8 labels, long showcase screenshots 27 PNGs"
   example_project: examples/10_full_sample_game
+
+- id: M15
+  name: Declarative script language — state:/set/character/image/audio/stage/choice/end + safe expression evaluator + editor pointer events
+  status: done   # 2026-09-08: parser declarative forms (state: typed vars, character block, image/audio/stage manifest, set, choice keyword, optional end terminators); expr_eval.py AST-whitelist replaces raw eval (escape payloads blocked); typed-state runtime enforcement; engine/ui/pointer.py hotspot hover/click; menu choice ids; ast.literal_eval for defaults; example 05 + 3 new test files + 5 new gallery cases; renpy_src tests skip when absent
+  depends_on: [M04, M06, M09]
+  acceptance:
+    - "examples/05_declarative_script parses + runs headless (choices 0/1) with typed state + asset manifest"
+    - "declarative and legacy forms produce identical event traces (tests/test_declarative.py)"
+    - "expr_eval blocks attribute/subscript/comprehension/import escapes; allows the declarative subset (tests/test_expr_eval.py)"
+    - "pointer tracker emits enter/leave/click over named editor objects (tests/test_pointer.py)"
+    - "pytest green: 72 passed, 2 skipped (renpy_src absent)"
+  example_project: examples/05_declarative_script
+
+- id: M16
+  name: Three language tiers over one IR — .urpy declarative, .rpy safe subset, .rpy full (drop-in Ren'Py)
+  status: done   # 2026-09-08: tier 1 engine/script/urpy_parser.py (strict, zero Python, required end); tier 2 = existing parser default (safe) now rejects full-tier constructs with 'mode=full' guidance; tier 3 = Parser(full=True): python:/init/init offset/while/break/continue/pass/window/nvl/voice/queue music|sound/show|hide|call screen/jump|call expression/call label(args)/label name(params)/conditional menu choices/generic $/screen|style|transform|translate blocks; interpreter executes python+init (renpy/store compat namespace engine/script/renpy_compat.py), label params, while splicing, break/continue, jump/call expr, conditional menu filtering; VNController(mode=) + tools --mode; expr_eval container subscript + renpy/store attribute allowlist; examples 12 (full) + 13 (urpy); tests/test_full_rpy.py 27 tests; 99 passed 2 skipped
+  depends_on: [M15]
+  acceptance:
+    - ".urpy parses+runs headless (examples/13_urpy_tier) with typed state, choice keyword, required end; rejects $/define/default/python with hints"
+    - ".rpy safe mode rejects python:/init/while/transform/screen/style/translate/define with 'mode=full' guidance"
+    - ".rpy full mode parses+runs python:/init/while/break/continue/label params/call args/jump+call expression/conditional choices/window/nvl/voice/queue/screens (examples/12_full_rpy_tier + tests/test_full_rpy.py)"
+    - "renpy compat: renpy.jump/call/quit/loadable/has_label/get_playing/random/store work in python: blocks; attribute access sandbox still closed"
+    - "all three tiers produce the same IR; pytest green: 99 passed, 2 skipped"
+  example_project: examples/12_full_rpy_tier
 ```
 
 ## Agent protocol (repeat every session)

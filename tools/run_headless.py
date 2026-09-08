@@ -25,9 +25,11 @@ def main():
     ap.add_argument("--choices", nargs="*", type=int, default=[], help="menu choices in order")
     ap.add_argument("--json", action="store_true", help="emit JSON trace")
     ap.add_argument("--state", action="store_true", help="dump final state JSON")
+    ap.add_argument("--mode", choices=("safe", "full"), default="safe",
+                    help="parse mode: safe declarative subset (default) or full drop-in Ren'Py")
     args = ap.parse_args()
 
-    ctrl = VNController(script_path=args.script)
+    ctrl = VNController(script_path=args.script, mode=args.mode)
     trace = ctrl.run_headless(choices=args.choices)
 
     if args.json:
