@@ -44,6 +44,20 @@ except ImportError:
     bge = None  # type: ignore
 
 
+def _menu_choice_from_keycodes(keys: dict, just_activated: int = 1,
+                               max_index: int = 9) -> int | None:
+    """Map number-key state dict (bge.logic.keyboard.events) to a menu choice
+    index. Digit key codes are ASCII (ONEKEY==ord('1')==49). Pure helper so the
+    bge-only branch stays unit-testable. Returns None when no digit was just
+    activated (or the digit is beyond max_index)."""
+    if not keys:
+        return None
+    for i in range(min(9, max_index)):
+        if keys.get(ord("1") + i) == just_activated:
+            return i
+    return None
+
+
 def _merge_scripts(a: dict | None, b: dict | None) -> dict:
     """Merge two parsed script dicts (used for multi-file game dirs)."""
     out: dict = {
@@ -320,11 +334,26 @@ class VNController:
                 if self._current_event.get("type") == "say":
                     self._advance(send_value=None)
                 elif self._current_event.get("type") == "menu":
-                    # choices handled via mouse/key UI elsewhere; here we just wait
+                    # click/space intentionally does not advance a menu;
+                    # choice comes from number keys (below) or controller.choose()
                     pass
                 elif self._current_event.get("type") == "pause":
                     self._advance()
                 # dissolve/fade auto-advance after duration is handled above
+            # M18: menu choices via number keys 1..9 — the in-engine fallback
+            # until pointer/raycast choice-clicking is wired in the frontend.
+            if self._current_event.get("type") == "menu" and HAS_BGE:
+                try:
+                    import bge as _bge_imp
+                    idx = _menu_choice_from_keycodes(
+                        _bge_imp.logic.keyboard.events,
+                        just_activated=_bge_imp.logic.KX_INPUT_JUST_ACTIVATED,
+                        max_index=len(self._current_event.get("choices", [])))
+                    if idx is not None:
+                        self.choose(idx)
+                        return
+                except Exception:
+                    pass
             # skip/auto toggles via keys + screens H/Q (M09)
             if HAS_BGE:
                 try:

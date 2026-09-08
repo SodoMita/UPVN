@@ -188,6 +188,45 @@ def main(cont=None):
             pass
     except Exception:
         pass
+    # M18 debug/QA keys: F1 state dump, F12 in-game screenshot
+    try:
+        _debug_keys(logic, ctrl)
+    except Exception:
+        pass
+
+
+_shot_seq = [0]
+
+
+def _debug_keys(logic, ctrl):
+    """F1 prints current story state; F12 saves an in-game screenshot PNG."""
+    if not HAS_BGE:
+        return
+    import bge as _bge
+    keys = _bge.logic.keyboard.events
+    just = _bge.logic.KX_INPUT_JUST_ACTIVATED
+    try:
+        f1 = getattr(_bge.events, "F1KEY")
+        f12 = getattr(_bge.events, "F12KEY")
+    except Exception:
+        return
+    if keys.get(f1) == just:
+        st = ctrl.state
+        ev = ctrl.current_event or {}
+        print(f"[UPVN] F1 state: label={st.current_label} idx={st.instruction_index} "
+              f"event={ev.get('type')} vars={ {k: v for k, v in list(st.variables.items())[:12]} }")
+    if keys.get(f12) == just:
+        _shot_seq[0] += 1
+        import os as _os
+        base = _os.path.dirname(_bge.logic.expandPath("//"))
+        d = _os.path.join(base, "screenshots")
+        _os.makedirs(d, exist_ok=True)
+        out = _os.path.join(d, f"upvn_ingame_{int(time.time())}_{_shot_seq[0]}.png")
+        try:
+            _bge.render.makeScreenshot(out)
+            print(f"[UPVN] F12 screenshot saved: {out}")
+        except Exception as e:
+            print(f"[UPVN] F12 screenshot failed: {e}")
 
 
 def draw_overlay():
@@ -230,6 +269,28 @@ def draw_overlay():
                 blf.size(0, 20)
                 blf.color(0, 0.85, 0.95, 1)
                 blf.draw(0, f"{i + 1}. {ch['text']}")
+            # footer hint (M18: number keys select)
+            blf.position(0, width // 2 - 100, y - len(ev.get("choices", [])) * 40 - 30, 0)
+            blf.size(0, 14)
+            blf.color(0, 0.6, 0.6, 0.6)
+            blf.draw(0, "Press 1-9 to choose")
+        # modal screens (save/load/history/quick menu): text fallback until the
+        # 3D plane UI is wired — lets S/L/H/Q be usable without extra objects
+        sm = getattr(ctrl, "screen_mgr", None)
+        if sm is not None and sm.is_modal_active():
+            scr = sm.active_modal
+            title = str(getattr(scr, "title", None) or getattr(scr, "name", "screen"))
+            y = height - 60
+            blf.position(0, width // 2 - 150, y, 0)
+            blf.size(0, 24)
+            blf.color(0, 0.95, 0.85, 0.4)
+            blf.draw(0, title)
+            page = getattr(scr, "page", None)
+            if page is not None:
+                blf.position(0, width // 2 - 150, y - 30, 0)
+                blf.size(0, 16)
+                blf.color(0, 0.8, 0.8, 0.8)
+                blf.draw(0, f"page {int(page) + 1} — ←/→ to page, ESC to close")
     except Exception as e:
         # blf errors are non-fatal
         print(f"[frontend draw_overlay] {e}")

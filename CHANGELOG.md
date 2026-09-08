@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.6.3 — 2026-09-08 Playable menus + QA keys in the real engine (M18)
+- **Menu choices are now playable in UPBGE with number keys `1`–`9`.** The
+  engine waited for a pointer/raycast choice-click that the frontend did not
+  provide yet, so any game with a `menu:` froze at the prompt. `vn_controller`
+  now maps digit key presses to `choose(i)` via the pure helper
+  `_menu_choice_from_keycodes` (digit codes are ASCII; respects choice count;
+  only `JUST_ACTIVATED`). Overlay shows a "Press 1-9 to choose" hint.
+- **QA/debug keys in `bge_frontend/frontend.py`**: `F1` prints current story
+  state (label, index, event type, variables) to the console; `F12` saves an
+  in-game screenshot to `//screenshots/upvn_ingame_<ts>_<n>.png` via
+  `bge.render.makeScreenshot` — screenshots inform humans without extra tools.
+- **Modal screens now have a text overlay** (title + page indicator) so
+  `H`/`Q`/`Ctrl+S`/`Ctrl+L`/`Esc` show feedback in-game instead of acting
+  invisibly (full 3D plane UI still pending).
+- Add-on version bumped to 0.6.3 (dist zips rebuilt with the new engine).
+- Tests: `tests/test_m18_gameplay_input.py` (6 tests: key mapping, max_index,
+  held-key ignore, headless no-ops) → **119 passed, 2 skipped**.
+
 ## 0.6.2 — 2026-09-08 Blender/UPBGE UX hardening (M17) — round 2, verified in real X11
 - **Add-on enable can no longer crash UPBGE startup.** The field crash
   `AttributeError: '_RestrictData' object has no attribute 'filepath'` (engine
