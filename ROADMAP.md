@@ -166,6 +166,36 @@
     - "Setup Scene (UPBGE UI) wires camera/collections/controller object/launcher + Always→Python brick using the same bpy.ops.logic.* API as UPBGE's own add-ons; --background runs skip bricks with an explicit note"
     - "pytest green: 113 passed, 2 skipped"
   example_project: blend/UPVN_Template.blend
+
+- id: M18
+  name: Gameplay input — playable menus + QA keys in the real engine
+  status: done   # 2026-09-08: _menu_choice_from_keycodes (digits 1-9), F1 state dump, F12 screenshot, modal overlays draw text
+  depends_on: [M09]
+  acceptance:
+    - "menu choices selectable with number keys in UPBGE (no more freeze at the prompt)"
+    - "pytest green"
+  example_project: examples/01_branching_choice
+
+- id: M19
+  name: Explicit scene-object contract (registry + sprite planes + wiring checker)
+  status: done   # 2026-09-08: engine/render/contract.py, renderers import identifiers, Check Scene Wiring operator, template regenerated
+  depends_on: [M02, M17]
+  acceptance:
+    - "renderers import object/material names from contract.py (no literals)"
+    - "tools/tests guard against re-introducing hard-coded names"
+  example_project: blend/UPVN_Template.blend
+
+- id: M20
+  name: Drop-in Ren'Py compatibility — a real shipped game parses and plays
+  status: done   # 2026-09-09: driven by freeCodeCamp/LearnToCodeRPG (BSD-3-Clause, 61 files) — 0/61 -> 61/61 files parse, 127 labels, 5560 statements, every jump/call/call-screen resolves, story runs headless; lexer triple-quoted + bracket continuation, from clauses, call screen args, for loops, voice attributes, nointeract/extend/centered, with <expr>, show clause splitting, named menus as labels, menu if/else groups, dotted defines as store namespaces, loose full-tier expressions, compat mode, tools/check_renpy_project.py, examples/14_renpy_dropin, 64+5 new tests
+  depends_on: [M16, M19]
+  acceptance:
+    - "every .rpy/.rpym of the corpus parses in the drop-in tier (tests/test_renpy_corpus.py, 0 errors)"
+    - "merged project: all jump/call/call-screen targets resolve; named menus are labels"
+    - "headless smoke run plays real dialogue (compat mode collects python: failures)"
+    - "safe/.urpy tiers unchanged: 4-space rule + strict expressions + blocked escapes"
+    - "pytest green: 200 passed, 0 skipped"
+  example_project: examples/14_renpy_dropin
 ```
 
 ## Agent protocol (repeat every session)

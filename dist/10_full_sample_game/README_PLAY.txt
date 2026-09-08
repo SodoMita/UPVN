@@ -1,7 +1,7 @@
 UPVN Playable Build — 10_full_sample_game
 ==============================
-Generated: 2026-09-08 19:50:04
-Project: /home/user/upvn/examples/10_full_sample_game
+Generated: 2026-09-08 22:03:07
+Project: /home/user/UPVN/examples/10_full_sample_game
 Engine: UPVN 0.50 (Blender 5.0 / UPBGE 0.50)
 
 How to play in UPBGE:
