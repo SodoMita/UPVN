@@ -1,0 +1,107 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "feat/**"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  tests:
+    name: Engine tests (headless)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install test deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest
+
+      - name: pytest
+        run: python -m pytest tests/ -q
+
+  examples:
+    name: Examples validate + play
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Validate every example (its own tier)
+        run: |
+          set -e
+          for d in examples/0*/ examples/10_*/; do
+            python -m tools.validate "$d" --mode safe
+          done
+          python -m tools.validate examples/12_full_rpy_tier --mode full
+          python -m tools.validate examples/14_renpy_dropin --mode full
+          # the gallery is intentionally broken: it must fail
+          if python -m tools.validate examples/11_syntax_error_gallery/bad_jump_colon.rpy; then
+            echo "gallery file unexpectedly parsed" >&2; exit 1
+          fi
+
+      - name: Play the examples headless
+        run: |
+          set -e
+          python -m tools.run_headless examples/00_minimal_dialogue
+          python -m tools.run_headless examples/01_branching_choice --choices 0
+          python -m tools.run_headless examples/03_variables_routes --choices 1
+          python -m tools.run_headless examples/05_declarative_script --choices 0
+          python -m tools.run_headless examples/12_full_rpy_tier --mode full
+          python -m tools.run_headless examples/13_urpy_tier --choices 0
+          python -m tools.run_headless examples/14_renpy_dropin --mode full --choices 0
+          python -m tools.run_headless examples/14_renpy_dropin --mode full --choices 1
+
+      - name: Drop-in check of the bundled Ren'Py example
+        run: python -m tools.check_renpy_project examples/14_renpy_dropin --run
+
+  renpy-corpus:
+    name: Real Ren'Py project (freeCodeCamp/LearnToCodeRPG)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install test deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest
+
+      # Only the scripts are needed — blob-filtered sparse checkout keeps this
+      # at ~3 MB instead of the full 288 MB repository.
+      - name: Fetch the corpus scripts
+        run: |
+          git clone --depth 1 --filter=blob:none --no-checkout \
+            https://github.com/freeCodeCamp/LearnToCodeRPG corpus
+          cd corpus
+          git sparse-checkout init --no-cone
+          git sparse-checkout set 'game/**/*.rpy' 'game/*.rpy' 'game/**/*.rpym'
+          git checkout
+          find . -name '*.rpy' | wc -l
+
+      - name: Compatibility report
+        run: python -m tools.check_renpy_project corpus --run --json corpus_report.json
+
+      - name: Corpus tests
+        env:
+          UPVN_RENPY_CORPUS: ${{ github.workspace }}/corpus
+        run: python -m pytest tests/test_renpy_corpus.py -q
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: renpy-compat-report
+          path: corpus_report.json
