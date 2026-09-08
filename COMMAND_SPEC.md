@@ -221,6 +221,46 @@ pause 0.5
 | `screen:` / `style:` / `transform:` / `translate:` | `screens`/`styles`/`transforms`/`translations` | captured as raw lines for the editor-built UI layer |
 | `renpy.jump/call/quit`, `renpy.loadable`, `renpy.has_label`, `renpy.get_playing`, `renpy.random.*`, `renpy.store.*` | `engine/script/renpy_compat.py` | allowlist stand-in object, not a real import |
 
+### M20 additions (driven by a real 61-file Ren'Py game)
+
+| Command | AST / effect | Notes |
+| --- | --- | --- |
+| `call/jump label from _id` and bare `from _id` | `call`/`jump` with `from_id`, `from_clause` | Ren'Py inserts these for save compatibility; recorded in `from_clauses`, no-ops at runtime |
+| `call screen f(a, b) with t` | `call_screen` with `args`, `transition` | same for `show screen f(args)` / `hide screen f` |
+| `for x in items:` (and `for k, v in pairs:`) | `for` (spliced per item) | `break`/`continue` work exactly like `while` |
+| `who @ attr "text"` | `say` with `voice_attr` | Ren'Py 7.4+ voice attributes |
+| `who happy -sweat "text"` | `say` with `expression="-sweat"` | negated image attributes |
+| `who "text" nointeract` | `say` with `nointeract` → `wait: false` | does not wait for a click |
+| `extend "more"` / `centered "t"` / `vcentered "t"` | `say` with `extend` / `centered` | |
+| `with Dissolve(0.5)` / `with None` | `with` with any expression | also on `scene`/`show`/`hide` |
+| `show img as tag at a, b behind x zorder 2 onlayer master` | `show` with `as_tag`/`position`/`behind`/`zorder`/`layer` | clauses recognised in any order, never inside dialogue text |
+| `pause` / `pause delay` / `pause 1.0 with fade` | `pause` with float or expression | expression evaluated at runtime |
+| `play/queue/stop music\|sound\|voice\|audio …` | `play_*`/`stop_*` | playlists, `fadein`/`fadeout`/`loop`/`noloop`/`with` |
+| `voice sustain` | `voice_sustain` | |
+| `menu name:` + `set var` inside it | `menu` with `name`/`set`; name registered as a **label** | Ren'Py lets you `jump`/`call` a named menu |
+| `if`/`elif`/`else` inside `menu:` | choices inherit `cond` (`(a)`, `not (a) and (b)`) | |
+| dialogue / `$` / `set` / `python:` before the choices | `menu.pre` (spliced in front of the menu) | |
+| `"Text" (icon="x") if cond:` | choice text + `choice_props` + `cond` | caption parsed first, so `if` inside the text stays text |
+| `default x = expr()` / `default a.b = 1` / `default` inside a label | deferred to `init_python` / dotted define / collected | Ren'Py collects `default` wherever it appears |
+| `define gui.x = …`, `define config.y = …` | store **namespaces** (`interp.namespaces`) | unknown members are permissive no-ops (`gui.init(1920, 1080)`) |
+| `image n = <expr>`, `layeredimage n:` block | `assets.images` / `image_blocks` | non-string RHS kept verbatim |
+| `style x.y = v`, `style x prop v`, `style n is p:` | `styles` | both `style x.y` and `style.x.y` forms |
+| `screen f(a) tag t modal m zorder z:`, `transform f(a):` | `screens` / `transforms` | parameters and trailing keywords accepted |
+| `init python hide:` / `python early:` / `init python in mod:` | `init_python` | |
+| `label n(p) hide:` | `label_params` | |
+| multi-line `define`, triple-quoted text, `\` and bracket continuation | lexer | `call screen f(\n … )` joins into one logical line |
+| `_( )` / `_p( )` | identity translation helper | UPVN has no catalogue |
+
+**Loose expressions (full tier only).** Unknown names/attributes/functions evaluate
+to `None` (recorded in `ExpressionEvaluator.missing`) instead of aborting, comparisons
+with `None` degrade to `False`, keyword arguments and comprehensions are allowed.
+Dunder access stays blocked in **both** modes. Safe/.urpy tiers are unchanged (strict).
+
+**Compat mode.** `VNController(..., mode="full", compat=True)` collects failing
+`init python:` / `python:` blocks into `interp.init_errors` / `interp.python_errors`
+and keeps playing, and unknown globals in `python:` blocks resolve to recorded no-ops
+(`PermissiveEnv`). Default (`compat=False`) still raises.
+
 In safe mode all of the above raise `ParseError` with hint `parse with mode='full'`.
 
 ## What is NOT in the declarative tiers (tiers 1–2)

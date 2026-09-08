@@ -1,5 +1,75 @@
 # Changelog
 
+## 0.6.5 — 2026-09-09 Drop-in Ren'Py compatibility, verified on a real game (M20)
+
+The full `.rpy` tier went from "demo subset" to **a real Ren'Py project parses and
+plays**. Driver: `freeCodeCamp/LearnToCodeRPG` (BSD-3-Clause, 61 `.rpy`/`.rpym`
+files, ~2 MB of script) — before this milestone **0/61** files parsed; now
+**61/61**, 127 labels, 5560 statements, every `jump`/`call`/`call screen` resolves,
+and the story runs headless.
+
+- **Lexer**: triple-quoted strings spanning lines, trailing-`\` continuation and
+  *unbalanced-bracket* continuation (`call screen f(` … `)`) — the single biggest
+  blocker for real scripts; BOM stripped anywhere (concatenated sources carry one
+  per file); `#` recognised only outside strings; unterminated `"""` gets a hint.
+- **Parser**: `from` clauses (`call x from _call_x_3`, bare `from`), `call screen
+  f(args) with t`, `show/hide screen f(args)`, `for x in items:` (tuple targets too),
+  voice attributes (`player @ surprised "…"`), negated image attributes
+  (`e -sweat "…"`), `nointeract`, `extend`, `centered`/`vcentered`,
+  `with <expression>` (`Dissolve(0.5)`, `None`), `scene`/`show`/`hide` clause
+  splitting in **any** order (`as`/`at`/`behind`/`zorder`/`onlayer`) that never
+  matches inside dialogue text, `pause` with an expression, playlists +
+  `loop`/`noloop`/`fadeout`, `voice sustain`, `stop audio`.
+- **Menus**: named menus (`menu day_choices:` — registered as a jump/call target,
+  as Ren'Py does), `set var`, `if`/`elif`/`else` choice groups (conditions flatten
+  to `(a)` / `not (a) and (b)`), dialogue/`$`/`set`/`python:` before the choices
+  (`menu.pre`), `"Text" (icon="x") if cond:` — the caption is parsed first, so a
+  literal "if" inside the text stays text.
+- **Top level**: `default` with an expression (deferred to init), dotted
+  (`default preferences.text_cps`), or inside a label; dotted `define` builds store
+  **namespaces** (`gui`/`config`/`build`) so `gui.accent_color` and
+  `gui.init(1920, 1080)` work; `image n = <expr>` and `layeredimage:` blocks;
+  style property statements (both `style x.y = v` and `style.x.y = v`);
+  `screen f(a) tag/modal/zorder:`, `transform f(a):`; `init python hide:`,
+  `python early:`; multi-line `Character(...)` defines.
+- **Indentation**: safe/.urpy tiers still demand exactly 4 spaces (gallery intact);
+  the drop-in tier accepts any *consistent* indent — real projects use 2, 4 or 8.
+- **Multi-file loading fixed**: `VNController` concatenated every `.rpy` into one
+  buffer (BOM in the middle broke it and line numbers were fiction). Files are now
+  parsed individually with `require_start=False` and merged; `start` is checked on
+  the merged script with a friendly error.
+- **Interpreter**: `for` loops (spliced like `while`, `break`/`continue` supported),
+  `from_clause` no-ops, `menu.pre` spliced in front of the menu, `call_screen`/
+  `show_screen` args, expression `pause`, `voice_sustain`, say extras
+  (`voice_attr`/`extend`/`centered`/`nointeract` → `wait: false`),
+  `stop_sound`/`stop_voice`/`stop_audio`, dotted defines injected as namespaces,
+  `_()`/`_p()` identity translation helper, `base_dir` wired so `renpy.loadable`
+  resolves real files.
+- **Loose expressions (full tier only)**: unknown names/attributes/functions →
+  `None` (recorded in `ExpressionEvaluator.missing`), `None` comparisons → `False`,
+  keyword args and comprehensions allowed, more pure builtins (`any`, `all`,
+  `sorted`, …). **Dunder access is still blocked in both modes** — the sandbox
+  escape stays closed (tested).
+- **Compat mode** (`VNController(..., mode="full", compat=True)`): failing
+  `init python:`/`python:` blocks are collected in `interp.init_errors` /
+  `interp.python_errors` and the story continues; unknown globals in `python:`
+  blocks resolve to recorded no-ops (`PermissiveEnv`); unknown `renpy.*` members
+  are no-ops that can even be subclassed (`__mro_entries__`) and logged in
+  `renpy.compat_log`. Default behaviour still raises.
+- **New tool `tools/check_renpy_project.py`**: parses every `.rpy`/`.rpym` of a
+  project, merges like Ren'Py, and reports files/labels/screens/statements,
+  duplicate labels, unresolved `jump`/`call`/`call screen`, the `renpy.*` APIs used
+  by `python:` blocks, `--json`, and `--run` (headless smoke run in compat mode).
+- **New example `examples/14_renpy_dropin`** — three files of stock Ren'Py syntax
+  (no UPVN keywords) exercising every construct above; runs headless both routes.
+- **Tests**: `tests/test_renpy_compat.py` (64 tests: lexer, parser, interpreter,
+  sandbox, compat objects, multi-file loading, example 14) and
+  `tests/test_renpy_corpus.py` (5 tests against a real project, skipped unless
+  `UPVN_RENPY_CORPUS` is set). The Question was re-added at `~/renpy_src`, so the
+  two long-skipped tests run again → **200 passed, 0 skipped**.
+- Docs: `COMMAND_SPEC.md` + `SCRIPT_LANGUAGE_SPEC.md` gained M20 tables, `ROADMAP.md`
+  M20 flipped to done, `STATUS.md` updated.
+
 ## 0.6.4 — 2026-09-08 Explicit scene↔code contract (M19)
 - **New `engine/render/contract.py`** — single source of truth for the naming
   convention between interface code and scene objects: every object, material,

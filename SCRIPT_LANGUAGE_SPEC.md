@@ -239,6 +239,34 @@ access is permitted *only* on the injected `renpy`/`store` objects (never `_`-pr
 never on arbitrary values) — so `renpy.loadable("…")` works while
 `().__class__.__mro__…` escapes stay closed.
 
+### M20 — what the drop-in tier now accepts (verified on a real game)
+
+The full tier is no longer a demo subset: it parses a complete shipped game
+(freeCodeCamp/LearnToCodeRPG, BSD-3-Clause, 61 files, 5.5k statements) with zero
+errors. Beyond the list above it accepts:
+
+- **Lexical:** triple-quoted strings across lines, trailing-`\` continuation, and
+  *unbalanced-bracket* continuation (`call screen f(` … `)`), BOM anywhere,
+  `#` only outside strings.
+- **Statements:** `from` clauses, `call screen f(args) with t`, `show/hide screen f(args)`,
+  `for` loops (incl. tuple targets), voice attributes (`who @ attr "text"`), negated
+  image attributes (`who -sweat "text"`), `nointeract`, `extend`, `centered`/`vcentered`,
+  `with <any expression>`, `show` clauses in any order (`as`/`at`/`behind`/`zorder`/`onlayer`),
+  `pause` with an expression, playlists + `loop`/`noloop`/`fadeout`, `voice sustain`,
+  `stop audio`.
+- **Menus:** `menu name:` (also a jump/call target), `set var`, `if`/`elif`/`else`
+  choice groups, dialogue/`$`/`python:` before the choices, `"Text" (props) if cond:`.
+- **Top level:** `default` with an expression / dotted name / inside a label,
+  dotted `define` (store namespaces `gui`/`config`/`build`), `image … = <expr>`,
+  `layeredimage:` blocks, style property statements, `screen`/`transform` with
+  parameters, `init python hide:` / `python early:`.
+- **Indentation:** the safe/.urpy tiers still demand exactly 4 spaces; the drop-in
+  tier accepts any *consistent* indent (real projects use 2, 4 or 8).
+- **Multi-file:** each file is parsed on its own (`require_start=False`) and merged,
+  so errors keep their real `file:line` and `start` may live in any file.
+
+Run `python -m tools.check_renpy_project <project> --run` for a full report.
+
 ## Diagnostics (LLM-friendly)
 
 Every `ParseError` includes:

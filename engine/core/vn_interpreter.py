@@ -33,15 +33,18 @@ from .vn_errors import ScriptRuntimeError, LabelNotFoundError
 
 
 # ------------------------------------------------------------------ safe eval
-def safe_eval(expr: str, variables: dict, extra: Optional[dict] = None):
+def safe_eval(expr: str, variables: dict, extra: Optional[dict] = None, loose: bool = False):
     """
     Evaluate an expression with only variables + safe builtins.
     No attribute access (except injected objects), no comprehensions, no
     imports, no open, no exec — enforced by an AST whitelist (expr_eval.py).
+
+    ``loose=True`` is the drop-in tier: unknown identifiers resolve to None
+    instead of aborting the game (see expr_eval.ExpressionEvaluator).
     """
     from ..script.expr_eval import evaluate
     try:
-        return evaluate(expr, variables, extra)
+        return evaluate(expr, variables, extra, loose=loose)
     except ScriptRuntimeError as e:
         raise ScriptRuntimeError(f"expression error: {expr!r} -> {e}")
 
@@ -71,8 +74,9 @@ def _coerce_declared(target: str, value, type_name: str):
 
 
 def safe_exec_assign(target: str, op: str, expr: str, variables: dict,
-                     declared_types: dict | None = None, extra: Optional[dict] = None):
-    val = safe_eval(expr, variables, extra)
+                     declared_types: dict | None = None, extra: Optional[dict] = None,
+                     loose: bool = False):
+    val = safe_eval(expr, variables, extra, loose=loose)
     old = variables.get(target, 0 if op in ("+=", "-=", "*=", "/=") else None)
     if op == "=":
         new = val
@@ -149,7 +153,8 @@ class VNInterpreter:
     For headless testing, use `run_headless(choices=[0,1,...])` which auto-picks menu choices.
     """
 
-    def __init__(self, script: dict, state: Optional[VNState] = None, base_dir: Optional[str] = None):
+    def __init__(self, script: dict, state: Optional[VNState] = None, base_dir: Optional[str] = None,
+                 compat: bool = False):
         # script is parser output: {"labels": {...}, "characters": {...}, "defaults": {...}, ...}
         self.script = script
         # Deep-copy labels so splicing (menu/if/while) doesn't mutate the original
@@ -178,6 +183,12 @@ class VNInterpreter:
 
         # full-tier metadata
         self.full: bool = bool(script.get("full"))
+        # compat (drop-in) mode: python: failures are collected, not fatal —
+        # a real game may need engine APIs or third-party modules UPVN lacks,
+        # and we would rather keep running the story than abort at init.
+        self.compat: bool = compat
+        self.init_errors: List[str] = []
+        self.python_errors: List[str] = []
         self.defines: Dict[str, Any] = copy.deepcopy(script.get("defines", {}))
         self.label_params: Dict[str, List[dict]] = copy.deepcopy(script.get("label_params", {}))
         self.transforms: Dict[str, dict] = copy.deepcopy(script.get("transforms", {}))
@@ -188,10 +199,19 @@ class VNInterpreter:
         # renpy compatibility namespace (full tier only)
         from ..script.renpy_compat import RenpyRuntime, RenpyCompat, StoreWrapper
         self._renpy_runtime = RenpyRuntime(self)
+        # `define gui.x = …` / `define config.y = …` create store namespaces
+        self.namespaces = self._build_namespaces()
         self._expr_extra = {
-            "renpy": RenpyCompat(self._renpy_runtime, base_dir=base_dir),
+            "renpy": RenpyCompat(self._renpy_runtime, base_dir=base_dir,
+                                 permissive=self.full),
             "store": StoreWrapper(self.state.variables),
         }
+        if self.full:
+            # Ren'Py's translation helper: no catalogue in UPVN, identity output
+            from ..script.renpy_compat import identity_translation
+            self._expr_extra["_"] = identity_translation
+            self._expr_extra["_p"] = identity_translation
+        self._expr_extra.update(self.namespaces)
 
         # execution pointer stack for call/return
         # each entry: (label, next_index, param_saves) where param_saves is
@@ -210,6 +230,36 @@ class VNInterpreter:
         if self.full and script.get("init_python"):
             self._run_init_python(script["init_python"])
 
+    def _build_namespaces(self) -> dict:
+        """Turn dotted defines into namespace objects (``gui``, ``config``, …).
+
+        ``define gui.accent_color = "#002ead"`` becomes an attribute on a
+        ``gui`` object that ``python:`` blocks and expressions can read, the
+        way Ren'Py's store does. Nested paths (``a.b.c``) build nested objects.
+        """
+        from ..script.renpy_compat import StoreNamespace
+
+        def values_of(ns: StoreNamespace) -> dict:
+            return object.__getattribute__(ns, "_values")
+
+        roots: Dict[str, StoreNamespace] = {}
+        for key, value in self.defines.items():
+            if "." not in key:
+                continue
+            parts = key.split(".")
+            ns = roots.get(parts[0])
+            if ns is None:
+                ns = StoreNamespace(parts[0], permissive=self.full)
+                roots[parts[0]] = ns
+            for part in parts[1:-1]:
+                inner = values_of(ns).get(part)
+                if not isinstance(inner, StoreNamespace):
+                    inner = StoreNamespace(part, permissive=self.full)
+                    values_of(ns)[part] = inner
+                ns = inner
+            values_of(ns)[parts[-1]] = value
+        return roots
+
     # ------------------------ init-time python (full tier)
     def _run_init_python(self, code_lines: List[str]):
         env = self._python_env()
@@ -217,15 +267,28 @@ class VNInterpreter:
             try:
                 exec(line, env)
             except Exception as e:
-                raise ScriptRuntimeError(f"init python error: {e}")
+                first = (line or "").strip().splitlines()[0] if line else ""
+                msg = f"init python error: {e}\n  in: {first[:120]}"
+                if self.compat:
+                    self.init_errors.append(msg)
+                    continue
+                raise ScriptRuntimeError(msg)
         self._sync_variables(env)
         self._renpy_runtime.store_dict = None
 
     def _python_env(self) -> dict:
         import builtins
-        from ..script.renpy_compat import StoreWrapper
-        env: dict = {"__builtins__": builtins.__dict__}
-        env.update(self.defines)
+        from ..script.renpy_compat import StoreWrapper, identity_translation
+        if self.compat:
+            from ..script.renpy_compat import PermissiveEnv
+            env: dict = PermissiveEnv({"__builtins__": builtins.__dict__})
+        else:
+            env = {"__builtins__": builtins.__dict__}
+        env["_"] = identity_translation
+        env["_p"] = identity_translation
+        # plain defines become store names; dotted ones live on their namespace
+        env.update({k: v for k, v in self.defines.items() if "." not in k})
+        env.update(self.namespaces)
         env.update(self.state.variables)
         env["renpy"] = self._expr_extra["renpy"]
         # `store` wraps the SAME namespace dict, so `store.x = ...` and bare
@@ -238,6 +301,7 @@ class VNInterpreter:
         """Copy python-block results back into the saveable variables dict."""
         skip = {"__builtins__", "renpy", "store"}
         skip.update(self.defines.keys())
+        skip.update(getattr(self, "namespaces", {}).keys())
         before = set(self.state.variables.keys())
         for k, v in env.items():
             if k.startswith("_") or k in skip:
@@ -247,7 +311,9 @@ class VNInterpreter:
 
     def _eval_expr(self, expr: str):
         extra = self._expr_extra if self.full else None
-        return safe_eval(expr, self.state.variables, extra)
+        # the drop-in tier forgives unknown identifiers (real games reference
+        # store variables/classes UPVN does not model); the safe subset does not
+        return safe_eval(expr, self.state.variables, extra, loose=self.full)
 
     def _enter_label(self, label: str, index: int = 0):
         """Set the execution pointer to a label.
@@ -452,7 +518,7 @@ class VNInterpreter:
             color = None
             if who and who in self.state.characters:
                 color = self.state.characters[who].color
-            return {
+            event = {
                 "type": "say",
                 "who": who,
                 "who_name": who_name,
@@ -460,9 +526,18 @@ class VNInterpreter:
                 "text": text,
                 "display_text": display,
                 "raw": text_raw,
-                "wait": True,
+                "wait": not node.get("nointeract"),
                 "_loc": loc,
             }
+            if node.get("expression"):
+                event["expression"] = node["expression"]
+            if node.get("voice_attr"):
+                event["voice_attr"] = node["voice_attr"]
+            if node.get("centered"):
+                event["centered"] = node["centered"]
+            if node.get("extend"):
+                event["extend"] = True
+            return event
 
         elif cmd == "scene":
             asset = node.get("asset")
@@ -515,14 +590,28 @@ class VNInterpreter:
             self.state.audio.music = None
             return {"type": "stop_music", "fadeout": fadeout, "wait": False, "_loc": loc}
 
-        elif cmd == "play_sound":
+        elif cmd in ("play_sound", "play_audio"):
+            self.state.audio.sound = node.get("asset")
             return {"type": "play_sound", "asset": node.get("asset"), "wait": False, "_loc": loc}
+
+        elif cmd in ("stop_sound", "stop_voice", "stop_audio"):
+            channel = cmd.split("_", 1)[1]
+            if channel == "audio":
+                channel = "sound"
+            setattr(self.state.audio, channel, None)
+            return {"type": cmd, "fadeout": node.get("fadeout"), "wait": False, "_loc": loc}
 
         elif cmd == "play_voice":
             return {"type": "play_voice", "asset": node.get("asset"), "wait": False, "_loc": loc}
 
         elif cmd == "pause":
-            return {"type": "pause", "duration": node.get("duration"), "wait": True, "_loc": loc}
+            dur = node.get("duration")
+            if isinstance(dur, str):        # `pause delay` — evaluated at runtime
+                try:
+                    dur = self._eval_expr(dur)
+                except ScriptRuntimeError:
+                    dur = None
+            return {"type": "pause", "duration": dur, "wait": True, "_loc": loc}
 
         elif cmd == "jump":
             label = node.get("label")
@@ -566,7 +655,7 @@ class VNInterpreter:
         elif cmd == "assign":
             target, op, expr = node.get("target"), node.get("op"), node.get("expr")
             safe_exec_assign(target, op, expr, self.state.variables, self.state.declared_types,
-                             self._expr_extra if self.full else None)
+                             self._expr_extra if self.full else None, loose=self.full)
             return {"type": "assign", "target": target, "op": op, "expr": expr, "value": self.state.variables[target], "wait": False, "_loc": loc}
 
         elif cmd == "if":
@@ -591,6 +680,15 @@ class VNInterpreter:
             return None  # let loop advance to first inserted node
 
         elif cmd == "menu":
+            if node.get("pre") and not node.get("_pre_done"):
+                # splice `set`/`$`/say statements in front of the menu, then
+                # re-insert the menu itself so it runs once afterwards
+                node["_pre_done"] = True
+                block_list = self.labels[self.state.current_label]
+                at = self.state.instruction_index
+                for n in reversed(list(node["pre"]) + [node]):
+                    block_list.insert(at + 1, n)
+                return None
             caption = node.get("caption")
             # filter conditional choices ("Text" if cond:)
             kept = []
@@ -616,7 +714,11 @@ class VNInterpreter:
             except ScriptRuntimeError:
                 raise
             except Exception as e:
-                raise ScriptRuntimeError(f"python block error: {e}", self.state.current_label, self.state.instruction_index)
+                if self.compat:
+                    first = (code or "").strip().splitlines()[0] if code else ""
+                    self.python_errors.append(f"{self.state.current_label}: {e} (in: {first[:100]})")
+                else:
+                    raise ScriptRuntimeError(f"python block error: {e}", self.state.current_label, self.state.instruction_index)
             self._sync_variables(env)
             self._renpy_runtime.store_dict = None
             # honor renpy.jump / renpy.call / renpy.quit from the block
@@ -656,8 +758,37 @@ class VNInterpreter:
                     block_list.insert(insert_pos, n)
             return None  # advance into spliced block, or past the while node
 
+        elif cmd == "for":
+            target = node.get("target")
+            loop_id = node.get("loop_id")
+            items = node.get("_items")
+            if items is None:
+                try:
+                    items = list(self._eval_expr(node.get("iter")) or [])
+                except (ScriptRuntimeError, TypeError):
+                    items = []
+            if items:
+                block_list = self.labels[self.state.current_label]
+                at = self.state.instruction_index
+                first, rest = items[0], list(items[1:])
+                self._bind_for_target(target, first)
+                tail = {"cmd": "for", "target": target, "loop_id": loop_id,
+                        "block": node.get("block", []), "_items": rest, "_tail": True}
+                for n in reversed(list(node.get("block", [])) + [tail]):
+                    block_list.insert(at + 1, n)
+            return None
+
         elif cmd == "pass":
             return None
+
+        elif cmd == "from_clause":
+            return None
+
+        elif cmd == "voice_sustain":
+            return {"type": "voice_sustain", "wait": False, "_loc": loc}
+
+        elif cmd == "voice":
+            return {"type": "voice", "position": node.get("position"), "wait": False, "_loc": loc}
 
         elif cmd == "break":
             loop_id = node.get("loop_id")
@@ -688,10 +819,13 @@ class VNInterpreter:
             return {"type": "nvl_mode", "mode": self.state.nvl_mode, "wait": False, "_loc": loc}
 
         elif cmd == "call_screen":
-            return {"type": "call_screen", "screen": node.get("screen"), "wait": True, "_loc": loc}
+            return {"type": "call_screen", "screen": node.get("screen"),
+                    "args": node.get("args") or [], "transition": node.get("transition"),
+                    "wait": True, "_loc": loc}
 
         elif cmd == "show_screen":
-            return {"type": "show_screen", "screen": node.get("screen"), "wait": False, "_loc": loc}
+            return {"type": "show_screen", "screen": node.get("screen"),
+                    "args": node.get("args") or [], "wait": False, "_loc": loc}
 
         elif cmd == "hide_screen":
             return {"type": "hide_screen", "screen": node.get("screen"), "wait": False, "_loc": loc}
@@ -730,12 +864,22 @@ class VNInterpreter:
         else:
             raise ScriptRuntimeError(f"unknown command {cmd!r}", self.state.current_label, self.state.instruction_index)
 
+    def _bind_for_target(self, target: str, value):
+        """Bind a `for` target: `for x in …` or `for k, v in …`."""
+        names = [t.strip() for t in (target or "").split(",") if t.strip()]
+        if len(names) > 1:
+            values = list(value)
+            for name, val in zip(names, values):
+                self.state.variables[name] = val
+        elif names:
+            self.state.variables[names[0]] = value
+
     def _find_loop_tail(self, loop_id) -> Optional[int]:
         """Find the spliced tail marker of the innermost matching while loop."""
         block = self.labels.get(self.state.current_label, [])
         for i in range(self.state.instruction_index, len(block)):
             n = block[i]
-            if n.get("cmd") == "while" and n.get("_tail") and n.get("loop_id") == loop_id:
+            if n.get("cmd") in ("while", "for") and n.get("_tail") and n.get("loop_id") == loop_id:
                 return i
         return None
 

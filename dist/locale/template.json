@@ -1,5 +1,5 @@
 {
-  "project": "/home/user/upvn/examples/10_full_sample_game",
+  "project": "/home/user/UPVN/examples/10_full_sample_game",
   "strings": [
     "30-min showcase would continue here with more chapters — this is a condensed demo exercising all systems.",
     "Affection set to 99 — rollback 2 steps should restore earlier.",
@@ -22,7 +22,7 @@
     "Now linear zoom to 1.5×.",
     "Pick up the book (tests $ + if)",
     "Press S for quick save, Q for quick menu, H for history.",
-    "Rollback test â choose then wheel up",
+    "Rollback test — choose then wheel up",
     "Save to slot 42 and continue (good ending)",
     "Save to slot 500 and see neutral",
     "Second line — rollback should restore previous variables.",

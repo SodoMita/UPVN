@@ -65,6 +65,7 @@ def _merge_scripts(a: dict | None, b: dict | None) -> dict:
         "assets": {"images": {}, "audio": {}, "stages": {}},
         "label_params": {}, "defines": {}, "init_python": [],
         "transforms": {}, "screens": {}, "styles": {}, "translations": {},
+        "image_blocks": {}, "from_clauses": [],
     }
     for d in (a, b):
         if not d:
@@ -82,6 +83,8 @@ def _merge_scripts(a: dict | None, b: dict | None) -> dict:
         out["screens"].update(d.get("screens", {}))
         out["styles"].update(d.get("styles", {}))
         out["translations"].update(d.get("translations", {}))
+        out["image_blocks"].update(d.get("image_blocks", {}))
+        out["from_clauses"].extend(d.get("from_clauses", []))
         if d.get("full"):
             out["full"] = True
         if d.get("language") == "urpy":
@@ -91,11 +94,12 @@ def _merge_scripts(a: dict | None, b: dict | None) -> dict:
 
 class VNController:
     def __init__(self, script_path: str | Path | None = None, script_dict: dict | None = None,
-                 state: Optional[VNState] = None, mode: str = "safe"):
+                 state: Optional[VNState] = None, mode: str = "safe", compat: bool = False):
         self.script_path = Path(script_path) if script_path else None
         self.script_dict = script_dict
         self.state = state or VNState()
         self.mode = mode  # "safe" (default declarative subset) | "full" (drop-in Ren'Py)
+        self.compat = compat  # full tier: collect python: failures instead of raising
         self.interp: Optional[VNInterpreter] = None
         self._gen = None
         self._current_event: Optional[dict] = None
@@ -121,18 +125,20 @@ class VNController:
                 raise ImportError("parser not available")
             # handle directory containing multiple .rpy/.urpy files (manifest-free for Tier1)
             if self.script_path.is_dir():
-                # scan all .rpy recursively, merge — Ren'Py scans whole game/ dir
-                combined = ""
+                # Scan the whole game/ dir and merge — exactly what Ren'Py does.
+                # Each file is parsed on its own so errors keep their real
+                # file:line, and `start` may live in any file.
                 merged = None
-                for p in sorted(self.script_path.rglob("*.rpy")):
-                    combined += f"\n# file: {p}\n" + p.read_text(encoding="utf-8") + "\n"
-                for p in sorted(self.script_path.rglob("*.urpy")):
-                    # multi-file games: entry `start` label may live in another file
-                    d = parse_file(str(p), require_start=False)
+                for p in sorted(set(list(self.script_path.rglob("*.rpy"))
+                                    + list(self.script_path.rglob("*.urpy")))):
+                    d = parse_file(str(p), mode=self.mode, require_start=False)
                     merged = _merge_scripts(merged, d)
-                if combined.strip():
-                    base = parse_string(combined, filename=str(self.script_path), mode=self.mode)
-                    merged = _merge_scripts(merged, base)
+                if merged is None:
+                    raise ValueError(f"no .rpy/.urpy scripts found in {self.script_path}")
+                if "start" not in merged["labels"]:
+                    from .vn_errors import ParseError as _PE
+                    raise _PE('missing required label "start:"', str(self.script_path), 1,
+                              hint="one of the game's .rpy files must define `label start:`")
                 self.script_dict = merged
             else:
                 self.script_dict = parse_file(str(self.script_path), mode=self.mode)
@@ -142,7 +148,12 @@ class VNController:
                 self.state.script_hash = hashlib.sha256(txt.encode("utf-8")).hexdigest()[:12]
 
         # init interpreter
-        self.interp = VNInterpreter(self.script_dict, self.state)
+        base_dir = None
+        if self.script_path is not None:
+            base_dir = str(self.script_path if self.script_path.is_dir()
+                           else self.script_path.parent)
+        self.interp = VNInterpreter(self.script_dict, self.state, base_dir=base_dir,
+                                    compat=self.compat)
         self._gen = self.interp.run()
 
         # init managers (lazy, allow headless without bge)
