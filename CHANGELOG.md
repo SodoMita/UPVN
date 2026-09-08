@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.1 — 2026-09-08 Debugging fixes (three-tier merge)
+- **Multi-file directories**: `.urpy` files no longer each require a `start` label — `parse_file(..., require_start=False)` / `parse_urpy_file(..., require_start=False)`; the entry label is checked on the merged script instead (single-file `.urpy` still requires `start`).
+- **`store` namespace consistency**: `store.x`, `renpy.store.x` and bare `x = ...` in `python:` blocks now share one namespace — a `store.x += …` mutation is no longer overwritten by a stale copy during variable sync.
+- **Label re-entry**: entering a label from the top now resets its block to the pristine template, so spliced `while`/`if`/menu bodies from a previous pass never accumulate or re-execute (fixes spurious extra loop iterations / duplicate choice branches on `call`-twice patterns).
+- **Expression interpolation**: dialogue `[...]` brackets now evaluate full expressions through the AST whitelist (`[gold * 2]`, `[store.gold]`, `[renpy.loadable(...)]`), while unresolvable/invalid expressions stay verbatim and never crash the line.
+- `renpy.store` attribute access available in full-mode `if` conditions (injected alongside `renpy`).
+- Tests: 103 → **108 passed, 2 skipped** (`test_full_rpy.py` regression tests for all of the above).
+
 ## 0.6.0 — 2026-09-08 Three language tiers over one IR (M16)
 - **Tier 1 — `.urpy` fully declarative** (`engine/script/urpy_parser.py`): zero embedded Python (`$`/`define`/`default`/`python:`/`init` rejected with hints), typed `state:` block, `character` blocks, `image`/`audio`/`stage` manifest, `set` + `choice` keywords, **required explicit `end`** for every block. Example `examples/13_urpy_tier`.
 - **Tier 2 — `.rpy` safe subset** (unchanged default): now rejects full-tier constructs (`python:`/`init`/`while`/`break`/`continue`/`pass`/`window`/`nvl`/`voice`/`queue`/screens/`jump expression`/`call args`/label params/`transform`/`style`/`translate`/non-Character `define`) with a `parse with mode='full'` hint.

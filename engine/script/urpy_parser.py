@@ -82,8 +82,9 @@ _FORBIDDEN_HINTS = [
 
 
 class UrpyParser:
-    def __init__(self, source: str, filename: str = "<string>"):
+    def __init__(self, source: str, filename: str = "<string>", require_start: bool = True):
         self.filename = filename
+        self.require_start = require_start
         self.lines: List[LogicalLine] = group_logical_lines(source, filename)
         self.pos = 0
         self.labels: Dict[str, List[dict]] = {}
@@ -105,7 +106,7 @@ class UrpyParser:
                     hint="state:/character:/image/audio/stage/label start at column 0",
                 )
             self._parse_top_level(ll)
-        if "start" not in self.labels:
+        if self.require_start and "start" not in self.labels:
             raise ParseError('missing required label "start:"', self.filename, 1, hint='add:\nlabel start:\n    "Hello."\nend')
         return {
             "labels": self.labels,
@@ -533,10 +534,10 @@ class UrpyParser:
                            SourceLocation(ll.filename, ll.lineno, ll.indent + 1)).to_dict())
 
 
-def parse_urpy_string(source: str, filename: str = "<string>") -> dict:
-    return UrpyParser(source, filename).parse()
+def parse_urpy_string(source: str, filename: str = "<string>", require_start: bool = True) -> dict:
+    return UrpyParser(source, filename, require_start=require_start).parse()
 
 
-def parse_urpy_file(path: str) -> dict:
+def parse_urpy_file(path: str, require_start: bool = True) -> dict:
     with open(path, "r", encoding="utf-8") as f:
-        return parse_urpy_string(f.read(), filename=path)
+        return parse_urpy_string(f.read(), filename=path, require_start=require_start)

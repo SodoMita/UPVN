@@ -103,13 +103,29 @@ def _is_state_value(v) -> bool:
 
 
 # ------------------------------------------------------------------ text substitution
-_var_pat = re.compile(r"\[(\w+)\]")  # Ren'Py [variable] interpolation
+_bracket_pat = re.compile(r"\[([^\]\[]+)\]")  # Ren'Py [expr] interpolation
 
-def interpolate(text: str, variables: dict) -> str:
+def interpolate(text: str, variables: dict, extra: Optional[dict] = None) -> str:
+    """Interpolate ``[expr]`` brackets in dialogue text.
+
+    Simple names resolve from ``variables``; anything else is evaluated with
+    the same AST whitelist as story expressions (so ``[gold * 2]`` works, and
+    in full mode ``[store.gold]`` / ``[renpy.loadable(...)]`` too). Unresolvable
+    or invalid expressions are left verbatim (never crash the line).
+    """
     def repl(m):
-        key = m.group(1)
-        return str(variables.get(key, f"[{key}]"))
-    return _var_pat.sub(repl, text)
+        expr = m.group(1).strip()
+        if not expr:
+            return m.group(0)
+        if re.fullmatch(r"\w+", expr):
+            return str(variables.get(expr, f"[{expr}]"))
+        try:
+            from ..script.expr_eval import evaluate
+            val = evaluate(expr, variables, extra)
+            return str(val)
+        except Exception:
+            return m.group(0)
+    return _bracket_pat.sub(repl, text)
 
 
 # tags like {b}, {/b}, {color=#fff} — we strip for trace but keep raw
@@ -140,6 +156,10 @@ class VNInterpreter:
         # script dict — allows reusing the same parsed dict across tests.
         import copy as _copy
         self.labels: Dict[str, List[dict]] = _copy.deepcopy(script.get("labels", {}))
+        # pristine label templates — used to reset a label's block when it is
+        # re-entered from the top, so spliced while/if/menu nodes from a previous
+        # execution never accumulate (re-entry would otherwise re-run them).
+        self._pristine_labels: Dict[str, List[dict]] = _copy.deepcopy(script.get("labels", {}))
         self.state = state or VNState()
         self.base_dir = base_dir
         # initialise defaults + character defs from script if state empty
@@ -166,9 +186,12 @@ class VNInterpreter:
         self.translations: Dict[str, dict] = copy.deepcopy(script.get("translations", {}))
 
         # renpy compatibility namespace (full tier only)
-        from ..script.renpy_compat import RenpyRuntime, RenpyCompat
+        from ..script.renpy_compat import RenpyRuntime, RenpyCompat, StoreWrapper
         self._renpy_runtime = RenpyRuntime(self)
-        self._expr_extra = {"renpy": RenpyCompat(self._renpy_runtime, base_dir=base_dir)}
+        self._expr_extra = {
+            "renpy": RenpyCompat(self._renpy_runtime, base_dir=base_dir),
+            "store": StoreWrapper(self.state.variables),
+        }
 
         # execution pointer stack for call/return
         # each entry: (label, next_index, param_saves) where param_saves is
@@ -196,6 +219,7 @@ class VNInterpreter:
             except Exception as e:
                 raise ScriptRuntimeError(f"init python error: {e}")
         self._sync_variables(env)
+        self._renpy_runtime.store_dict = None
 
     def _python_env(self) -> dict:
         import builtins
@@ -204,7 +228,10 @@ class VNInterpreter:
         env.update(self.defines)
         env.update(self.state.variables)
         env["renpy"] = self._expr_extra["renpy"]
-        env["store"] = StoreWrapper(self.state.variables)
+        # `store` wraps the SAME namespace dict, so `store.x = ...` and bare
+        # `x = ...` stay consistent (no stale-copy overwrite when syncing back).
+        env["store"] = StoreWrapper(env)
+        self._renpy_runtime.store_dict = env
         return env
 
     def _sync_variables(self, env: dict):
@@ -221,6 +248,19 @@ class VNInterpreter:
     def _eval_expr(self, expr: str):
         extra = self._expr_extra if self.full else None
         return safe_eval(expr, self.state.variables, extra)
+
+    def _enter_label(self, label: str, index: int = 0):
+        """Set the execution pointer to a label.
+
+        Entering from the top (index 0) resets the block to its pristine
+        template, discarding any nodes spliced in by a previous pass over the
+        label (while/if/menu bodies). Resuming mid-label (index > 0) keeps the
+        spliced structure intact.
+        """
+        if index == 0:
+            self.labels[label] = copy.deepcopy(self._pristine_labels.get(label, []))
+        self.state.current_label = label
+        self.state.instruction_index = index
 
     # ------------------------ label parameter binding (full tier)
     def _bind_label_params(self, label: str, provided: dict) -> Optional[list]:
@@ -311,8 +351,7 @@ class VNInterpreter:
                 if self._call_stack:
                     ret_label, ret_idx, saves = self._call_stack.pop()
                     self._restore_params(saves)
-                    self.state.current_label = ret_label
-                    self.state.instruction_index = ret_idx
+                    self._enter_label(ret_label, ret_idx)
                     continue
                 else:
                     yield {"type": "end", "label": label}
@@ -406,8 +445,8 @@ class VNInterpreter:
         if cmd == "say":
             who = node.get("who")
             text_raw = node.get("text", "")
-            # interpolation [var]
-            text = interpolate(text_raw, self.state.variables)
+            # interpolation [var] / [expr]
+            text = interpolate(text_raw, self.state.variables, self._expr_extra if self.full else None)
             display = text  # keep tags for frontend to render rich text
             who_name = self.state.get_character_name(who) if who else None
             color = None
@@ -492,8 +531,7 @@ class VNInterpreter:
             if label not in self.labels:
                 raise LabelNotFoundError(f'jump target "{label}" does not exist', self.state.current_label, self.state.instruction_index)
             self._bind_label_params(label, {})
-            self.state.current_label = label
-            self.state.instruction_index = 0
+            self._enter_label(label)
             return {"type": "jump", "label": label, "wait": False, "_loc": loc}
 
         elif cmd == "call":
@@ -512,16 +550,14 @@ class VNInterpreter:
             saves = self._bind_label_params(label, provided)
             # push return address + param undo info
             self._call_stack.append((self.state.current_label, self.state.instruction_index + 1, saves))
-            self.state.current_label = label
-            self.state.instruction_index = 0
+            self._enter_label(label)
             return {"type": "call", "label": label, "wait": False, "_loc": loc}
 
         elif cmd == "return":
             if self._call_stack:
                 ret_label, ret_idx, saves = self._call_stack.pop()
                 self._restore_params(saves)
-                self.state.current_label = ret_label
-                self.state.instruction_index = ret_idx
+                self._enter_label(ret_label, ret_idx)
                 return {"type": "return", "to": ret_label, "wait": False, "_loc": loc}
             else:
                 # top-level return ends game
@@ -582,6 +618,7 @@ class VNInterpreter:
             except Exception as e:
                 raise ScriptRuntimeError(f"python block error: {e}", self.state.current_label, self.state.instruction_index)
             self._sync_variables(env)
+            self._renpy_runtime.store_dict = None
             # honor renpy.jump / renpy.call / renpy.quit from the block
             if self._renpy_runtime.jump_to:
                 target = self._renpy_runtime.jump_to
@@ -589,8 +626,7 @@ class VNInterpreter:
                 if target not in self.labels:
                     raise LabelNotFoundError(f'renpy.jump target "{target}" does not exist', self.state.current_label, self.state.instruction_index)
                 self._bind_label_params(target, {})
-                self.state.current_label = target
-                self.state.instruction_index = 0
+                self._enter_label(target)
                 return {"type": "jump", "label": target, "wait": False, "_loc": loc}
             if self._renpy_runtime.call_to:
                 target = self._renpy_runtime.call_to
@@ -599,8 +635,7 @@ class VNInterpreter:
                     raise LabelNotFoundError(f'renpy.call target "{target}" does not exist', self.state.current_label, self.state.instruction_index)
                 saves = self._bind_label_params(target, {})
                 self._call_stack.append((self.state.current_label, self.state.instruction_index + 1, saves))
-                self.state.current_label = target
-                self.state.instruction_index = 0
+                self._enter_label(target)
                 return {"type": "call", "label": target, "wait": False, "_loc": loc}
             if self._renpy_runtime.quit_requested:
                 self._renpy_runtime.reset()

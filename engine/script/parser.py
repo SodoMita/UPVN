@@ -1224,12 +1224,17 @@ def parse_string_full(source: str, filename: str = "<string>") -> dict:
     return parse_string(source, filename, mode="full")
 
 
-def parse_file(path: str, mode: str = "safe") -> dict:
-    """Parse a script file. `.urpy` → declarative parser; else `.rpy` parser."""
+def parse_file(path: str, mode: str = "safe", require_start: bool = True) -> dict:
+    """Parse a script file. `.urpy` → declarative parser; else `.rpy` parser.
+
+    ``require_start`` (default True) demands a ``start`` label in the file;
+    pass False when parsing individual files of a multi-file game directory
+    (the entry label is then checked on the merged script).
+    """
     from pathlib import Path
     p = Path(path)
     if p.suffix.lower() == ".urpy":
         from .urpy_parser import parse_urpy_file
-        return parse_urpy_file(str(p))
+        return parse_urpy_file(str(p), require_start=require_start)
     with open(str(p), "r", encoding="utf-8") as f:
         return parse_string(f.read(), filename=str(p), mode=mode)
