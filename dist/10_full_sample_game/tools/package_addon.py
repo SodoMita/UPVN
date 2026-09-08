@@ -4,7 +4,7 @@ Package the UPVN editor add-on into ONE self-contained, installable .zip.
 Usage:
     python tools/package_addon.py [out_dir]        # default: repo dist/
 
-Output: <out_dir>/upvn_editor_addon_v0.6.2.zip
+Output: <out_dir>/upvn_editor_addon_v0.6.3.zip
 
 Why this exists (v0.6):
     The old workflow asked you to install a lone .py — Blender copied it into
@@ -12,7 +12,7 @@ Why this exists (v0.6):
     "Engine not available". The zip ships engine/, bge_frontend/, the playable
     template and the LICENSE together with the add-on.
 
-Zip layout (v0.6.2, single top-level folder):
+Zip layout (v0.6.3, single top-level folder):
     upvn_editor_addon/
         __init__.py            <- the add-on (blend/upvn_editor_addon.py)
         engine/…               <- full engine (filesystem discovery after extract)
