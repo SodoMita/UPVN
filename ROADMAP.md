@@ -154,6 +154,18 @@
     - "renpy compat: renpy.jump/call/quit/loadable/has_label/get_playing/random/store work in python: blocks; attribute access sandbox still closed"
     - "all three tiers produce the same IR; pytest green: 99 passed, 2 skipped"
   example_project: examples/12_full_rpy_tier
+
+- id: M17
+  name: Blender/UPBGE UX hardening — no more "Engine not available", one-click scene setup
+  status: done   # 2026-09-08: add-on v0.6 self-contained engine discovery (module dir / repo / zipimport from installed archive / prefs / blend file dirs, engine_status_line + engine_diag_text in panels, Locate Engine + Check + Bundle operators, friendly reports everywhere instead of bare 'Engine not available'); blend/upvn_editor_addon.py build_vn_scene (data-API, idempotent, UPBGE-verified) creates VN_Main + cameras + VN_* collections + planes + VNController(script_path/upvn_root/upvn_bricks) + launcher Text datablock + Always(pulse)→Python brick via official bpy.ops.logic.* pattern (UI context; --background skips loudly); bge_frontend/frontend.py now reads VNController.script_path first (legacy candidates as fallback) + self sys.path bootstrap (fixes 'wrong/no script starts'); tools/make_template.py regenerates blend/UPVN_Template.blend data-API-only incl. classroom stage (110KB, was 96KB brickless); tools/package_addon.py builds self-contained dist/upvn_editor_addon_v0.6.0.zip (upvn_editor_addon/ + zip-root engine with injected __init__.py for zipimport); tests/test_m17_addon_init.py 5 tests incl. clean-subprocess zip-import proof; 113 passed 2 skipped; verified inside real UPBGE 0.50 (Blender 5.0.1) headless via libpulse stub: engine OK, register OK, scene OK
+  depends_on: [M16]
+  acceptance:
+    - "add-on installed alone (old single-.py style) no longer says only 'Engine not available': reports searched roots + hints (zip release / Locate Engine)"
+    - "dist/upvn_editor_addon_v0.6.0.zip is fully self-contained: in a clean python subprocess the add-on imports the engine straight from the archive (zipimport) and validates a built script"
+    - "bge_frontend resolves the game script from the VNController object's script_path property first, then legacy candidates (unit-tested)"
+    - "Setup Scene (UPBGE UI) wires camera/collections/controller object/launcher + Always→Python brick using the same bpy.ops.logic.* API as UPBGE's own add-ons; --background runs skip bricks with an explicit note"
+    - "pytest green: 113 passed, 2 skipped"
+  example_project: blend/UPVN_Template.blend
 ```
 
 ## Agent protocol (repeat every session)
@@ -167,6 +179,9 @@
 
 ## NEXT_STEPS (for next turn)
 
+- M17 Blender UX hardening DONE 2026-09-08 — add-on v0.6 (engine discovery: repo/module-dir/zipimport/prefs/blend-file; status rows; Locate/Check/Bundle; friendly reports), one-click Setup Scene (data-API scene + official bpy.ops.logic.* bricks in UI), frontend reads VNController.script_path + sys.path bootstrap, make_template regenerates 110KB template (was brickless 96KB), tools/package_addon.py → dist/upvn_editor_addon_v0.6.0.zip self-contained (zipimport-verified in clean subprocess), tests/test_m17_addon_init.py 5 tests, verified in real UPBGE 0.50 headless (libpulse stub): engine OK/register OK/scene OK; 113 passed 2 skipped
+- Next candidate: run the full interactive loop in UPBGE UI (Setup Scene → P) on a machine with a display; publish dist zips + addon zip as GitHub release; CI workflow (pytest + package_game + package_addon)
+- Optional: migrate editor GameBuilder to declarative forms (character/state/set/choice) per STATUS; asset browser thumbnails; side-image live preview
 - 0.5.2 Audit fixes DONE 2026-09-08 — M-1 safe_eval AST whitelist (blocks Attribute/Subscript/ListComp), L-1 save _sanitize_slot/_slot_path is_relative_to, L-2 load schema validation, I-1 tests skip when the_question missing (42+2 skipped vs 44 passed both green, stub 555B), I-2 zip hygiene no pyc 52 files 214KB (was 76 324KB) LICENSE included, I-3 MIT LICENSE, requirements dev black, package copies LICENSE, exploit/traversal blocked verified, headless 59 events still
 - 0.5.1 Polish DONE 2026-09-07 21:20 — editor v0.5 preserve+asset browser+side image+arbitrary slot spinner, headless desks (board+teacher+3 rows), StageManager LibLoad+addObject+playAction+camera preset, make_template richer VN_3DStage (floor+3 markers+3 presets+9 desks+board+capsules, 150KB+ when libpulse available), showcase regenerated 27 PNGs desks behind sprite (36K), zip 324KB → now 214KB clean, 44 tests green, preserve test PASS
 - M14 DONE 2026-09-07 21:09 — verify saves arbitrary: SaveManager.list_slot_ids 1..∞ pagination (test_arbitrary_saves), headless save overlay page 83 shows slot 500, dist build saves 1..∞ verified via run.py choices (absolute Path)

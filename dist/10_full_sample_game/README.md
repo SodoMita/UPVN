@@ -38,21 +38,41 @@ Expected: all 4 examples + *The Question* parse and trace cleanly. No YAML.
 ## Quickstart (in UPBGE — minimal coding, no .rpy typing)
 
 1. Extract `~/upbge-0.50-linux-x64.tar.xz`
-2. Open `blend/UPVN_Template.blend`
-3. **Enable editor tools:** Edit → Preferences → Add-ons → Install → `blend/upvn_editor_addon.py` → Enable. Then in 3D View or Text Editor press `N` → tab **UPVN**.
-4. **Create game with clicks (no coding):**
+2. **Install the add-on (v0.6+, one file — engine is bundled):**
+   Edit → Preferences → Add-ons → **Install from Disk…** (older UI: Install…) → select
+   `dist/upvn_editor_addon_v0.6.0.zip` (or the raw `blend/upvn_editor_addon.py` when
+   working from the repo) → enable **"UPVN — Visual Novel Editor"**.
+   The UPVN tab (3D View or Text Editor sidebar, `N`) shows **✓ Engine: OK** when ready —
+   if it ever shows ✗, press *Locate Engine…* / *Re-check* (or *Copy engine next to add-on*).
+3. Open `blend/UPVN_Template.blend`
+4. **One click wiring (UPBGE only):** UPVN tab → **Setup Scene** — creates/refreshes
+   cameras, collections, `VNController` object (`script_path`, `upvn_root`), the
+   path-bootstrap `upvn_launcher` text and the `Always (True pulse) → Python` brick.
+   Nothing to wire by hand, pressing it twice is safe.
+5. **Create game with clicks (no coding):**
    - `Create UPVN Project` → creates `//game/script.rpy` with starter `define` + `scene` + `say`
    - `Add Character` (ID, Name, Color) → writes `define e = Character("Eileen", color="#c8ffc8")`
    - `Add Scene` / `Add Show` (asset, position `left/center/right`, `with move/dissolve`) → writes `scene`/`show`
    - `Add Dialogue` (speaker, text with `[var]` and `{b}`) → writes `say`
    - `Add Menu` (caption, 2 choices + jumps) → writes `menu:` with automatic `jump` targets
    - `Validate` → parser checks line/col + hint (friendly errors), `Preview` → headless screenshot to `screenshots/upvn_preview.png`
-5. Scene `VN_Main` contains `Empty: VNController` with logic:
-   ```
-   Always (True pulse) → Python Controller → bge_frontend.frontend.main
-   ```
-6. Set `script_path` property to `//game/script.rpy` or `//examples/99_creator_demo/script.rpy`
+6. The frontend reads **`script_path` from the `VNController` object** — exactly what the
+   panel's `project_path` writes — so the game you build is the game that plays
+   (legacy `//game/script.rpy`, `//script.rpy`, `//examples/…` are fallbacks).
 7. Press `P` to play. Click / Space to advance, `H` history, `Q` quick menu, `S` save, `L` load (arbitrary slots 1..∞), mouse wheel rollback.
+
+## Troubleshooting (was: "Engine not available")
+
+Old add-on versions were a lone `.py`: Blender copied them away from `engine/`, and every
+button died with a bare **"Engine not available"**. Since v0.6:
+
+| Symptom | Fix |
+|---|---|
+| ✗ Engine NOT found in the UPVN tab | Install the **zip release** (engine is inside it) or press *Locate Engine…* and point at the folder containing `engine/`; press *Re-check*. |
+| Add-on installed from an old single `.py` | Enable, then in Preferences → Add-ons → UPVN press *Copy engine next to add-on* (or reinstall from the zip). |
+| "no game script found" in the console when pressing P | The `script_path` on `VNController` points nowhere — set panel `project_path`, press `Create Project`, then `Setup Scene` again. |
+| Running in plain Blender (not UPBGE) | Editing/Validate/Preview work; *Setup Scene* and *P to play* need UPBGE (has the game engine). |
+| Setup Scene in `--background` | Logic-brick operators need the UPBGE UI context — run Setup Scene from the panel, not headless. |
 
 **Headless minimal coding (without Blender):**
 ```bash

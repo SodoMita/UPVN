@@ -1,6 +1,7 @@
-# Current Status — 2026-09-08 (M16 three tiers + 0.5.1 polish + 0.5.2 audit fixes)
+# Current Status — 2026-09-08 (M17 Blender UX hardening + M16 tiers)
 
 ## Last completed
+- M17 Blender/UPBGE UX hardening DONE (2026-09-08): add-on v0.6 self-contained engine discovery (module dir / repo root / zipimport from installed archive / prefs engine_path / open .blend dirs) + live ✓/✗ status rows + Locate Engine/Check/Bundle operators + friendly reports (no more bare "Engine not available"); one-click `Setup Scene` (UPBGE): `build_vn_scene` data-API creates VN_Main+cameras+VN_* collections+planes+VNController(script_path/upvn_root/upvn_bricks)+`upvn_launcher` Text+bricks via official `bpy.ops.logic.*` (UI context; --background skips loudly); `bge_frontend/frontend.py` reads VNController.script_path first + self sys.path bootstrap (wrong/no script bug fixed); `tools/make_template.py` data-API regen → blend/UPVN_Template.blend 110KB (was brickless 96KB), verified inside real UPBGE 0.50 (Blender 5.0.1) via libpulse stub: engine OK / register OK / scene OK; `tools/package_addon.py` → dist/upvn_editor_addon_v0.6.0.zip self-contained (zipimport proven in clean subprocess); tests/test_m17_addon_init.py 5 tests → **113 passed, 2 skipped**
 - M00 Harness done: parser, interpreter, state, headless runner, UPBGE 0.50 download verified (408 MB, Blender 5.0.1), The Question parses and runs 3 paths
 - M01 Kinetic done: 00_minimal_dialogue headless + UPBGE controller + blf typewriter dt via bge_frontend.frontend
 - M02 Display DONE (2026-09-07 late): engine/render/* real BGE texture + headless_renderer 109 PNGs, positions validated
@@ -22,15 +23,14 @@
 - M16 merge + debugging DONE (2026-09-08): merged `feat/declarative-rpy` into `main` (resolved 4 conflicts: vn_interpreter safe_eval kept delegating to expr_eval whitelist, STATUS/CHANGELOG combined, tests use shared TQ_SCRIPT) and pushed. Debug fixes: multi-file dirs no longer require `start` in every `.urpy` (`require_start=False`, checked on merged script); `store.x`/`renpy.store.x`/bare names share one namespace in python blocks (stale-copy overwrite fixed via StoreWrapper over the exec dict + runtime.store_dict); label re-entry resets to `_pristine_labels` so spliced while/if/menu nodes never accumulate; dialogue `[...]` interpolation evaluates whitelisted expressions (`[gold*2]`, `[store.gold]`) with verbatim fallback; `store` injected into expr `extra`. 108 passed, 2 skipped
 
 ## Currently failing / todo
-- None blocker — 108 passed + 2 skipped (renpy_src absent), 0 failures
-- `dist/` tree deleted from working tree (left by prior agent cleanup, uncommitted) — rebuild via `tools/package_game.py` when shipping; don't commit the deletion into a feature commit
-- Next up (not blockers): make `UPVN_GameBuilder` emit declarative forms (`character`/`state`/`set`/`choice`) instead of legacy `define`/`$`; wire `VNState.resolve_asset` into renderers so scene/show/play_music actually resolve manifest paths; wire `engine/ui/pointer.py` into `bge_frontend/frontend.py` (raycast object under cursor → `PointerTracker.update` → `controller.choose(i)`)
-- DLC perf: 108 tests <1s headless; blend/UPVN_Template.blend still 96K (old) — new `tools/make_template.py` would produce 150KB+ when run in UPBGE with libpulse
+- None blocker — 113 passed + 2 skipped (renpy_src absent), 0 failures
+- Interactive-only verification left: `bpy.ops.logic.*` (Always→Python brick) runs in the UPBGE UI; `--background` intentionally skips it (crashes headless in UPBGE 0.50) — someone with a display should press Setup Scene once and P to play, then save the template with bricks committed
+- Next up (not blockers): make `UPVN_GameBuilder` emit declarative forms (`character`/`state`/`set`/`choice`) instead of legacy `define`/`$`; wire `VNState.resolve_asset` into renderers so scene/show/play_music actually resolve manifest paths; wire `engine/ui/pointer.py` into `bge_frontend/frontend.py` (raycast object under cursor → `PointerTracker.update` → `controller.choose(i)`); CI workflow (pytest + package_game + package_addon); publish GitHub release with dist zips
 
 ## Recommended next task
+- Human-in-the-loop acceptance: in real UPBGE UI open blend/UPVN_Template.blend → enable add-on → Setup Scene → Create Project → P; confirm save/load + click choices; then commit the brick-wired template (or update the generator if the UI path differs)
 - Wire `engine/ui/pointer.py` into `bge_frontend/frontend.py` + `VNController` (hover/click over editor-built choice objects → `controller.choose`) — the UI/input half of M15
 - Update `UPVN_GameBuilder.build_rpy()` to emit the canonical declarative forms (and update `test_arbitrary_saves.py::test_blender_builder_minimal_coding`)
-- Polish/DLC: LibLoad real .blend classroom mesh, addon asset browser, publish release + CI
 
 ## Notes
 - Parser requires 4 spaces, spaces not tabs, BOM stripped. Caption inside menu: bare quoted line — see SCRIPT_LANGUAGE_SPEC. Friendly hints for define/jump/menu/label. New: camera zoom 1.2 duration 1.0 with ease, show with move.
