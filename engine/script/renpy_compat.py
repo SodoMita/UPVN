@@ -66,6 +66,7 @@ class RenpyRuntime:
         self.jump_to: Optional[str] = None
         self.call_to: Optional[str] = None
         self.quit_requested: bool = False
+        self.store_dict: Optional[dict] = None  # current python: block namespace (if any)
 
     def reset(self):
         self.jump_to = None
@@ -92,8 +93,11 @@ class RenpyCompat:
 
     @property
     def store(self) -> StoreWrapper:
-        interp = self._runtime.interpreter
-        return StoreWrapper(interp.state.variables if interp else {})
+        d = self._runtime.store_dict
+        if d is None:
+            interp = self._runtime.interpreter
+            d = interp.state.variables if interp else {}
+        return StoreWrapper(d)
 
     # ---- files / labels
     def loadable(self, path: str) -> bool:

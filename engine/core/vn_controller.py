@@ -113,7 +113,8 @@ class VNController:
                 for p in sorted(self.script_path.rglob("*.rpy")):
                     combined += f"\n# file: {p}\n" + p.read_text(encoding="utf-8") + "\n"
                 for p in sorted(self.script_path.rglob("*.urpy")):
-                    d = parse_file(str(p))  # urpy dispatches to its own parser
+                    # multi-file games: entry `start` label may live in another file
+                    d = parse_file(str(p), require_start=False)
                     merged = _merge_scripts(merged, d)
                 if combined.strip():
                     base = parse_string(combined, filename=str(self.script_path), mode=self.mode)

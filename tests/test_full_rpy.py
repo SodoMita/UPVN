@@ -327,3 +327,144 @@ def test_urpy_tier_rejects_python_and_legacy_forms():
     ):
         with pytest.raises(ParseError):
             parse_urpy_string(bad)
+
+
+def test_multifile_directory_urpy_rpy_merge():
+    """Multi-file game dirs: .rpy + .urpy merge; `start` may live in another file."""
+    import tempfile
+    from pathlib import Path
+    from engine.core.vn_controller import VNController
+
+    tmp = Path(tempfile.mkdtemp())
+    (tmp / "prologue.rpy").write_text(r'''
+define e = Character("Eileen", color="#c8ffc8")
+default points = 10
+label start():
+    e "From rpy: [points] points."
+    jump urpy_label
+''', encoding="utf-8")
+    (tmp / "chapter.urpy").write_text(r'''
+state:
+    route: str = "none"
+end
+label urpy_label:
+    set route = "merged"
+    e "From urpy: route [route]."
+    return
+end
+''', encoding="utf-8")
+
+    c = VNController(script_path=tmp, mode="full")
+    trace = c.run_headless()
+    texts = [ev["text"] for ev in trace if ev["type"] == "say"]
+    assert "From rpy: 10 points." in texts
+    assert "From urpy: route merged." in texts
+    assert c.state.variables["route"] == "merged"
+    assert c.state.variables["points"] == 10
+    assert c.state.characters["e"].name == "Eileen"
+
+
+def test_single_urpy_file_still_requires_start():
+    from engine.script.parser import parse_file
+    import tempfile
+    from pathlib import Path
+    tmp = Path(tempfile.mkdtemp())
+    (tmp / "nostart.urpy").write_text('label foo:\n    "x"\n    return\nend\n', encoding="utf-8")
+    with pytest.raises(ParseError):
+        parse_file(str(tmp / "nostart.urpy"))
+
+
+# ------------------------------------------------------------------ regressions from debugging pass
+def test_python_block_store_and_bare_names_consistent():
+    """`store.x`, `renpy.store.x` and bare `x` must share one namespace."""
+    d = parse_string_full(r'''
+default gold = 7
+label start():
+    python:
+        store.gold += 3
+    python:
+        renpy.store.gold += 5
+    python:
+        bare = 99
+        store.gold += 1
+    "gold=[gold] bare=[bare]"
+    return
+''')
+    interp = VNInterpreter(d)
+    trace = interp.run_headless()
+    assert interp.state.variables["gold"] == 16
+    assert interp.state.variables["bare"] == 99
+    texts = [ev["text"] for ev in trace if ev["type"] == "say"]
+    assert texts == ["gold=16 bare=99"]
+
+
+def test_expression_interpolation_in_dialogue():
+    from engine.core.vn_interpreter import interpolate
+    assert interpolate("x=[x] y=[y*2]", {"x": 3, "y": 4}) == "x=3 y=8"
+    # unresolved/invalid stays verbatim (never crashes the line)
+    assert interpolate("z=[bogus.attr]", {}) == "z=[bogus.attr]"
+    assert interpolate("nope=[1/0]", {}) == "nope=[1/0]"
+    # full mode: store.* interpolates
+    d = parse_string_full('label start():\n    "gold=[store.gold]"\n    return\n')
+    interp = VNInterpreter(d)
+    interp.state.variables["gold"] = 5
+    trace = interp.run_headless()
+    assert [ev["text"] for ev in trace if ev["type"] == "say"] == ["gold=5"]
+
+
+def test_label_reentry_no_spliced_node_accumulation():
+    """Re-entering a label must not re-run previously spliced while/if/menu nodes."""
+    d = parse_string_full(r'''
+label start():
+    call loop(3)
+    call loop(2)
+    return
+label loop(x):
+    while x > 0:
+        $ x -= 1
+    "iter"
+    return
+''')
+    interp = VNInterpreter(d)
+    trace = interp.run_headless()
+    assert [ev["value"] for ev in trace if ev["type"] == "assign"] == [2, 1, 0, 1, 0]
+
+
+def test_menu_reentry_uses_fresh_choices():
+    d = parse_string_full(r'''
+label start():
+    call pick()
+    call pick()
+    return
+label pick():
+    menu:
+        "A":
+            "chose A"
+        "B":
+            "chose B"
+    "after"
+    return
+''')
+    interp = VNInterpreter(d)
+    trace = interp.run_headless(choices=[0, 1])
+    texts = [ev["text"] for ev in trace if ev["type"] == "say"]
+    assert texts == ["chose A", "after", "chose B", "after"]
+
+
+def test_if_reentry_no_duplicate_branch():
+    d = parse_string_full(r'''
+default flag = True
+label start():
+    call check()
+    call check()
+    return
+label check():
+    if flag:
+        "yes"
+    "end"
+    return
+''')
+    interp = VNInterpreter(d)
+    trace = interp.run_headless()
+    texts = [ev["text"] for ev in trace if ev["type"] == "say"]
+    assert texts == ["yes", "end", "yes", "end"]
