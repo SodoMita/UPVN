@@ -65,10 +65,19 @@ class VNState:
     instruction_index: int = 0
     call_stack: List[Dict[str, Any]] = field(default_factory=list)
 
-    # variables declared via `default` or `$`
+    # variables declared via `default` / `state:` and mutated via `set` / `$`
     variables: Dict[str, Any] = field(default_factory=dict)
+    # optional type declarations from a declarative `state:` block
+    # (var name -> "int"|"float"|"str"|"bool"|"list"); empty means untyped
+    declared_types: Dict[str, str] = field(default_factory=dict)
 
-    # character registry (define)
+    # declarative asset manifest (image/audio/stage declarations)
+    #   assets = {"images": {name: path}, "audio": {name: path}, "stages": {name: path}}
+    assets: Dict[str, Dict[str, str]] = field(
+        default_factory=lambda: {"images": {}, "audio": {}, "stages": {}}
+    )
+
+    # character registry (define / character block)
     characters: Dict[str, CharacterDef] = field(default_factory=dict)
 
     # presentation
@@ -77,6 +86,11 @@ class VNState:
 
     # audio
     audio: AudioState = field(default_factory=AudioState)
+
+    # full-tier presentation toggles (window show/hide/auto, nvl mode)
+    window: str = "auto"
+    nvl: Optional[str] = None
+    nvl_mode: str = "adv"
 
     # 3D stage (hybrid mode stub — LLM can populate via python)
     stage: Optional[str] = None          # e.g. "classroom_3d"
@@ -128,6 +142,13 @@ class VNState:
     def get_character_name(self, who_id: str) -> str:
         c = self.characters.get(who_id)
         return c.name if c else who_id
+
+    def resolve_asset(self, kind: str, name: str) -> str:
+        """Resolve a declared asset name to its path (falls back to the name).
+
+        kind is one of "images", "audio", "stages".
+        """
+        return self.assets.get(kind, {}).get(name, name)
 
     def clone(self) -> "VNState":
         return copy.deepcopy(self)

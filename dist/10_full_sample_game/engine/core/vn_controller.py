@@ -44,11 +44,44 @@ except ImportError:
     bge = None  # type: ignore
 
 
+def _merge_scripts(a: dict | None, b: dict | None) -> dict:
+    """Merge two parsed script dicts (used for multi-file game dirs)."""
+    out: dict = {
+        "labels": {}, "characters": {}, "defaults": {}, "types": {},
+        "assets": {"images": {}, "audio": {}, "stages": {}},
+        "label_params": {}, "defines": {}, "init_python": [],
+        "transforms": {}, "screens": {}, "styles": {}, "translations": {},
+    }
+    for d in (a, b):
+        if not d:
+            continue
+        out["labels"].update(d.get("labels", {}))
+        out["characters"].update(d.get("characters", {}))
+        out["defaults"].update(d.get("defaults", {}))
+        out["types"].update(d.get("types", {}))
+        for kind in ("images", "audio", "stages"):
+            out["assets"][kind].update(d.get("assets", {}).get(kind, {}))
+        out["label_params"].update(d.get("label_params", {}))
+        out["defines"].update(d.get("defines", {}))
+        out["init_python"].extend(d.get("init_python", []))
+        out["transforms"].update(d.get("transforms", {}))
+        out["screens"].update(d.get("screens", {}))
+        out["styles"].update(d.get("styles", {}))
+        out["translations"].update(d.get("translations", {}))
+        if d.get("full"):
+            out["full"] = True
+        if d.get("language") == "urpy":
+            out["language"] = "urpy"
+    return out
+
+
 class VNController:
-    def __init__(self, script_path: str | Path | None = None, script_dict: dict | None = None, state: Optional[VNState] = None):
+    def __init__(self, script_path: str | Path | None = None, script_dict: dict | None = None,
+                 state: Optional[VNState] = None, mode: str = "safe"):
         self.script_path = Path(script_path) if script_path else None
         self.script_dict = script_dict
         self.state = state or VNState()
+        self.mode = mode  # "safe" (default declarative subset) | "full" (drop-in Ren'Py)
         self.interp: Optional[VNInterpreter] = None
         self._gen = None
         self._current_event: Optional[dict] = None
@@ -72,16 +105,23 @@ class VNController:
                 raise ValueError("no script_path or script_dict provided")
             if parse_file is None:
                 raise ImportError("parser not available")
-            # handle directory containing multiple .rpy files (manifest-free for Tier1)
+            # handle directory containing multiple .rpy/.urpy files (manifest-free for Tier1)
             if self.script_path.is_dir():
                 # scan all .rpy recursively, merge — Ren'Py scans whole game/ dir
-                # For UPVN we use explicit manifest later, but for Tier1 just concatenate
                 combined = ""
+                merged = None
                 for p in sorted(self.script_path.rglob("*.rpy")):
                     combined += f"\n# file: {p}\n" + p.read_text(encoding="utf-8") + "\n"
-                self.script_dict = parse_string(combined, filename=str(self.script_path))
+                for p in sorted(self.script_path.rglob("*.urpy")):
+                    # multi-file games: entry `start` label may live in another file
+                    d = parse_file(str(p), require_start=False)
+                    merged = _merge_scripts(merged, d)
+                if combined.strip():
+                    base = parse_string(combined, filename=str(self.script_path), mode=self.mode)
+                    merged = _merge_scripts(merged, base)
+                self.script_dict = merged
             else:
-                self.script_dict = parse_file(str(self.script_path))
+                self.script_dict = parse_file(str(self.script_path), mode=self.mode)
                 # hash for save compatibility
                 import hashlib
                 txt = Path(self.script_path).read_text(encoding="utf-8")
