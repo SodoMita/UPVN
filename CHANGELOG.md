@@ -1,5 +1,41 @@
 # Changelog
 
+## 0.6.2 — 2026-09-08 Blender/UPBGE UX hardening (M17) — round 2, verified in real X11
+- **Add-on enable can no longer crash UPBGE startup.** The field crash
+  `AttributeError: '_RestrictData' object has no attribute 'filepath'` (engine
+  discovery reading the open .blend path while the add-on is enabled before a
+  file is loaded) is fixed: `bpy.data.filepath` is read via `getattr`, and both
+  `ensure_engine()` and `register()` are exception-proof end-to-end. Verified in
+  the real UPBGE 0.50 UI (X11/Xvfb): registration with an open file AND at
+  startup without a file both print `[UPVN] Editor addon v0.6 registered`.
+- **Install zip layout v0.6.2: single top-level folder.** v0.6.0 also placed
+  `engine/` + `bge_frontend/` at the zip root; installing it extracted those into
+  the add-ons folder, where Blender scanned them as add-ons and spammed
+  `Warning: add-on missing 'bl_info'` at every startup. The zip now contains only
+  `upvn_editor_addon/` (add-on + engine + frontend + template). If the zip is
+  dropped in compressed instead of installed, the add-on shows a clear hint
+  ("install via Install from Disk…") instead of failing silently.
+- **Shipped `blend/UPVN_Template.blend` is now pre-wired and playable.**
+  Previously the committed template had NO logic bricks (they could only be
+  added in the UI), so pressing P started the game engine with nothing running —
+  the exact "same frozen scene, no interaction" symptom. `tools/make_template.py`
+  is now run in an interactive X11 session during generation, so the committed
+  file contains the full wiring: `VNController` object + `upvn_launcher` text +
+  `Always (True pulse) → Python (SCRIPT, upvn_launcher)` brick, linked
+  (verified: `sensor.controllers == ['UPVN_Main']`, mode SCRIPT, text set).
+  Pressing P in UPBGE now runs the game (frontend → VNController → click/Space
+  advances via bge.logic keyboard/mouse polling in `VNController.update`).
+- **Runtime robustness**: frontend per-frame `ctrl.update` is guarded — one
+  missing asset no longer spams tracebacks every frame; the blf overlay is also
+  registered for the no-script fallback; the launcher prints a one-time hint when
+  the engine can't be imported at game runtime.
+- Verification: registration OK in real UPBGE 0.50 UI with and without an open
+  file; bricks verified present+linked in the saved template; scene build under
+  X11; 113 passed, 2 skipped headless. (Full P-to-play needs a real display/GPU —
+  the sandbox GL segfaults on game start, the user machine does not.)
+- Tests: `tests/test_m17_addon_init.py` updated to the single-folder zip layout
+  (extract-and-import proof + compressed-drop hint proof).
+
 ## 0.6.2 — 2026-09-08 Blender/UPBGE UX hardening (M17) — "Engine not available" is gone
 - **Add-on v0.6 is self-contained.** Engine discovery now searches, in order: the engine folder from add-on preferences (new *Locate Engine…* button), the folder next to the add-on (repo `blend/`, extracted add-on), the add-on's own install `.zip` (zipimport fallback with `engine/` at archive root), and the open `.blend`'s folder/parents. Panels show a live ✓/✗ status row; operators report *what* was searched instead of a bare "Engine not available"; new *Check Engine*, *Locate Engine…*, *Copy engine next to add-on* actions in Preferences → Add-ons → UPVN.
 - **One-click Setup Scene (UPBGE).** `blend/upvn_editor_addon.py` gained `build_vn_scene()` — pure data-API, idempotent, no `bpy.ops` context traps: creates `VN_Main`, ortho + 3D cameras, the five `VN_*` collections, BG/Dialogue planes, the `VNController` object (`script_path`, `upvn_root`, `upvn_bricks`), a path-bootstrap `upvn_launcher` Text datablock, and the Always(pulse) → Python controller brick via the same `bpy.ops.logic.*` API UPBGE's own add-ons use. In `--background` runs (no UI context for the logic operators) bricks are skipped with an explicit note instead of a half-wired scene.

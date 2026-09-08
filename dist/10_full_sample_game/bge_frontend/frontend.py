@@ -110,6 +110,17 @@ def _owner_script_prop(cont):
     return owner
 
 
+def _register_overlay():
+    """Append the blf overlay to the current scene's post_draw (once per scene)."""
+    try:
+        import bge as _bge
+        sc = _bge.logic.getCurrentScene()
+        if draw_overlay not in sc.post_draw:
+            sc.post_draw.append(draw_overlay)
+    except Exception:
+        pass
+
+
 def main(cont=None):
     """Entry for UPBGE Python controller. Called every frame."""
     if not HAS_BGE:
@@ -131,11 +142,7 @@ def main(cont=None):
                 ctrl = VNController(script_path=path)
                 ctrl.load()
                 logic._upvn_ctrl = ctrl
-                try:
-                    sc = _bge.logic.getCurrentScene()
-                    sc.post_draw.append(draw_overlay)
-                except Exception:
-                    pass
+                _register_overlay()
                 print(f"[UPVN] Loaded script {path} (from {'VNController.script_path' if owner is not None else 'candidate'})")
             except Exception as e:
                 print(f"[UPVN] failed to load {path}: {e}")
@@ -150,6 +157,7 @@ def main(cont=None):
             ctrl = VNController(script_dict=script)
             ctrl.load()
             logic._upvn_ctrl = ctrl
+            _register_overlay()
 
     # per-frame tick with dt
     global _last_time
@@ -159,7 +167,18 @@ def main(cont=None):
     # clamp dt
     dt = min(0.05, max(0.0, dt))
     ctrl = logic._upvn_ctrl
-    ctrl.update(dt=dt)
+    try:
+        ctrl.update(dt=dt)
+    except Exception as e:
+        # one missing asset must never spam the console every frame nor kill the game
+        if not getattr(logic, "_upvn_tick_error", False):
+            logic._upvn_tick_error = True
+            print(f"[UPVN] tick error (shown once, game keeps running): {e}")
+            try:
+                import traceback
+                traceback.print_exc()
+            except Exception:
+                pass
     # also tick sub-managers for transitions
     try:
         if ctrl.sprite_mgr:

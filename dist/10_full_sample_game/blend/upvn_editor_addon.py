@@ -21,7 +21,7 @@ Why v0.6 exists
 
 Install (two supported ways)
   A. Dist zip (recommended):
-        dist/upvn_editor_addon_v0.6.zip  → Edit → Preferences → Add-ons →
+        dist/upvn_editor_addon_v0.6.2.zip  → Edit → Preferences → Add-ons →
            Install from Disk… (or Install…) → select the .zip → enable "UPVN".
      Engine, frontend and template travel inside the zip; nothing else needed.
   B. Repo checkout:
@@ -45,7 +45,7 @@ Headless fallback: when bpy unavailable (CI), the module still imports and expos
 bl_info = {
     "name": "UPVN — Visual Novel Editor",
     "author": "UPVN",
-    "version": (0, 6, 0),
+    "version": (0, 6, 2),
     "blender": (4, 2, 0),
     "location": "View3D > Sidebar > UPVN, Text Editor > Sidebar > UPVN",
     "description": "Create Ren'Py-like visual novel inside UPBGE with minimal coding — self-contained engine, one-click scene setup, characters, scenes, dialogue, menus, arbitrary saves, preview",
@@ -113,8 +113,13 @@ def _engine_candidates():
     except Exception:
         pass
     # 3) next to the open .blend file (project lives inside a repo/checkout)
+    #    NB: some UPBGE builds expose no bpy.data.filepath during startup
+    #    (AttributeError seen in the field) — never let this crash discovery.
     if HAS_BPY and bpy is not None and getattr(bpy, "data", None):
-        fp = bpy.data.filepath
+        try:
+            fp = getattr(bpy.data, "filepath", "") or ""
+        except Exception:
+            fp = ""
         if fp:
             try:
                 bdir = os.path.dirname(os.path.abspath(bpy.path.abspath(fp)))
@@ -127,16 +132,35 @@ def _engine_candidates():
     return out
 
 
+def _zip_namelist_norm(path):
+    """Normalised member names of a zip ('/' separators), or None."""
+    try:
+        with zipfile.ZipFile(path) as zf:
+            return {n.replace("\\", "/") for n in zf.namelist()}
+    except Exception:
+        return None
+
+
+def _zip_engine_member(path):
+    """Member path of engine/script/parser.py inside the zip, or None.
+
+    Returns 'engine/script/parser.py' when the engine sits at the zip root
+    (importable via zipimport), or e.g. 'upvn_editor_addon/engine/script/parser.py'
+    when it is nested in the add-on folder (needs extraction to import)."""
+    names = _zip_namelist_norm(path)
+    if names is None:
+        return None
+    if "engine/script/parser.py" in names:
+        return "engine/script/parser.py"
+    hits = sorted(n for n in names if n.endswith("/engine/script/parser.py"))
+    return hits[0] if hits else None
+
+
 def _candidate_is_engine(kind, path):
     if kind == "dir":
         return os.path.isfile(os.path.join(path, "engine", "script", "parser.py"))
     if kind == "zip":
-        try:
-            with zipfile.ZipFile(path) as zf:
-                names = zf.namelist()
-            return any(n.startswith("engine/script/parser.py") or n.startswith("engine\\script\\parser.py") for n in names)
-        except Exception:
-            return False
+        return _zip_engine_member(path) == "engine/script/parser.py"
     return False
 
 
@@ -166,9 +190,8 @@ def _import_engine_api():
 
 def ensure_engine(retry=False):
     """Locate and import the engine. Idempotent; retry=True re-scans.
-
-    Returns (ok: bool, ENGINE_INFO dict). Public API used by tests + operators.
-    """
+    NEVER raises — returns (ok: bool, ENGINE_INFO dict) in every case.
+    Public API used by tests + operators."""
     global ENGINE_INFO, _engine_api, ENGINE_AVAILABLE
     if ENGINE_AVAILABLE and not retry:
         return True, ENGINE_INFO
@@ -178,26 +201,49 @@ def ensure_engine(retry=False):
     searched = []
     info = {"status": "not_found", "root": None, "source": None,
             "message": "", "searched": searched}
-    for kind, path, desc in _engine_candidates():
+    nested_zip_hint = None
+    try:
+        candidates = _engine_candidates()
+    except Exception as exc:          # discovery itself must never crash
+        info.update(status="error", message=f"discovery failed: {exc}")
+        ENGINE_INFO = info
+        return False, info
+    for kind, path, desc in candidates:
         searched.append(f"{desc}: {path}")
-        if _candidate_is_engine(kind, path):
-            try:
-                _add_to_syspath(kind, path)
-                _p, _vc, _sm = _import_engine_api()
-                info.update(status="ok", root=path, source=desc,
-                            message=f"engine found via {desc}")
-                _engine_api = (_p, _vc, _sm)
-                ENGINE_AVAILABLE = True
-            except Exception as exc:  # engine present but broken (missing dep…)
-                info.update(status="error", root=path, source=desc,
-                            message=f"engine found at {path} but import failed: {exc}")
-                ENGINE_INFO = info
-                return False, info
-            break
+        try:
+            if kind == "zip":
+                member = _zip_engine_member(path)
+                if member is None:
+                    continue
+                if member != "engine/script/parser.py":
+                    nested_zip_hint = nested_zip_hint or path
+                    continue          # nested engine: only importable after extraction
+            if not _candidate_is_engine(kind, path):
+                continue
+        except Exception:
+            continue                  # a broken candidate must not stop the scan
+        try:
+            _add_to_syspath(kind, path)
+            _p, _vc, _sm = _import_engine_api()
+            info.update(status="ok", root=path, source=desc,
+                        message=f"engine found via {desc}")
+            _engine_api = (_p, _vc, _sm)
+            ENGINE_AVAILABLE = True
+        except Exception as exc:      # engine present but broken (missing dep…)
+            info.update(status="error", root=path, source=desc,
+                        message=f"engine found at {path} but import failed: {exc}")
+            ENGINE_INFO = info
+            return False, info
+        break
     if not ENGINE_AVAILABLE:
-        info["message"] = ("no engine/ folder found — install the UPVN zip release "
-                           "(bundles engine) or set the engine folder in "
-                           "Preferences → Add-ons → UPVN (Locate Engine…)")
+        if nested_zip_hint:
+            info["message"] = ("engine is inside the add-on zip but not at its root — "
+                               "install via Preferences → Add-ons → Install from Disk… "
+                               "(extracts the folder) instead of unpacking by hand")
+        else:
+            info["message"] = ("no engine/ folder found — install the UPVN zip release "
+                               "(bundles engine) or set the engine folder in "
+                               "Preferences → Add-ons → UPVN (Locate Engine…)")
     ENGINE_INFO = info
     return ENGINE_AVAILABLE, info
 
@@ -680,8 +726,16 @@ if '_upvn_booted' not in bge.logic.__dict__:
             sys.path.append(_r)
     bge.logic._upvn_booted = True
 
-import bge_frontend.frontend as _upvn_frontend
-_upvn_frontend.main(_cont)
+try:
+    import bge_frontend.frontend as _upvn_frontend
+    _upvn_frontend.main(_cont)
+except Exception:
+    import traceback
+    if '_upvn_launch_error' not in bge.logic.__dict__:
+        bge.logic._upvn_launch_error = True
+        traceback.print_exc()
+        print('[UPVN] launcher error (shown once) - is the engine/ folder next to '
+              'this .blend or inside the installed add-on?')
 """
 
     def _engine_root_relative(blend_dir):
@@ -1285,12 +1339,20 @@ _upvn_frontend.main(_cont)
                UPVN_PT_MainPanel, UPVN_PT_TextPanel)
 
     def register():
-        for cls in classes:
-            bpy.utils.register_class(cls)
-        bpy.types.Scene.upvn_props = bpy.props.PointerProperty(type=UPVN_SceneProps)
-        ok, info = ensure_engine(retry=True)
-        print(f"[UPVN] Editor addon v0.6 registered — engine: {'OK via ' + str(info['source']) if ok else 'NOT FOUND (' + str(info['message'])[:120] + ')'}")
-        print("[UPVN] Panels: View3D > Sidebar > UPVN | Text Editor > Sidebar > UPVN")
+        try:
+            for cls in classes:
+                bpy.utils.register_class(cls)
+            bpy.types.Scene.upvn_props = bpy.props.PointerProperty(type=UPVN_SceneProps)
+            ok, info = ensure_engine(retry=True)
+            print(f"[UPVN] Editor addon v0.6 registered — engine: {'OK via ' + str(info['source']) if ok else 'NOT FOUND (' + str(info['message'])[:120] + ')'}")
+            print("[UPVN] Panels: View3D > Sidebar > UPVN | Text Editor > Sidebar > UPVN")
+        except Exception as exc:      # never let an add-on enable crash Blender startup
+            print(f"[UPVN] register() error (add-on partially enabled): {exc}")
+            try:
+                import traceback
+                traceback.print_exc()
+            except Exception:
+                pass
 
     def unregister():
         for cls in reversed(classes):
