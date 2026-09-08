@@ -63,14 +63,6 @@ from ..core.vn_errors import ParseError
 _re_label = re.compile(r"^label\s+(\w+)\s*:\s*$")
 _re_define = re.compile(r'^define\s+(\w+)\s*=\s*Character\s*\((.*)\)\s*$', re.S)
 _re_default = re.compile(r"^default\s+([\w.]+)\s*=\s*(.+)\s*$", re.S)
-_re_scene = re.compile(r"^scene\s+(.+?)(?:\s+with\s+(\w+))?\s*$")
-_re_show = re.compile(r"^show\s+(.+?)(?:\s+with\s+(\w+))?\s*$")
-_re_hide = re.compile(r"^hide\s+(\w+)(?:\s+with\s+(\w+))?\s*$")
-_re_with = re.compile(r"^with\s+(\w+)\s*$")
-_re_play_music = re.compile(r'^play\s+music\s+(?:"([^"]+)"|\'([^\']+)\'|(\S+))(?:\s+fadein\s+([\d.]+))?\s*$')
-_re_play_sound = re.compile(r'^play\s+sound\s+(?:"([^"]+)"|\'([^\']+)\'|(\S+))\s*$')
-_re_play_voice = re.compile(r'^play\s+voice\s+(?:"([^"]+)"|\'([^\']+)\'|(\S+))\s*$')
-_re_stop = re.compile(r"^stop\s+(music|sound|voice)(?:\s+fadeout\s+([\d.]+))?\s*$")
 _re_jump = re.compile(r"^jump\s+(\w+)\s*$")
 _re_call = re.compile(r"^call\s+(\w+)\s*$")
 _re_return = re.compile(r"^return\s*$")
@@ -79,7 +71,6 @@ _re_if = re.compile(r"^if\s+(.+)\s*:\s*$")
 _re_elif = re.compile(r"^elif\s+(.+)\s*:\s*$")
 _re_else = re.compile(r"^else\s*:\s*$")
 _re_assign = re.compile(r"^\$\s*(.+)\s*$", re.S)
-_re_pause = re.compile(r"^pause\s+([\d.]+)\s*$")
 # 3D stubs — python-driven but parseable
 _re_load_stage = re.compile(r"^load_stage\s+(\w+)\s*$")
 _re_show3d = re.compile(r"^show3d\s+(\w+)(?:\s+at\s+(\w+))?\s*$")
@@ -89,8 +80,6 @@ _re_camera_zoom = re.compile(r"^camera\s+zoom\s+([\d.]+)(?:\s+duration\s+([\d.]+
 _re_camera_zoom_alt = re.compile(r"^camera\s+zoom\s+([\d.]+)(?:\s+with\s+(\w+))?(?:\s+duration\s+([\d.]+))?\s*$")
 
 # say:  s "text"  or  e happy "text"
-_re_say = re.compile(r'^(\w+)(?:\s+(\w+))?\s+"(.*)"\s*$')
-_re_nar = re.compile(r'^"(.*)"\s*$')
 
 # Character args parser (very subset): _("Name") or "Name", color="#..."
 _re_char_name_tr = re.compile(r'_\(\s*"(.*?)"\s*\)')
@@ -134,13 +123,11 @@ _re_queue_music = re.compile(r'^queue\s+music\s+(?:"([^"]+)"|\'([^\']+)\'|(\S+))
 _re_queue_sound = re.compile(r'^queue\s+sound\s+(?:"([^"]+)"|\'([^\']+)\'|(\S+))\s*$')
 _re_jump_expr = re.compile(r"^jump\s+expression\s+(.+)\s*$")
 _re_call_expr = re.compile(r"^call\s+expression\s+(.+)\s*$")
-_re_label_params = re.compile(r"^label\s+(\w+)\s*\(([^)]*)\)\s*:\s*$")
 _re_call_args = re.compile(r"^call\s+(\w+)\s*\(([^)]*)\)\s*$")
 _re_define_generic = re.compile(r"^define\s+([\w.]+)\s*=\s*(.+)\s*$", re.S)
 _re_transform = re.compile(r"^transform\s+(\w+)\s*:\s*$")
 _re_screen = re.compile(r"^screen\s+(\w+)\s*(?:\(([^)]*)\))?\s*:\s*$")
 _re_style_block = re.compile(r"^style\s+(\w+)\s*(?:is\s+(\w+))?\s*:\s*$")
-_re_style_prop = re.compile(r"^style\s+([\w.]+)\s*=\s*(.+)\s*$")
 _re_translate = re.compile(r"^translate\s+([\w.]+)\s+(.+?)\s*:\s*$")
 _re_show_screen = re.compile(r"^show\s+screen\s+(\w+)\s*$")
 _re_hide_screen = re.compile(r"^hide\s+screen\s+(\w+)\s*$")
@@ -153,13 +140,11 @@ _re_bare_from = re.compile(r"^from\s+([\w.]+)\s*$")
 _re_call_from = re.compile(r"^call\s+(.+?)\s+from\s+([\w.]+)\s*$")
 _re_jump_from = re.compile(r"^jump\s+(.+?)\s+from\s+([\w.]+)\s*$")
 # screen statements with arguments / transition
-_re_call_screen_args = re.compile(r"^call\s+screen\s+([\w.]+)\s*(?:\((.*)\))?\s*(?:with\s+(.+?))?\s*$")
 _re_show_screen_args = re.compile(r"^show\s+screen\s+([\w.]+)\s*(?:\((.*)\))?\s*(?:with\s+(.+?))?\s*$")
 _re_hide_screen_args = re.compile(r"^hide\s+screen\s+([\w.]+)\s*$")
 # `for x in items:`
 _re_for = re.compile(r"^for\s+(.+?)\s+in\s+(.+?)\s*:\s*$")
 # voice attributes:  who @ attr "text"
-_re_voice_attr = re.compile(r"^(\w+)\s+@\s*(\w+)\s*(.*)$")
 # generic transition:  with Dissolve(0.5) / with hp8 / with None
 _re_with_any = re.compile(r"^with\s+(.+?)\s*$")
 # pause:  pause / pause 1.0 / pause delay / pause 1.0 with fade
@@ -185,12 +170,7 @@ _re_screen_full = re.compile(
     r"(?:zorder\s+\d+)?\s*(?:predict\s+\S+)?\s*:\s*$")
 _re_transform_full = re.compile(r"^transform\s+(\w+)\s*(?:\(([^)]*)\))?\s*:\s*$")
 # default / define with a dotted name:  default preferences.text_cps = 60
-_re_default_dotted = re.compile(r"^default\s+([\w.]+)\s*=\s*(.+)$", re.S)
 # display statements (scene/show/hide) with any clauses
-_re_scene_any = re.compile(r"^scene\b\s*(.*)$")
-_re_show_any = re.compile(r"^show\b\s*(.*)$")
-_re_hide_any = re.compile(r"^hide\b\s*(.*)$")
-_re_camera_any = re.compile(r"^camera\b\s*(.*)$")
 
 
 def _parse_character_args(inner: str) -> Tuple[str, str, dict]:
@@ -393,22 +373,6 @@ def _split_say(text: str):
         "kwargs": kwargs or None,
         "inline": inline or None,
     }
-
-
-def _matching_open_paren(text: str) -> Optional[int]:
-    """Index of the ``(`` matching the trailing ``)`` of ``text`` (or None)."""
-    if not text.endswith(")"):
-        return None
-    depth = 0
-    for i in range(len(text) - 1, -1, -1):
-        ch = text[i]
-        if ch == ")":
-            depth += 1
-        elif ch == "(":
-            depth -= 1
-            if depth == 0:
-                return i
-    return None
 
 
 def _matching_close_paren(text: str) -> Optional[int]:
