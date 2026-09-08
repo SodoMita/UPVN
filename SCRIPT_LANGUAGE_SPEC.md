@@ -1,6 +1,20 @@
-# Script Language Spec — UPVN `.rpy` subset (Tier 1-2)
+# Script Language Spec — UPVN script language (three tiers, one IR)
 
-**.rpy is parsed directly** — no YAML/JSON is the source. This mirrors Ren'Py's own `renpy/lexer.py` + `renpy/parser.py` → `renpy.ast`. Our `engine/script/lexer.py` + `parser.py` are a 500-line subset with friendlier errors.
+**.rpy is parsed directly** — no YAML/JSON is the source. This mirrors Ren'Py's own `renpy/lexer.py` + `renpy/parser.py` → `renpy.ast`. Our `engine/script/lexer.py` + `parser.py` are a subset with friendlier errors.
+
+## Three language tiers (one internal IR)
+
+All three compile to the **same IR** (`{"labels", "characters", "defaults", "types", "assets", …}`), so the interpreter and the whole engine treat them identically.
+
+| Tier | File | Parser | Embedded Python | Use |
+|------|------|--------|-----------------|-----|
+| 1 — `.urpy` declarative | `.urpy` | `engine/script/urpy_parser.py` | **none** (no `$`, `define`, `default`, `python:`/`init`) | strict, analyzable, editor-authored |
+| 2 — `.rpy` safe subset | `.rpy` | `parser.parse(mode='safe')` (default) | none — full-tier constructs are rejected with guidance | declarative Ren'Py-like scripts |
+| 3 — `.rpy` full | `.rpy` | `parser.parse(mode='full')` / `parse_string_full` | **yes** — `python:`/`init`, `while`, `$`, `renpy.*` compat | drop-in Ren'Py replacement |
+
+Tier 3 additionally populates `label_params`, `defines`, `init_python`, `transforms`, `screens`, `styles`, `translations`, and sets `"full": true` in the IR. Tier 1 sets `"language": "urpy"`.
+
+`VNController(script_path, mode="safe"|"full")`; `tools/run_headless.py` / `tools/validate.py` accept `--mode safe|full`. `.urpy` files are auto-dispatched by extension.
 
 ## Files & encoding
 
@@ -13,17 +27,23 @@
 ## Top-level statements (indent 0)
 
 ```ebnf
-file := (define | default | label)*
+file := (define | default | state | character | image | audio | stage | label)*
 define := "define" ID "=" "Character" "(" char_args ")" newline
 default := "default" ID "=" literal newline
-label := "label" ID ":" newline block
+state := "state" ":" newline (typed_var | var)* "end"?
+typed_var := ID ":" TYPE ("=" literal)? newline
+character := "character" ID ":" newline (name | color)* "end"?
+image := "image" image_name "=" path newline
+audio := "audio" ID "=" path newline
+stage := "stage" ID "=" path newline
+label := "label" ID ":" newline block "end"?
 ```
 
 `define`/`default` may appear in any order but must be top-level. Missing `label start:` is an error.
 
-`literal` for `default`: `True` | `False` | `None` | INT | FLOAT | `"..."` | `'...'`.
+`literal` for `default` / `state:`: `True` | `False` | `None` | INT | FLOAT | `"..."` | `'...'` | `[...]` (evaluated via `ast.literal_eval`, never code).
 
-Example:
+Example (legacy forms — still supported):
 
 ```rpy
 define e = Character("Eileen", color="#c8ffc8")
@@ -32,6 +52,79 @@ default book = False
 label start:
     ...
 ```
+
+## Declarative forms (canonical — what the editor generates)
+
+The language is **declarative**: no `python:` blocks, no `$` required. The
+legacy Ren'Py-like forms above still parse (for compatibility with existing
+scripts and *The Question*), but the canonical forms below are preferred.
+
+```rpy
+# assets — explicit manifest (no filename guessing)
+image "bg classroom" = "backgrounds/classroom.png"
+image eileen happy = "characters/eileen/happy.png"
+audio theme = "music/theme.ogg"
+stage classroom_3d = "stages/classroom.blend"
+
+# characters — declarative block
+character e:
+    name "Eileen"
+    color "#c8ffc8"
+
+# typed state — declared, saved, rollback-safe
+state:
+    affection: int = 0
+    route: str = "none"
+    has_key: bool = False
+    inventory: list = []
+
+label start:
+    scene bg classroom with fade
+    show eileen happy at center
+    e "Hi. Affection is [affection]."
+
+    menu:
+        choice "Help Eileen":
+            set affection += 1
+            set route = "good"
+        end
+        choice "Ignore her":
+            set route = "neutral"
+        end
+    end
+
+    if affection >= 1:
+        jump good
+    else:
+        jump neutral
+    end
+    return
+end
+```
+
+Rules:
+
+- `state:` variables become `VNState.variables` with their type in
+  `VNState.declared_types`. Assigning a value of the wrong type (`set`) is a
+  runtime error. Types: `int`, `float`, `str` (or `string`), `bool`, `list`.
+- `set` is the canonical assignment (`$` is a legacy alias — same AST).
+- `character e:` compiles to the same `characters` registry as
+  `define e = Character(...)`. Properties: `name`, `color`.
+- `image`/`audio`/`stage` populate `VNState.assets` (kind: `images`/`audio`/`stages`);
+  `VNState.resolve_asset(kind, name)` returns the path (falls back to the name).
+  Script events still carry the *declared* name, so golden traces are unchanged.
+- `choice "Text":` is the declarative menu choice form; the bare `"Text":`
+  form still works (including the single-caption rule).
+- `end` is an **optional** explicit block terminator. It may close
+  `label`, `menu`, `if`, `state`, `character`, and `choice` blocks. It must
+  be dedented to the same indent as the block it closes. Indentation-only
+  blocks without `end` remain valid.
+- Expressions (in `if`/`elif`/`set`/`$`) are evaluated by an AST whitelist
+  (`engine/script/expr_eval.py`): literals, names, arithmetic, comparisons,
+  `and`/`or`/`not`, `in`/`not in`, ternary, list/tuple/dict/set literals, and
+  the pure functions `len,int,float,str,bool,abs,min,max`. Attribute access,
+  subscripts, comprehensions, lambdas and arbitrary calls are **errors** — no
+  sandbox escape, no arbitrary Python.
 
 ## Blocks
 
@@ -114,10 +207,37 @@ label bad:
 
 ## What is NOT allowed (and errors)
 
-- `python:` / `init python` / `init:` blocks → `ParseError: expected "label", "define" or "default"...` + hint `extension code lives in .py plugins`
-- `image` declarations, `transform`, `screen` → postponed; will be `unknown statement` with `check spelling`
+In **tiers 1–2** (`.urpy` and `.rpy` safe):
+
+- `python:` / `init python` / `init:` blocks → `ParseError` + hint `parse with mode='full'`
+- `while`/`break`/`continue`/`pass`, `window`, `nvl`, `voice`, `queue`, `jump/call expression`, `call label(args)`, label parameters, `show/hide/call screen`, arbitrary `define`, `transform`, `screen`, `style`, `translate` → same guidance
+- In `.urpy`, additionally: `$`, `define`, `default` are rejected with targeted hints (`use set`, `use a character block`, `declare in a state: block`), and every block requires an explicit `end`.
+
+Always (all tiers):
+
 - YAML/JSON scripts → not a `.rpy`. We don't read YAML as story source (answers your question). Internal AST *is* JSON-serialisable (`{"cmd":"say",...}`) for caching/tracing, but that's build artifact, not author file.
 - Orphan `.rpyc`/cache execution → never. We hash source (`VNState.script_hash`) and re-parse.
+
+## Full `.rpy` tier (drop-in Ren'Py)
+
+With `mode='full'` the parser accepts the Ren'Py constructs above and passes them to
+the interpreter:
+
+- `python:` blocks — executed with the variables dict, `renpy`, `store`, and `define`s in scope; results are copied back into the saveable state (only JSON-friendly values).
+- `init python:` / `init:` / `init offset = N` — run once before the first label.
+- `$ expr` — one-line Python (plain assignments still become `assign` nodes).
+- `while cond:` / `break` / `continue` / `pass` — full control flow.
+- `label name(params):` + `call label(args)` — parameters bound into variables (defaults supported); restored on `return`.
+- `jump expression expr` / `call expression expr` — computed targets.
+- `menu:` choices with `"Text" if cond:` — conditions evaluated; false choices are hidden.
+- `window show|hide|auto`, `nvl clear|show|hide`, `nvl mode nvl|adv`, `voice "…"`, `queue music|sound …`.
+- `show screen x` / `hide screen x` / `call screen x` + `screen:` / `style:` / `transform:` / `translate:` blocks (captured into `screens`/`styles`/`transforms`/`translations` for the editor-built UI layer).
+- `renpy.*` compat namespace (`engine/script/renpy_compat.py`): `renpy.jump`/`call`/`quit`, `renpy.loadable`, `renpy.has_label`, `renpy.get_playing`, `renpy.random.*`, `renpy.store.*` — a small allowlist object, not a real import (dunder attributes blocked).
+
+The **expression sandbox** still applies to story expressions, but in full mode attribute
+access is permitted *only* on the injected `renpy`/`store` objects (never `_`-prefixed,
+never on arbitrary values) — so `renpy.loadable("…")` works while
+`().__class__.__mro__…` escapes stay closed.
 
 ## Diagnostics (LLM-friendly)
 
