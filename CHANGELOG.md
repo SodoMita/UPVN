@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.6.7 — 2026-09-09 Script discovery across directories + on-screen diagnostics
+- **The game now finds its script.rpy on its own.** The packaged game layout is
+  `<package>/blend/UPVN_Template.blend` + `<package>/game/script.rpy`, but the
+  runtime only searched next to the .blend, so pressing P fell back to the
+  placeholder ("no script found yet"). `frontend.resolve_script_path` now also
+  probes the parent and grandparent of the .blend directory (`//../game/script.rpy`,
+  `//../../game/script.rpy`) plus the example layouts; the VNController
+  `script_path` property still wins when it points at an existing file.
+- **Load failures are explained on screen, not only in the console.** When no
+  script is found, the game now draws a red diagnostic panel listing the paths
+  that were searched and the exact fix (UPVN panel → Create Project → Setup
+  Scene → P) — players no longer stare at a cryptic placeholder.
+- **Setup Scene no longer reports a false warning for intact wiring.** The value
+  `upvn_bricks = "existing"` was treated as an error ("Brick wiring issue") —
+  it now reports success: "Scene wiring already present and intact".
+- **Input API updated to UPBGE 0.50's non-deprecated form.** The runtime used
+  `keyboard.events` / `mouse.events`, which UPBGE 0.50 deprecates in favour of
+  `keyboard.inputs` / `mouse.inputs` (per-key `KX_InputDevice`). New pure helpers
+  `_bge_input_state/_bge_just/_bge_active` prefer the new API and fall back to
+  the legacy one; all polling sites (advance, menu digits, skip/auto, history,
+  quick menu, Ctrl+S/L, ESC, wheel rollback) now go through them. The digit
+  selector is now the pure `_digit_choice_index`.
+- **Registration banner prints the real add-on version** (read from `bl_info`)
+  instead of a hard-coded "v0.6".
+- Tests: menu-input tests rewritten for the new helpers + packaged-layout path
+  discovery test → **135 passed, 2 skipped**.
+- Add-on version 0.6.7; dist rebuilt.
+
 ## 0.6.6 — 2026-09-08 Idempotent Setup Scene + live Pillow probe (field reports)
 - **Setup Scene no longer fails on a second run.** Field error
   `bpy_prop_collection: attribute "remove" not found`: the generator deleted the

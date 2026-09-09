@@ -1,6 +1,6 @@
 """
 UPVN Blender Editor Tools — create visual novel inside Blender with minimal coding
-v0.6.6 (2026-09-08): self-contained engine discovery — no more "Engine not available"
+v0.6.7 (2026-09-08): self-contained engine discovery — no more "Engine not available"
 
 Why v0.6 exists
     Installing the old add-on copied this single .py into Blender's add-ons folder,
@@ -21,7 +21,7 @@ Why v0.6 exists
 
 Install (two supported ways)
   A. Dist zip (recommended):
-        dist/upvn_editor_addon_v0.6.6.zip  → Edit → Preferences → Add-ons →
+        dist/upvn_editor_addon_v0.6.7.zip  → Edit → Preferences → Add-ons →
            Install from Disk… (or Install…) → select the .zip → enable "UPVN".
      Engine, frontend and template travel inside the zip; nothing else needed.
   B. Repo checkout:
@@ -45,7 +45,7 @@ Headless fallback: when bpy unavailable (CI), the module still imports and expos
 bl_info = {
     "name": "UPVN — Visual Novel Editor",
     "author": "UPVN",
-    "version": (0, 6, 6),
+    "version": (0, 6, 7),
     "blender": (4, 2, 0),
     "location": "View3D > Sidebar > UPVN, Text Editor > Sidebar > UPVN",
     "description": "Create Ren'Py-like visual novel inside UPBGE with minimal coding — self-contained engine, one-click scene setup, characters, scenes, dialogue, menus, arbitrary saves, preview",
@@ -1134,15 +1134,23 @@ except Exception:
                 return {"CANCELLED"}
             bricks = ctrl.get("upvn_bricks", "no")
             if bricks == "yes":
-                self.report({"INFO"}, "Scene wired: VNController + Always→Python launcher brick. Press P to play.")
+                self.report({"INFO"},
+                            "Scene wired: VNController + Always→Python launcher brick. Press P to play.")
+            elif bricks == "existing":
+                self.report({"INFO"},
+                            "Scene wiring already present and intact (nothing changed). "
+                            "script_path set — press P to play.")
             elif isinstance(bricks, str) and bricks.startswith("skipped"):
                 self.report({"WARNING"},
                             "Scene objects created, but logic bricks need the UPBGE UI: "
                             "run Setup Scene again from this panel (not --background).")
+            elif isinstance(bricks, str) and bricks.startswith("error"):
+                self.report({"ERROR"}, f"Brick wiring failed: {bricks}")
             else:
-                self.report({"WARNING"}, f"Brick wiring issue: {bricks} — see console.")
-                print("[UPVN] Setup Scene done, but bricks:", bricks)
-            print("[UPVN] Setup Scene done. script_path=", p.project_path)
+                self.report({"INFO"},
+                            "Scene objects refreshed. Press P to play (or run Setup Scene "
+                            "inside the UPBGE UI for the full brick wiring).")
+            print("[UPVN] Setup Scene done. script_path=", p.project_path, "| bricks:", bricks)
             return {"FINISHED"}
 
     class UPVN_OT_CheckWiring(bpy.types.Operator):
@@ -1578,7 +1586,8 @@ except Exception:
                 bpy.utils.register_class(cls)
             bpy.types.Scene.upvn_props = bpy.props.PointerProperty(type=UPVN_SceneProps)
             ok, info = ensure_engine(retry=True)
-            print(f"[UPVN] Editor addon v0.6 registered — engine: {'OK via ' + str(info['source']) if ok else 'NOT FOUND (' + str(info['message'])[:120] + ')'}")
+            ver = ".".join(str(x) for x in bl_info.get("version", ()))
+            print(f"[UPVN] Editor addon v{ver} registered — engine: {'OK via ' + str(info['source']) if ok else 'NOT FOUND (' + str(info['message'])[:120] + ')'}")
             print("[UPVN] Panels: View3D > Sidebar > UPVN | Text Editor > Sidebar > UPVN")
         except Exception as exc:      # never let an add-on enable crash Blender startup
             print(f"[UPVN] register() error (add-on partially enabled): {exc}")
