@@ -433,11 +433,16 @@ class VNController:
             if self._current_event.get("type") == "menu" and HAS_BGE:
                 try:
                     import bge as _bge_imp
+                    ev = _bge_imp.events
                     count = len(self._current_event.get("choices", []))
                     digit_states = {}
                     for i in range(min(9, count)):
                         key = ord("1") + i
-                        digit_states[key] = _bge_input_state("keyboard", key)
+                        st = _bge_input_state("keyboard", key)
+                        pad = getattr(ev, f"PAD{i + 1}", None) or getattr(ev, f"PAD{i + 1}KEY", None)
+                        if pad is not None and _bge_input_state("keyboard", pad) == "just":
+                            st = "just"
+                        digit_states[key] = st
                     idx = _digit_choice_index(digit_states, count)
                     if idx is not None:
                         self.choose(idx)

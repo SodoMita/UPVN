@@ -57,11 +57,10 @@ class StageManager:
                     cam["upvn_zoom_ease"] = easing
                     # we handle actual scale via lens or ortho_scale; for now use cam.lens interpolation
                     # Simplified: cam.ortho_scale lerped
-                    if not "upvn_zoom_t0" in cam:
-                        import time
-                        cam["upvn_zoom_t0"] = time.time()
-                        cam["upvn_zoom_from"] = getattr(cam, "ortho_scale", 10.0)
-                        cam["upvn_zoom_dur"] = duration
+                    import time
+                    cam["upvn_zoom_t0"] = time.time()
+                    cam["upvn_zoom_from"] = getattr(cam, "ortho_scale", 15.0)
+                    cam["upvn_zoom_dur"] = duration
             except Exception as e:
                 print(f"[StageManager] camera_zoom failed {e}")
 
@@ -136,10 +135,10 @@ class StageManager:
                     scene = bge.logic.getCurrentScene()
                     cam = scene.active_camera
                     if cam and "upvn_target_zoom" in cam:
-                        # apply final zoom: ortho_scale = 10/zoom? For perspective, lens
+                        from .contract import CAMERA_UI_ORTHO_SCALE
                         target = cam["upvn_target_zoom"]
                         if hasattr(cam, "ortho_scale"):
-                            cam.ortho_scale = 10.0 / target
+                            cam.ortho_scale = CAMERA_UI_ORTHO_SCALE / max(0.05, float(target))
                         elif hasattr(cam, "lens"):
                             cam.lens = 35.0 * target
                 except: pass
@@ -158,9 +157,9 @@ class StageManager:
                 import bge
                 scene = bge.logic.getCurrentScene()
                 cam = scene.active_camera
-                if cam and hasattr(cam,"ortho_scale"):
-                    base = 10.0
-                    cam.ortho_scale = base / cur
+                if cam and hasattr(cam, "ortho_scale"):
+                    from .contract import CAMERA_UI_ORTHO_SCALE
+                    cam.ortho_scale = CAMERA_UI_ORTHO_SCALE / max(0.05, float(cur))
             except: pass
 
     def spawn(self, asset: str, marker: str | None):
@@ -217,7 +216,10 @@ class StageManager:
             try:
                 import bge.logic as logic
                 scene = logic.getCurrentScene()
-                cam = scene.active_camera
+                cam = scene.objects.get("Camera_3D") or scene.active_camera
+                if cam is not None and getattr(cam, "name", "") == "Camera_UI":
+                    print("[StageManager] camera_preset skipped — would move Camera_UI")
+                    return
                 preset = scene.objects.get(name) or scene.objects.get(f"preset_{name}") or scene.objects.get(f"Preset_{name}")
                 if cam and preset:
                     # store lerp target for smooth transition (1 sec)
