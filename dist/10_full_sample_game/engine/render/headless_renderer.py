@@ -531,6 +531,246 @@ def draw_quick_menu_overlay(img: Image.Image, draw: ImageDraw.ImageDraw, state):
         x += tw+32 + 8
 
 # ---------------------------------------------------------------- public
+# ---------------------------------------------------------------- M23 screens
+# Widget trees produced by engine/ui/screen_lang.py. Ren'Py's real layout
+# engine (predicted sizes, style inheritance, transforms) is deliberately not
+# reimplemented: the point here is that a `show screen` is *visible* in a golden
+# trace, so a human can tell the UI apart from an empty frame. Layout is a
+# simple two-pass measure/place flow over vbox/hbox/frame, honouring the
+# `xalign`/`yalign`/`spacing`/`xsize` hints that screen_lang leaves in `props`.
+
+_SCR_PAD = 14
+_SCR_GAP = 8
+
+
+def _scr_num(value, default=0.0):
+    """Coerce a prop to a number; props may be int, float or source text."""
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        t = value.strip()
+        try:
+            return float(t)
+        except ValueError:
+            return default
+    return default
+
+
+def _scr_color(value, default):
+    if isinstance(value, str) and value.startswith("#"):
+        try:
+            return hex_rgb(value)
+        except Exception:
+            return default
+    return default
+
+
+def _scr_align(props, key, default):
+    """`xalign 0.5` -> 0.5. Falls back to the default when absent/unparsable."""
+    if key not in props:
+        return default
+    raw = props[key]
+    if isinstance(raw, str) and not raw.replace('.', '', 1).replace('-', '', 1).isdigit():
+        return default          # an unresolved expression: don't guess
+    return _scr_num(raw, default)
+
+
+def _scr_size(w, draw):
+    """Measure a widget. Returns (width, height)."""
+    kind = w.get("kind")
+    props = w.get("props") or {}
+    kids = w.get("children") or []
+
+    if kind in ("text", "label"):
+        font = F_Text if kind == "text" else F_Name
+        txt = str(w.get("text") or "")
+        tw = int(draw.textlength(txt, font=font)) if txt else 0
+        return min(tw, W - 120), font.size + 6
+
+    if kind == "textbutton":
+        txt = str(w.get("text") or "")
+        tw = int(draw.textlength(txt, font=F_Menu)) if txt else 0
+        return tw + 34, F_Menu.size + 18
+
+    if kind == "input":
+        return 260, F_Text.size + 16
+
+    if kind in ("add", "image", "imagebutton"):
+        return 132, 74
+
+    if kind == "bar":
+        return 220, 16
+    if kind == "vbar":
+        return 16, 140
+
+    if kind in ("key", "timer", "mousearea", "null"):
+        return 0, 0
+
+    # containers
+    if kind in ("hbox", "vbox"):
+        gap = _scr_num(props.get("spacing"), _SCR_GAP)
+    else:
+        gap = _SCR_GAP
+    if not kids:
+        if kind in ("frame", "window"):
+            return _SCR_PAD * 2, _SCR_PAD * 2
+        return 0, 0
+
+    sizes = [_scr_size(k, draw) for k in kids]
+    if kind == "hbox":
+        inner_w = sum(s[0] for s in sizes) + gap * (len(sizes) - 1)
+        inner_h = max(s[1] for s in sizes)
+    else:
+        inner_w = max(s[0] for s in sizes)
+        inner_h = sum(s[1] for s in sizes) + gap * (len(sizes) - 1)
+
+    if kind in ("frame", "window"):
+        return inner_w + _SCR_PAD * 2, inner_h + _SCR_PAD * 2
+    return inner_w, inner_h
+
+
+def _scr_draw(w, img, draw, x, y, avail_w):
+    """Draw a widget inside the box whose top-left is (x, y)."""
+    kind = w.get("kind")
+    props = w.get("props") or {}
+    kids = w.get("children") or []
+
+    if kind in ("key", "timer", "mousearea", "null"):
+        return
+    if not kind:
+        return
+
+    my_w, my_h = _scr_size(w, draw)
+
+    if kind in ("text", "label"):
+        font = F_Text if kind == "text" else F_Name
+        ax = _scr_align(props, "xalign", 0.0)
+        color = _scr_color(props.get("color"), (232, 236, 242))
+        tx = int(x + (avail_w - my_w) * ax)
+        draw.text((tx, y), str(w.get("text") or ""), fill=color, font=font)
+        return
+
+    if kind == "textbutton":
+        ax = _scr_align(props, "xalign", 0.0)
+        bx = int(x + (avail_w - my_w) * ax)
+        has_action = bool(props.get("action"))
+        bg = (24, 58, 78, 235) if has_action else (30, 34, 44, 200)
+        edge = (0, 214, 245, 220) if has_action else (255, 255, 255, 40)
+        draw.rounded_rectangle([bx, y, bx + my_w, y + my_h], radius=9,
+                               fill=bg, outline=edge, width=2)
+        draw.text((bx + 17, y + 8), str(w.get("text") or ""),
+                  fill=(226, 240, 248), font=F_Menu)
+        return
+
+    if kind == "input":
+        draw.rounded_rectangle([x, y, x + my_w, y + my_h], radius=8,
+                               fill=(10, 26, 36, 235), outline=(0, 214, 245, 140),
+                               width=2)
+        draw.text((x + 12, y + 9), str(w.get("text") or "") + "|",
+                  fill=(150, 200, 220), font=F_Text)
+        return
+
+    if kind in ("add", "image", "imagebutton"):
+        # the asset itself is not available headless — show a labelled plate so
+        # the frame still reads as "something is here"
+        ax = _scr_align(props, "xalign", 0.0)
+        bx = int(x + (avail_w - my_w) * ax)
+        draw.rounded_rectangle([bx, y, bx + my_w, y + my_h], radius=6,
+                               fill=(16, 30, 44, 210), outline=(0, 184, 195, 110),
+                               width=2)
+        label = str(w.get("text") or kind)
+        label = label.split("/")[-1][:16]
+        draw.text((bx + 10, y + my_h // 2 - 7), label,
+                  fill=(120, 190, 210), font=F_Small)
+        return
+
+    if kind in ("bar", "vbar"):
+        fill_w = int(my_w * 0.4) if kind == "bar" else my_w
+        fill_h = my_h if kind == "bar" else int(my_h * 0.4)
+        draw.rounded_rectangle([x, y, x + my_w, y + my_h], radius=7,
+                               fill=(14, 26, 36, 220), outline=(255, 255, 255, 40))
+        draw.rounded_rectangle([x + 2, y + 2, x + 2 + max(4, fill_w - 4),
+                                y + 2 + max(4, fill_h - 4)],
+                               radius=5, fill=(0, 184, 195, 220))
+        return
+
+    # ---- containers
+    if kind in ("frame", "window"):
+        bg = _scr_color(props.get("background"), None)
+        fill = tuple(bg) + (215,) if bg else (6, 18, 28, 215)
+        draw.rounded_rectangle([x, y, x + my_w, y + my_h], radius=12,
+                               fill=fill, outline=(0, 184, 195, 130), width=2)
+        inner_x, inner_y = x + _SCR_PAD, y + _SCR_PAD
+        inner_w = max(0, my_w - _SCR_PAD * 2)
+        gap = _scr_num(props.get("spacing"), _SCR_GAP)
+        cy = inner_y
+        for k in kids:
+            kw, kh = _scr_size(k, draw)
+            _scr_draw(k, img, draw, inner_x, cy, inner_w)
+            cy += kh + gap
+        return
+
+    if kind == "fixed":
+        for k in kids:                       # children stack, not flow
+            _scr_draw(k, img, draw, x, y, avail_w)
+        return
+
+    # vbox and anything unrecognised: vertical flow
+    gap = _scr_num(props.get("spacing"), _SCR_GAP) if kind == "vbox" else _SCR_GAP
+    if kind == "hbox":
+        cx = x
+        for k in kids:
+            kw, kh = _scr_size(k, draw)
+            _scr_draw(k, img, draw, cx, y, kw)
+            cx += kw + gap
+        return
+
+    cy = y
+    for k in kids:
+        kw, kh = _scr_size(k, draw)
+        _scr_draw(k, img, draw, x, cy, avail_w)
+        cy += kh + gap
+
+
+def draw_active_screens(img: Image.Image, draw: ImageDraw.ImageDraw, state):
+    """Draw every screen in ``state.active_screens`` (M22/M23).
+
+    Returns the number of screens drawn. Sorted by `zorder` so a modal
+    `confirm` lands on top of a HUD, the way Ren'Py layers them.
+    """
+    active = getattr(state, "active_screens", None) or {}
+    if not active:
+        return 0
+
+    def zorder(item):
+        props = (item[1] or {}).get("props") or {}
+        return _scr_num(props.get("zorder"), 0.0)
+
+    drawn = 0
+    for name, scr in sorted(active.items(), key=zorder):
+        widgets = (scr or {}).get("widgets") or []
+        if not widgets:
+            continue
+        props = (scr or {}).get("props") or {}
+        if _scr_num(props.get("modal"), 0.0) >= 1 or props.get("modal") is True:
+            draw.rectangle([0, 0, W, H], fill=(0, 0, 0, 150))
+
+        total_h = sum(_scr_size(w, draw)[1] for w in widgets) + _SCR_GAP * max(0, len(widgets) - 1)
+        y = _SCR_PAD * 2
+        for wdg in widgets:
+            ww, wh = _scr_size(wdg, draw)
+            ax = _scr_align((wdg.get("props") or {}), "xalign", 0.5)
+            x = int((W - ww) * ax)
+            x = max(_SCR_PAD, min(x, W - ww - _SCR_PAD))
+            _scr_draw(wdg, img, draw, x, y, ww)
+            y += wh + _SCR_GAP
+            total_h -= 0
+        drawn += 1
+    return drawn
+
+
 def render_state(state, event, out_path: Path | None = None, transition_alpha: float = 1.0, screen_mgr=None) -> Image.Image:
     """
     Render a single frame from VNState + current waiting event.
@@ -679,6 +919,12 @@ def render_state(state, event, out_path: Path | None = None, transition_alpha: f
                 draw_main_menu_overlay(img, draw, state)
             elif modal.name == "preferences":
                 draw_main_menu_overlay(img, draw, state)
+    # M23: screens from the drop-in tier (`show screen` / `call screen`).
+    # Drawn after the built-in overlays so a game's own UI sits on top.
+    try:
+        draw_active_screens(img, draw, state)
+    except Exception:
+        pass  # a frame must never fail because a screen could not be laid out
     # quick menu hint when auto/skip active (always)
     if state.skip or state.auto:
         txt = "SKIP ▶" if state.skip else "AUTO ▶"
