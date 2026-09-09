@@ -544,14 +544,28 @@ def draw_quick_menu_overlay(img: Image.Image, draw: ImageDraw.ImageDraw, state):
         x += tw+32 + 8
 
 # ---------------------------------------------------------------- public
-def render_state(state, event, out_path: Path | None = None, transition_alpha: float = 1.0, screen_mgr=None) -> Image.Image:
+def _pil_probe():
+    """Live check + binding of PIL names. The module may have been imported in
+    the same Blender session before Pillow was installed, so HAS_PIL alone is
+    stale — re-import on every render attempt. Raises RuntimeError with the
+    install instruction when Pillow is genuinely unavailable."""
+    global HAS_PIL, Image, ImageDraw, ImageFont
     if not HAS_PIL:
-        raise RuntimeError(
-            "Pillow (PIL) is not available in this Python interpreter. Install it into "
-            "UPBGE's bundled Python, e.g.:\n"
-            "  <upbge>/5.0/python/bin/python3.11 -m pip install pillow\n"
-            "(or run Preview from a system Python that has Pillow installed)."
-        )
+        try:
+            from PIL import Image, ImageDraw, ImageFont
+            HAS_PIL = True
+        except Exception:
+            raise RuntimeError(
+                "Pillow (PIL) is not available in this Python interpreter. Install it into "
+                "UPBGE's bundled Python, e.g.:\n"
+                "  <upbge>/5.0/python/bin/python3.11 -m pip install pillow\n"
+                "If you just installed it, restart Blender/UPBGE so the interpreter sees it."
+            )
+    return Image, ImageDraw, ImageFont
+
+
+def render_state(state, event, out_path: Path | None = None, transition_alpha: float = 1.0, screen_mgr=None) -> Image.Image:
+    Image, ImageDraw, ImageFont = _pil_probe()  # noqa: F811 (module-level rebinding)
 
     """
     Render a single frame from VNState + current waiting event.

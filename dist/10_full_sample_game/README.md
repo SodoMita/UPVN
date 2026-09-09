@@ -38,9 +38,9 @@ Expected: all 4 examples + *The Question* parse and trace cleanly. No YAML.
 ## Quickstart (in UPBGE — minimal coding, no .rpy typing)
 
 1. Extract `~/upbge-0.50-linux-x64.tar.xz`
-2. **Install the add-on (v0.6.5+, one file — engine is bundled):**
+2. **Install the add-on (v0.6.6+, one file — engine is bundled):**
    Edit → Preferences → Add-ons → **Install from Disk…** (older UI: Install…) → select
-   `dist/upvn_editor_addon_v0.6.5.zip` (or the raw `blend/upvn_editor_addon.py` when
+   `dist/upvn_editor_addon_v0.6.6.zip` (or the raw `blend/upvn_editor_addon.py` when
    working from the repo) → enable **"UPVN — Visual Novel Editor"**.
    The UPVN tab (3D View or Text Editor sidebar, `N`) shows **✓ Engine: OK** when ready —
    if it ever shows ✗, press *Locate Engine…* / *Re-check* (or *Copy engine next to add-on*).
@@ -65,7 +65,7 @@ Expected: all 4 examples + *The Question* parse and trace cleanly. No YAML.
 6. The frontend reads **`script_path` from the `VNController` object** — exactly what the
    panel's `project_path` writes — so the game you build is the game that plays
    (legacy `//game/script.rpy`, `//script.rpy`, `//examples/…` are fallbacks).
-7. Press `P` to play. **Controls (v0.6.5):** click / Space / Enter advance; **`1`–`9` pick a menu choice** (in-engine input, no extra wiring); `H` history, `Q` quick menu, `Ctrl+S` save, `Ctrl+L` load (arbitrary slots 1..∞, `←`/`→` page, `Esc` close), `S` skip, `A` auto, mouse wheel rollback, **`F1` console state dump, `F12` in-game screenshot** to `//screenshots/upvn_ingame_*.png` (QA/debug helpers).
+7. Press `P` to play. **Controls (v0.6.6):** click / Space / Enter advance; **`1`–`9` pick a menu choice** (in-engine input, no extra wiring); `H` history, `Q` quick menu, `Ctrl+S` save, `Ctrl+L` load (arbitrary slots 1..∞, `←`/`→` page, `Esc` close), `S` skip, `A` auto, mouse wheel rollback, **`F1` console state dump, `F12` in-game screenshot** to `//screenshots/upvn_ingame_*.png` (QA/debug helpers).
 
 ## Troubleshooting (was: "Engine not available")
 
@@ -75,14 +75,15 @@ button died with a bare **"Engine not available"**. Since v0.6:
 | Symptom | Fix |
 |---|---|
 | ✗ Engine NOT found in the UPVN tab | Install the **zip release** (engine is inside it) or press *Locate Engine…* and point at the folder containing `engine/`; press *Re-check*. |
-| `Warning: add-on missing 'bl_info'` for engine/ + bge_frontend/ | Leftovers of the old v0.6.0 zip layout in your add-ons folder — delete `addons/engine` and `addons/bge_frontend` (v0.6.5 zip is a single folder). |
+| `Warning: add-on missing 'bl_info'` for engine/ + bge_frontend/ | Leftovers of the old v0.6.0 zip layout in your add-ons folder — delete `addons/engine` and `addons/bge_frontend` (v0.6.6 zip is a single folder). |
 | Add-on installed from an old single `.py` | Enable, then in Preferences → Add-ons → UPVN press *Copy engine next to add-on* (or reinstall from the zip). |
 | "no game script found" in the console when pressing P | The `script_path` on `VNController` points nowhere — set panel `project_path`, press `Create Project`, then `Setup Scene` again. |
 | Pressing P shows a frozen viewport-like scene, no dialogue | The template had no logic bricks (old file). In the UPVN tab press **Setup Scene** once and File → Save; the committed `blend/UPVN_Template.blend` already includes the bricks. |
 | Running in plain Blender (not UPBGE) | Editing/Validate/Preview work; *Setup Scene* and *P to play* need UPBGE (has the game engine). |
 | Setup Scene in `--background` | Logic-brick operators need the UPBGE UI context — run Setup Scene from the panel, not headless. |
 | `blf.color() takes exactly 5 arguments` in the game console | Fixed in 0.6.5 — reinstall the add-on zip so the updated `bge_frontend` is used. |
-| `Preview failed: … Pillow (PIL) is not installed…` | UPBGE uses its own bundled Python, where Pillow may be missing even if the system has it. Press **Install Pillow** in the UPVN panel (runs `python3.11 -m pip install pillow` in UPBGE's Python). |
+| `Preview failed: … Pillow (PIL) is not installed…` | UPBGE uses its own bundled Python, where Pillow may be missing even if the system has it. Press **Install Pillow** in the UPVN panel (installs into the running interpreter's site-packages; works without restarting Blender since 0.6.6). |
+| `Setup failed: bpy_prop_collection: attribute "remove" not found` | Fixed in 0.6.6 — Setup Scene reuses the existing `VNController` and only adds missing bricks; it is safe to press repeatedly. |
 
 **Headless minimal coding (without Blender):**
 ```bash

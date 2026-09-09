@@ -101,3 +101,26 @@ def test_addon_preview_error_field():
             out = b.preview_screenshot()
             assert out is None
             assert b.last_error  # a reason string, not an exception
+
+
+def test_addon_pil_live_probe_exists():
+    """The add-on probes Pillow with a live import (module-level stale flags go
+    stale after a mid-session pip install)."""
+    sys.path.insert(0, str(ROOT))
+    from blend.upvn_editor_addon import pil_live_available
+    assert isinstance(pil_live_available(), bool)
+    # system Python has Pillow in this test env
+    assert pil_live_available() is True
+
+
+def test_addon_build_vn_scene_no_brick_collection_remove():
+    """Field error: 'bpy_prop_collection: attribute "remove" not found' when
+    Setup Scene ran twice — UPBGE 0.50 brick collections are read-only. The
+    generator must reuse the existing VNController instead of deleting it."""
+    src = _read(ROOT / "blend" / "upvn_editor_addon.py")
+    assert 'game.controllers.remove(' not in src
+    assert '.sensors.remove(' not in src
+    # reuse path + per-piece brick addition must be present
+    assert 'ctrl = scene.objects.get("VNController")' in src
+    assert 'need_sensor' in src and 'need_controller' in src
+    assert '"upvn_bricks"] = "existing"' in src
