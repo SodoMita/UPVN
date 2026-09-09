@@ -111,7 +111,10 @@ class SpriteRenderer:
             if tex_path:
                 img = vt.ImageFFmpeg(tex_path)
                 img.scale = False
-                mat_id = vt.materialID(plane, SPRITE_MATERIAL)
+                try:
+                    mat_id = vt.materialID(plane, SPRITE_MATERIAL)
+                except Exception:
+                    mat_id = -1
                 if mat_id < 0:
                     # fallback plane may carry only a generic material — use the
                     # first slot (note: shared datablocks are a known limitation)
