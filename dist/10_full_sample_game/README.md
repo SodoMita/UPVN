@@ -228,6 +228,36 @@ continuations, any consistent indentation, project-registered statements
 `show`/`scene` ATL blocks, bare `scene`, `define x += [ … ]`, `style n:` inside a
 label, and `window`/`nvl` transitions.
 
+### Screens render, they are not just captured (M22)
+
+A `screen:` block used to be stored as text and ignored, so `show screen` /
+`call screen` produced an event with a name and nothing to draw — 99 screens in
+the SDK tutorial and 23 in LearnToCodeRPG were inert. `engine/ui/screen_lang.py`
+now evaluates a screen body into a **JSON-serialisable widget tree**:
+
+```bash
+python -m tools.run_headless examples/14_renpy_dropin --mode full --choices 1
+#   CALL SCREEN confirm -> 4 widgets
+#   SHOW SCREEN hud -> 5 widgets
+#   HIDE SCREEN hud
+```
+
+It handles containers (`vbox`, `hbox`, `frame`, `window`, `fixed`, `null`,
+`bar`), leaves (`text`, `textbutton`, `imagebutton`, `add`, `label`, `input`,
+`key`), control flow (`if`/`elif`/`else`, `for`, `$`), screen-local `default`s,
+`use` with `transclude`, `has vbox`, and `[expr]` interpolation. Rendered
+screens land in `VNState.active_screens`, so a save restores the same UI.
+
+Two deliberate limits: **layout is not modelled** — positions, sizes, styles and
+anchors stay in each widget's `props`, because UPVN draws its UI in the 3D scene
+and a second layout engine would only compete with it; and **a broken screen
+never stops the story** — an undefined screen or an unresolvable condition
+yields an empty tree plus a diagnostic instead of raising.
+
+Across both corpora: **99/99** and **23/23** screens render (716 and 346
+widgets). Nothing draws them yet — the widget list is the contract a frontend
+consumes.
+
 ```bash
 python -m tools.run_headless examples/14_renpy_dropin --mode full --choices 0
 ```

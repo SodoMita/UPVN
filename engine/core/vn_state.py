@@ -92,6 +92,11 @@ class VNState:
     nvl: Optional[str] = None
     nvl_mode: str = "adv"
 
+    # active Ren'Py screens (M22): name -> {args, widgets, modal, zorder}.
+    # Kept in state so a save restores the same UI, and so a frontend can draw
+    # `show screen` overlays after a load.
+    active_screens: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+
     # 3D stage (hybrid mode stub — LLM can populate via python)
     stage: Optional[str] = None          # e.g. "classroom_3d"
     stage_objects: Dict[str, Any] = field(default_factory=dict)  # id -> {marker, anim}

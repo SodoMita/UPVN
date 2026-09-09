@@ -713,7 +713,8 @@ class Parser:
                 return
             m = _re_screen_full.match(t) or _re_screen.match(t)
             if m:
-                self._parse_capture_block(ll, self.screens, "screen", kind_id=m.group(1))
+                self._parse_capture_block(ll, self.screens, "screen", kind_id=m.group(1),
+                                          params=m.group(2))
                 return
             if _re_style_block.match(t):
                 self._parse_capture_block(ll, self.styles, "style", kind_id=_re_style_block.match(t).group(1))
@@ -1066,15 +1067,27 @@ class Parser:
         finally:
             self.lines, self.pos = saved_lines, saved_pos
 
-    def _parse_capture_block(self, ll: LogicalLine, target: dict, kind: str, kind_id: str):
-        """Capture a screen/style/translate block as raw lines (parse-level, full tier)."""
+    def _parse_capture_block(self, ll: LogicalLine, target: dict, kind: str, kind_id: str,
+                             params: Optional[str] = None):
+        """Capture a screen/style/translate block (parse-level, full tier).
+
+        ``lines`` stays stripped text for backwards compatibility; ``indents``
+        carries the *relative* indent of each line so a consumer can rebuild the
+        block's tree without re-lexing. Screen parameters are kept too — a
+        `screen choice(items):` is not usable without them.
+        """
         self.pos += 1
         raw_lines = []
+        indents = []
         while self.pos < len(self.lines) and self.lines[self.pos].indent > ll.indent:
             raw_lines.append(self.lines[self.pos].text)
+            indents.append(self.lines[self.pos].indent - ll.indent)
             self.pos += 1
         self._consume_end(ll.indent, kind)
-        target[kind_id] = {"lines": raw_lines}
+        entry = {"lines": raw_lines, "indents": indents}
+        if params is not None:
+            entry["params"] = params.strip() if params else ""
+        target[kind_id] = entry
 
     # ---------------------------- block parsing (indent-sensitive)
     def _block_indent(self, ll: LogicalLine, what: str) -> Optional[int]:

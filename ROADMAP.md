@@ -208,6 +208,19 @@
     - "CI runs both corpora plus every example headless"
     - "pytest green: 224 passed, 0 skipped"
   example_project: examples/14_renpy_dropin
+
+- id: M22
+  name: Screens actually render — a screen-language interpreter
+  status: done   # 2026-09-09: engine/ui/screen_lang.py evaluates captured `screen:` bodies into JSON-serialisable widget trees (containers, leaves, if/elif/else, for, $, screen-local default, use + transclude, has, [expr] interpolation); show/hide/call screen record into VNState.active_screens and carry widgets on the event; parser keeps body indents + params. SDK tutorial 99/99 screens render (716 widgets), LearnToCodeRPG 23/23 (346 widgets). Layout stays in props — UPVN draws in the 3D scene.
+  depends_on: [M21]
+  acceptance:
+    - "every `screen:` in both corpora renders to a widget tree without raising"
+    - "`show screen` / `call screen` carry the widgets; `hide screen` clears state.active_screens"
+    - "control flow (if/elif/else, for), `use` + `transclude`, `has`, `default` params and `[expr]` all evaluate"
+    - "a broken screen degrades to an empty tree plus a diagnostic — the story keeps playing"
+    - "active screens survive a save round-trip (JSON only)"
+    - "pytest green: 253 passed, 0 skipped"
+  example_project: examples/14_renpy_dropin
 ```
 
 ## Agent protocol (repeat every session)
@@ -222,7 +235,8 @@
 ## NEXT_STEPS (for next turn)
 
 - M17 Blender UX hardening DONE 2026-09-08 — add-on v0.6 (engine discovery: repo/module-dir/zipimport/prefs/blend-file; status rows; Locate/Check/Bundle; friendly reports), one-click Setup Scene (data-API scene + official bpy.ops.logic.* bricks in UI), frontend reads VNController.script_path + sys.path bootstrap, make_template regenerates 110KB template (was brickless 96KB), tools/package_addon.py → dist/upvn_editor_addon_v0.6.0.zip self-contained (zipimport-verified in clean subprocess), tests/test_m17_addon_init.py 5 tests, verified in real UPBGE 0.50 headless (libpulse stub): engine OK/register OK/scene OK; 113 passed 2 skipped
-- Next candidate: run the full interactive loop in UPBGE UI (Setup Scene → P) on a machine with a display; publish dist zips + addon zip as GitHub release; wire captured `screen:` bodies to the editor UI so `call screen` draws something (CI is in place and green: pytest + examples headless + both Ren'Py corpora)
+- M22 screens DONE 2026-09-09 — engine/ui/screen_lang.py interprets captured `screen:` bodies (99/99 + 23/23 corpus screens render, 716 + 346 widgets); show/hide/call screen carry widgets and persist in VNState.active_screens; 253 passed
+- Next candidate: draw the rendered widget trees in the UPBGE frontend (blf + planes) so `call screen` is visible in-game; run the full interactive loop in UPBGE UI (Setup Scene → P) on a machine with a display; publish dist zips + addon zip as GitHub release
 - Optional: migrate editor GameBuilder to declarative forms (character/state/set/choice) per STATUS; asset browser thumbnails; side-image live preview
 - 0.5.2 Audit fixes DONE 2026-09-08 — M-1 safe_eval AST whitelist (blocks Attribute/Subscript/ListComp), L-1 save _sanitize_slot/_slot_path is_relative_to, L-2 load schema validation, I-1 tests skip when the_question missing (42+2 skipped vs 44 passed both green, stub 555B), I-2 zip hygiene no pyc 52 files 214KB (was 76 324KB) LICENSE included, I-3 MIT LICENSE, requirements dev black, package copies LICENSE, exploit/traversal blocked verified, headless 59 events still
 - 0.5.1 Polish DONE 2026-09-07 21:20 — editor v0.5 preserve+asset browser+side image+arbitrary slot spinner, headless desks (board+teacher+3 rows), StageManager LibLoad+addObject+playAction+camera preset, make_template richer VN_3DStage (floor+3 markers+3 presets+9 desks+board+capsules, 150KB+ when libpulse available), showcase regenerated 27 PNGs desks behind sprite (36K), zip 324KB → now 214KB clean, 44 tests green, preserve test PASS

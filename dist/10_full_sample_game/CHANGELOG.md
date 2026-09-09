@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.6.7 — 2026-09-09 Screens actually render (M22)
+
+The drop-in tier *parsed* `screen:` blocks and then threw the information away:
+the body was captured as stripped text, so `show screen` / `call screen` emitted
+an event with a name and nothing to draw. The SDK tutorial has **99** screens and
+LearnToCodeRPG has **23**, and every one of them was inert. This milestone makes
+them real.
+
+- **`engine/ui/screen_lang.py`** — a screen-language interpreter. It rebuilds the
+  widget tree from a captured body and evaluates it: containers (`vbox`, `hbox`,
+  `frame`, `window`, `fixed`, `null`, `bar`), leaves (`text`, `textbutton`,
+  `imagebutton`, `add`, `label`, `input`, `key`), control flow
+  (`if`/`elif`/`else`, `for`, `$`), screen-local `default`s, `use` composition
+  with `transclude`, `has vbox` (a declaration, not a block — the container is
+  synthesised from the siblings that follow), and `[expr]` interpolation.
+  Output is JSON-serialisable, so it survives a save and reaches a frontend.
+- **Layout is not modelled, on purpose.** Positions, sizes, styles and anchors
+  stay in `props` for the consumer to interpret. UPVN's UI is built in the 3D
+  scene, so a second layout engine would only compete with it.
+- **Screens are wired into the interpreter.** `show screen` / `call screen`
+  render and record into `VNState.active_screens` (so a load restores the same
+  UI); `hide screen` clears it. `run_headless` prints `SHOW SCREEN hud -> 5
+  widgets`, and a screen that cannot be resolved says so on the same line.
+- **A broken screen never stops the story.** Rendering does not raise: an
+  undefined screen, an unresolvable condition or a non-iterable `for` yields an
+  empty tree plus a diagnostic, which is what compat mode is for.
+- **Parser:** captured `screen:` blocks keep their relative indentation and
+  their parameter list — a `screen choice(items):` is not usable without them,
+  and without indentation the body has no tree to build.
+- **Validated on both corpora:** SDK tutorial **99/99** screens render (97
+  non-empty, 716 widgets), LearnToCodeRPG **23/23** (22 non-empty, 346 widgets).
+
+
 ## 0.6.6 — 2026-09-09 Second corpus: the Ren'Py SDK's own games (M21)
 
 M20 proved the drop-in tier on **one** shipped game. That is not the same as
