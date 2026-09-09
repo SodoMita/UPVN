@@ -29,7 +29,7 @@ Scene: VN_Main
 - `frontend.main` reads **`script_path` from the `VNController` object** — the same
   property the UPVN panel writes (`project_path`) — so the built game is the game that
   plays. It then ticks `VNController` each frame and handles click/space.
-- `blf` overlay draws typewriter text; or `Text` objects (`Dialogue_Text`) — both supported.
+- No blf overlay. Dialogue/menus are FONT + `choice_*` planes on **the open scene**.
 - In `--background` runs the brick operators are skipped on purpose (they need an
   interactive context in UPBGE 0.50) — the console says so, and the panel button does it
   in one click in the UI.
@@ -87,7 +87,9 @@ objects up **by name** in the current scene. The authoritative list lives in
 | `MABackground` | material | same | material slot of `BG_Plane` receiving the texture |
 | `Sprite_far_left` … `Sprite_far_right` | objects | `SpriteRenderer._bge_show` | one plane per position (`left/center/right/far_left/far_right`); texture swapped on `show` events |
 | `MASprite` | material | same | material slot of every `Sprite_*` plane |
-| `Dialogue_Box` | object | visual only | decorative panel — **dialogue text is NOT a scene Text object**; it is drawn by the blf overlay in `bge_frontend/frontend.py::draw_overlay()` (the game engine cannot edit Text datablocks at runtime) |
+| `Dialogue_Box` | object | `world_ui` | 3D panel behind FONT text (no blf overlay) |
+| `Speaker_Text` / `Dialogue_Text` | FONT objects | `world_ui` | speaker + body; runtime writes `.text` |
+| `choice_0` … `choice_8` | objects | `pointer` + `world_ui` | clickable 3D menu buttons (STATIC ghost) |
 | `Camera_UI` | object | `frontend._bind_camera`, Setup Scene | ortho Front camera; runtime sets `scene.active_camera` |
 | `Camera_3D` | object | stage_manager | perspective camera for hybrid 3D |
 | `VNController` | object | `frontend.main`, launcher | carries `script_path`, `upvn_root`, `upvn_bricks` properties and the `Always+AllKeys+Mouse → Python` brick |

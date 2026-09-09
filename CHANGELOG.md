@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.6.10 — 2026-09-09 Setup Scene writes the OPEN scene
+
+- Field: Check Wiring 18/27, all `choice_*` missing. `build_vn_scene` always
+  created/switched to a new `VN_Main`, so the open template `Scene` never got
+  the buttons. Default is now `context.scene`; operator passes
+  `scene_name=context.scene.name`. Reuses `bpy.data.objects` by exact name
+  (no `choice_0.001`). Reports leftover missing names.
+- `materialID` no longer aborts the tick when the slot name is absent (Emission
+  plates) — falls back to slot 0.
+- Contract lists `Speaker_Text` / `Dialogue_Text`. Add-on v0.6.10.
+- **Restart UPBGE after zip install** (startup still printed v0.6.8 until reload).
+  Then Setup Scene on the file you have open. The committed `.blend` is a
+  bootstrap; Setup Scene is the source of truth (no UPBGE here to regen the binary).
+
 ## 0.6.9 — 2026-09-09 3D-only UI (no overlay)
 
 - **No `blf` / `post_draw` HUD.** Dialogue, speaker, load-fail text and menus

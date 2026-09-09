@@ -95,8 +95,12 @@ def required_objects() -> list[dict]:
     for name, purpose, used_by in (
         (BG_PLANE, "background image plane (texture swapped on 'scene')",
          "engine/render/scene_manager.py::SceneManager._swap_bge_texture"),
-        (DIALOGUE_PLANE, "decorative panel behind the blf dialogue overlay",
-         "tools/make_template.py (visual only)"),
+        (DIALOGUE_PLANE, "3D panel behind Speaker_Text / Dialogue_Text",
+         "engine/ui/world_ui.py"),
+        (SPEAKER_TEXT, "3D FONT — speaker name",
+         "engine/ui/world_ui.py"),
+        (DIALOGUE_TEXT, "3D FONT — dialogue body",
+         "engine/ui/world_ui.py"),
     ):
         items.append({"kind": "object", "name": name,
                       "purpose": purpose, "used_by": used_by})

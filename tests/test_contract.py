@@ -35,6 +35,10 @@ def test_contract_required_objects_complete():
     # every contract identifier appears in the required list
     assert contract.BG_PLANE in names
     assert contract.DIALOGUE_PLANE in names
+    assert contract.SPEAKER_TEXT in names
+    assert contract.DIALOGUE_TEXT in names
+    for i in range(contract.CHOICE_COUNT):
+        assert f"{contract.CHOICE_PREFIX}{i}" in names
     assert contract.CONTROLLER in names
     assert contract.LAUNCHER_TEXT in names
     for pos in contract.SPRITE_POSITIONS:
