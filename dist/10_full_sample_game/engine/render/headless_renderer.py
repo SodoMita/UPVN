@@ -12,7 +12,14 @@ POSITIONS, Dialogue_Box plane + blf text.
 """
 from __future__ import annotations
 from pathlib import Path
-from PIL import Image, ImageDraw, ImageFont
+try:
+    from PIL import Image, ImageDraw, ImageFont
+    HAS_PIL = True
+except Exception:  # UPBGE's bundled Python may lack Pillow — give a clear message later
+    Image = None  # type: ignore
+    ImageDraw = None  # type: ignore
+    ImageFont = None  # type: ignore
+    HAS_PIL = False
 import re
 
 W, H = 1280, 720
@@ -31,13 +38,19 @@ def _load_font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
             pass
     return ImageFont.load_default()
 
-F_Title = _load_font(22, bold=True)
-F_Name = _load_font(14, bold=True)
-F_Text = _load_font(20)
-F_TextSmall = _load_font(18)
-F_Small = _load_font(12)
-F_Menu = _load_font(19)
-F_Caption = _load_font(16)
+if HAS_PIL:
+    F_Title = _load_font(22, bold=True)
+    F_Name = _load_font(14, bold=True)
+    F_Text = _load_font(20)
+    F_TextSmall = _load_font(18)
+    F_Small = _load_font(12)
+    F_Menu = _load_font(19)
+    F_Caption = _load_font(16)
+else:
+    # module stays importable without Pillow (UPBGE bundled Python);
+    # render_state() raises an instructive RuntimeError before any drawing
+    F_Title = F_Name = F_Text = F_TextSmall = None
+    F_Small = F_Menu = F_Caption = None
 
 def hex_rgb(h: str):
     h = h.lstrip("#")
@@ -532,6 +545,14 @@ def draw_quick_menu_overlay(img: Image.Image, draw: ImageDraw.ImageDraw, state):
 
 # ---------------------------------------------------------------- public
 def render_state(state, event, out_path: Path | None = None, transition_alpha: float = 1.0, screen_mgr=None) -> Image.Image:
+    if not HAS_PIL:
+        raise RuntimeError(
+            "Pillow (PIL) is not available in this Python interpreter. Install it into "
+            "UPBGE's bundled Python, e.g.:\n"
+            "  <upbge>/5.0/python/bin/python3.11 -m pip install pillow\n"
+            "(or run Preview from a system Python that has Pillow installed)."
+        )
+
     """
     Render a single frame from VNState + current waiting event.
     state: VNState (already mutated by interpreter)
