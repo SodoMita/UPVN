@@ -1,6 +1,6 @@
 """
 UPVN Blender Editor Tools — create visual novel inside Blender with minimal coding
-v0.6.5 (2026-09-08): self-contained engine discovery — no more "Engine not available"
+v0.6.6 (2026-09-08): self-contained engine discovery — no more "Engine not available"
 
 Why v0.6 exists
     Installing the old add-on copied this single .py into Blender's add-ons folder,
@@ -21,7 +21,7 @@ Why v0.6 exists
 
 Install (two supported ways)
   A. Dist zip (recommended):
-        dist/upvn_editor_addon_v0.6.5.zip  → Edit → Preferences → Add-ons →
+        dist/upvn_editor_addon_v0.6.6.zip  → Edit → Preferences → Add-ons →
            Install from Disk… (or Install…) → select the .zip → enable "UPVN".
      Engine, frontend and template travel inside the zip; nothing else needed.
   B. Repo checkout:
@@ -45,7 +45,7 @@ Headless fallback: when bpy unavailable (CI), the module still imports and expos
 bl_info = {
     "name": "UPVN — Visual Novel Editor",
     "author": "UPVN",
-    "version": (0, 6, 5),
+    "version": (0, 6, 6),
     "blender": (4, 2, 0),
     "location": "View3D > Sidebar > UPVN, Text Editor > Sidebar > UPVN",
     "description": "Create Ren'Py-like visual novel inside UPBGE with minimal coding — self-contained engine, one-click scene setup, characters, scenes, dialogue, menus, arbitrary saves, preview",
@@ -277,6 +277,18 @@ def engine_diag_text():
         for s in info.get("searched", []):
             lines.append(f"  looked: {s}")
     return "\n".join(lines)
+
+
+def pil_live_available():
+    """Live probe for Pillow in the CURRENT interpreter. A static HAS_PIL flag
+    goes stale when the user installs Pillow mid-session (Python caches failed
+    imports at module level), so every preview attempt re-checks with a real
+    import. Returns True/False, never raises."""
+    try:
+        import PIL  # noqa: F401
+        return True
+    except Exception:
+        return False
 
 
 def engine_parser_available():
@@ -557,14 +569,14 @@ class UPVN_GameBuilder:
             self.last_error = "engine not found"
             return None
         try:
-            from engine.render.headless_renderer import render_state, HAS_PIL
+            from engine.render.headless_renderer import render_state
         except ImportError as e:
             self.last_error = f"headless renderer import failed: {e}"
             return None
-        if not HAS_PIL:
-            self.last_error = ("Pillow (PIL) is not installed in this Python "
-                               "interpreter — use 'Install Pillow' in the UPVN panel "
-                               "or run: <upbge>/5.0/python/bin/python3.11 -m pip install pillow")
+        if not pil_live_available():
+            self.last_error = ("Pillow (PIL) is not visible to this Python "
+                               "interpreter — press 'Install Pillow' in the UPVN panel "
+                               "(if you already did, restart Blender/UPBGE once)")
             return None
         from engine.core.vn_state import VNState
         from engine.core.vn_interpreter import VNInterpreter
@@ -725,14 +737,30 @@ if HAS_BPY:
                             str(getattr(bpy.app, "binary_path", "")))
                 return {"FINISHED"}
             import subprocess
+            # Install into the site-packages of the RUNNING interpreter (already
+            # on sys.path), so the package becomes visible without a restart.
+            target = None
             try:
-                r = subprocess.run([py, "-m", "pip", "install", "pillow"],
-                                   capture_output=True, text=True, timeout=600)
+                import sysconfig
+                target = sysconfig.get_paths().get("purelib")
+            except Exception:
+                target = None
+            cmd = [py, "-m", "pip", "install", "pillow"]
+            if target:
+                cmd += ["--target", target]
+            try:
+                r = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
             except Exception as e:
                 self.report({"ERROR"}, f"pip failed: {e}")
                 return {"FINISHED"}
             if r.returncode == 0:
-                self.report({"INFO"}, f"Pillow installed into {py}")
+                # verify: does the RUNNING interpreter see it now?
+                if pil_live_available():
+                    self.report({"INFO"}, "Pillow installed and visible — Preview should work now.")
+                else:
+                    self.report({"WARNING"},
+                                "Pillow installed into the bundled Python, but this Blender "
+                                "session does not see it yet — restart Blender/UPBGE once, then Preview.")
             else:
                 tail = (r.stderr or r.stdout or "").strip().splitlines()
                 self.report({"ERROR"}, "pip install failed: " + ("; ".join(tail[-3:]) if tail else "?"))
@@ -885,17 +913,7 @@ except Exception:
                 scene.collection.children.link(col)
             collections[name] = col
 
-        # remove previous controller object (idempotent re-run)
-        old = scene.objects.get("VNController")
-        if old is not None:
-            for c in list(old.game.controllers) if has_game else []:
-                old.game.controllers.remove(c)
-            for s in list(old.game.sensors) if has_game else []:
-                old.game.sensors.remove(s)
-            scene.collection.objects.unlink(old)
-            _b.data.objects.remove(old, do_unlink=True)
-
-        # cameras (keep user cameras, add missing defaults)
+        # camera defaults (keep user cameras, add missing)
         cam_ui = scene.objects.get("Camera_UI")
         if cam_ui is None:
             cam_ui = _data_camera("Camera_UI")
@@ -970,9 +988,16 @@ except Exception:
             scene.collection.objects.link(sp)
             collections["VN_Characters"].objects.link(sp)
 
-        # VNController empty
-        ctrl = _b.data.objects.new("VNController", None)
-        ctrl.empty_display_type = "CUBE"
+        # VNController empty — reuse the existing object when present (UPBGE's
+        # brick collections have no .remove(), so deleting/recreating the object
+        # is impossible without the logic UI operators; reuse keeps it simple and
+        # idempotent)
+        ctrl = scene.objects.get("VNController")
+        created = ctrl is None
+        if ctrl is None:
+            ctrl = _b.data.objects.new("VNController", None)
+            ctrl.empty_display_type = "CUBE"
+            scene.collection.objects.link(ctrl)
         ctrl["script_path"] = script_path
         # relative root to the folder that contains engine/ (launcher falls back
         # to the blend dir + parents when this is empty/stale)
@@ -982,15 +1007,13 @@ except Exception:
             blend_dir = None
         ctrl["upvn_root"] = _engine_root_relative(blend_dir)
 
-        scene.collection.objects.link(ctrl)
-
         # --- logic bricks (UPBGE only) ---
         # UPBGE 0.50 exposes brick editing through bpy.ops.logic.* (the same
         # operators UPBGE's own add-ons use) — the RNA collections themselves are
-        # read-only. bpy.ops.logic requires an interactive UI/GL context, so in
-        # --background mode we skip bricks and say so loudly (no silent half-wired
-        # scenes: the object + launcher text are still created, so the user can
-        # press "Setup Scene" once in the UPBGE UI to finish).
+        # read-only and lack .remove(). bpy.ops.logic requires an interactive
+        # UI/GL context, so in --background mode we skip adding bricks and say so
+        # loudly. Existing bricks are never touched: Setup Scene is idempotent and
+        # preserves a working wiring when the object already has it.
         ctrl["upvn_bricks"] = "no"
         if has_game and install_launcher:
             launcher = _b.data.texts.get("upvn_launcher")
@@ -998,16 +1021,35 @@ except Exception:
                 launcher = _b.data.texts.new("upvn_launcher")
             launcher.clear()
             launcher.write(_UPVN_LAUNCHER_TEXT)
-            brick_state = _add_logic_bricks(_b, ctrl, launcher, controller_module)
-            ctrl["upvn_bricks"] = brick_state
+            try:
+                sensor_names = {s.name for s in ctrl.game.sensors}
+                controller_names = {c.name for c in ctrl.game.controllers}
+            except Exception:
+                sensor_names, controller_names = set(), set()
+            need_sensor = "Always" not in sensor_names
+            need_controller = "UPVN_Main" not in controller_names
+            if not need_sensor and not need_controller:
+                ctrl["upvn_bricks"] = "existing"
+            else:
+                brick_state = _add_logic_bricks(
+                    _b, ctrl, launcher, controller_module,
+                    need_sensor=need_sensor, need_controller=need_controller)
+                ctrl["upvn_bricks"] = brick_state
         return ctrl
 
 
-    def _add_logic_bricks(_b, obj, launcher_text, controller_module):
+    def _add_logic_bricks(_b, obj, launcher_text, controller_module,
+                          need_sensor=True, need_controller=True):
         """Wire Always(pulse) -> Python(launcher text) on obj via bpy.ops.logic.*.
 
-        Returns 'yes' | 'skipped-background' | 'error: …'.
+        Only the missing pieces are added (need_sensor / need_controller), so a
+        repeated Setup Scene never creates duplicate bricks.
+
+        Returns 'yes' | 'skipped-background' | 'error: …' | 'already' when
+        nothing needed adding.
         """
+        if not need_sensor and not need_controller:
+            return "already"
         if getattr(_b.app, "background", True):
             return ("skipped-background: run 'Setup Scene' from the UPVN panel "
                     "inside the UPBGE UI (bpy.ops.logic needs an interactive context)")
@@ -1016,19 +1058,26 @@ except Exception:
         except Exception:
             pass
         try:
-            _b.ops.logic.sensor_add(type="ALWAYS", object=obj.name, name="Always")
-            _b.ops.logic.controller_add(type="PYTHON", object=obj.name, name="UPVN_Main")
+            if need_sensor:
+                _b.ops.logic.sensor_add(type="ALWAYS", object=obj.name, name="Always")
+            if need_controller:
+                _b.ops.logic.controller_add(type="PYTHON", object=obj.name, name="UPVN_Main")
         except Exception as e:
             return f"error: {e}"
         try:
-            sen = obj.game.sensors[-1]
-            con = obj.game.controllers[-1]
+            # pair the first sensor with the first controller (both must exist)
+            sensors = list(obj.game.sensors)
+            controllers = list(obj.game.controllers)
+            if not sensors or not controllers:
+                return "error: brick created but pair incomplete"
+            sen = sensors[-1]
+            con = controllers[-1]
             try:
                 sen.use_pulse_true_level = True
                 sen.frequency = 0
             except Exception:
                 pass
-            if launcher_text is not None:
+            if need_controller and launcher_text is not None:
                 try:
                     con.text = launcher_text      # SCRIPT mode, Text datablock
                 except Exception:
@@ -1355,13 +1404,14 @@ except Exception:
             p = context.scene.upvn_props
             # generate a preview screenshot of save overlay pagination
             try:
-                from engine.render.headless_renderer import render_state, HAS_PIL
-                if not HAS_PIL:
-                    self.report({'ERROR'},
-                                "Pillow (PIL) is not installed in this Python — press 'Install Pillow' in the UPVN panel.")
-                    return {'FINISHED'}
+                from engine.render.headless_renderer import render_state
             except ImportError as e:
                 self.report({'ERROR'}, f"headless renderer import failed: {e}")
+                return {'FINISHED'}
+            if not pil_live_available():
+                self.report({'ERROR'},
+                            "Pillow (PIL) is not visible to this Python — press 'Install Pillow' "
+                            "in the UPVN panel (restart Blender/UPBGE after installing).")
                 return {'FINISHED'}
             try:
                 from engine.core.vn_state import VNState

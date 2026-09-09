@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.6.6 — 2026-09-08 Idempotent Setup Scene + live Pillow probe (field reports)
+- **Setup Scene no longer fails on a second run.** Field error
+  `bpy_prop_collection: attribute "remove" not found`: the generator deleted the
+  existing `VNController` by iterating the read-only brick collections
+  (sensors/controllers have no `.remove()` in UPBGE 0.50). `build_vn_scene` now
+  **reuses** the existing object — properties are refreshed, the launcher text is
+  rewritten, and only the missing pieces (Always sensor / UPVN_Main controller)
+  are added by name; an intact wiring is reported as `upvn_bricks = "existing"`
+  and never touched. Repeated presses are safe by construction.
+- **Preview works immediately after installing Pillow.** The static module flag
+  `HAS_PIL` went stale when Pillow was installed mid-session (a module imported
+  earlier without Pillow stays `False`). `render_state()` now performs a live
+  probe (`from PIL import …` at call time) and binds the names then; the add-on
+  preview paths use a new `pil_live_available()` that imports `PIL` afresh on
+  every attempt. The "Install Pillow" operator installs with
+  `pip --target <purelib of the running interpreter>` — that directory is
+  already on `sys.path`, so the package is visible without restarting Blender;
+  the operator verifies visibility and, if still absent, advises one restart.
+- Tests: `tests/test_m20_upbge_runtime.py` extended (7 tests, incl. static guard
+  that the add-on never calls `.remove()` on brick collections and reuses
+  `VNController`) → **133 passed, 2 skipped**.
+- Add-on version 0.6.6; dist rebuilt.
+
 ## 0.6.5 — 2026-09-08 Runtime fixes from the field (UPBGE console reports)
 - **`blf.color()` signature fixed.** UPBGE 0.50 requires
   `blf.color(fontid, r, g, b, a)`; the overlay passed four values under the old
