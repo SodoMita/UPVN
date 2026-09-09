@@ -1,7 +1,7 @@
-HEAD
-# Current Status — 2026-09-09 (M23 screens draw in the golden trace)
+# Current Status — 2026-09-09 (M23.1 open scene · M23 Ren'Py screens)
 
 ## Last completed
+- M23.1 Setup Scene writes the OPEN scene (2026-09-09): field 18/27 missing choice_* because objects landed on VN_Main while the template Scene stayed old. v0.6.10. Restart UPBGE, Setup Scene, Check Wiring on that scene.
 - **M22 Screen-language interpreter DONE (2026-09-09, branch `feat/renpy-corpus-compat`)**: the drop-in tier *parsed* `screen:` blocks and then discarded them — the body was captured as stripped text, so `show screen` / `call screen` emitted an event with a name and nothing to draw. The SDK tutorial has **99** screens and LearnToCodeRPG **23**; all were inert.
   - **`engine/ui/screen_lang.py`**: rebuilds the widget tree from a captured body and evaluates it — containers (`vbox`/`hbox`/`frame`/`window`/`fixed`/`null`/`bar`), leaves (`text`/`textbutton`/`imagebutton`/`add`/`label`/`input`/`key`), control flow (`if`/`elif`/`else`, `for`, `$`), screen-local `default`s, `use` + `transclude`, `has vbox` (a declaration, not a block — the container is synthesised from the siblings that follow), and `[expr]` interpolation. Output is JSON-serialisable.
   - **Layout deliberately not modelled**: positions, sizes, styles and anchors stay in `props`. UPVN's UI is built in the 3D scene, so a second layout engine would only compete with it.
@@ -32,6 +32,7 @@ HEAD
   - Compat mode (`VNController(..., mode="full", compat=True)`): `init python:`/`python:` failures collected in `interp.init_errors`/`interp.python_errors`, unknown globals → recorded no-ops (`PermissiveEnv`), unknown `renpy.*` → no-ops that can be subclassed (`__mro_entries__`) and are logged in `renpy.compat_log`. Default still raises.
   - New `tools/check_renpy_project.py` (per-file report, duplicates, unresolved targets, `renpy.*` usage, `--json`, `--run` smoke run) and example `examples/14_renpy_dropin` (3 files, stock Ren'Py syntax, both routes run).
   - Tests: `tests/test_renpy_compat.py` (64) + `tests/test_renpy_corpus.py` (5, skips without `UPVN_RENPY_CORPUS`); The Question restored at `~/renpy_src` so the 2 long-skipped tests run again → **200 passed, 0 skipped**.
+
 - M23 3D-only UI DONE (2026-09-09): no blf overlay; FONT Speaker_Text/Dialogue_Text + choice_0..8 planes; LMB getScreenRay → PointerTracker.choose; Emission unlit + lights off; sprites visible without PNG. Add-on v0.6.9. Re-run Setup Scene.
 - M22 UPBGE play: camera bind + keyboard capture DONE (2026-09-09): Camera_UI Front (XZ planes, (0,-10,0) rot X=90°) reset every Setup Scene; runtime `scene.active_camera = Camera_UI`; AllKeys+Mouse bricks so embedded P receives keys (LMB already worked); input path is `inputs.queue` only — `keyboard.events` gone (deprecation + lossy conversion). Add-on v0.6.8. tests/test_m22_upbge_play.py
 - M21 Script discovery + diagnostics DONE (2026-09-09): runtime searches parent/grandparent dirs of the .blend (`//../game/script.rpy`, `//../../game/script.rpy`, example layouts) — packaged `<pkg>/blend` + `<pkg>/game` now loads without manual path setup; load failure draws an on-screen red diagnostic (searched paths + fix steps) instead of a console-only warning; Setup Scene reports intact wiring as INFO (was false "Brick wiring issue: existing" warning); input polling moved off deprecated keyboard.events/mouse.events to device.inputs via pure helpers `_bge_input_state/_bge_just/_bge_active` with legacy fallback; digit selector rewritten as pure `_digit_choice_index`; register banner prints real bl_info version; add-on v0.6.7; tests updated (+packaged-layout path test) → 135 passed 2 skipped
@@ -63,7 +64,6 @@ HEAD
 - M16 merge + debugging DONE (2026-09-08): merged `feat/declarative-rpy` into `main` (resolved 4 conflicts: vn_interpreter safe_eval kept delegating to expr_eval whitelist, STATUS/CHANGELOG combined, tests use shared TQ_SCRIPT) and pushed. Debug fixes: multi-file dirs no longer require `start` in every `.urpy` (`require_start=False`, checked on merged script); `store.x`/`renpy.store.x`/bare names share one namespace in python blocks (stale-copy overwrite fixed via StoreWrapper over the exec dict + runtime.store_dict); label re-entry resets to `_pristine_labels` so spliced while/if/menu nodes never accumulate; dialogue `[...]` interpolation evaluates whitelisted expressions (`[gold*2]`, `[store.gold]`) with verbatim fallback; `store` injected into expr `extra`. 108 passed, 2 skipped
 
 ## Currently failing / todo
-HEAD
 - None blocker — 224 passed, 0 skipped, 0 failures (CI green on GitHub, all 4 jobs)
 - Drop-in tier still **captures** (does not render) `screen`/`style`/`transform`/`translate` bodies; the editor-built UI layer is the consumer
 - `python:` blocks run for real: a game needing third-party modules or `renpy.display.*` classes needs `compat=True` (LearnToCodeRPG needs `supermemo2.SMTwo`, which its pinned dependency version no longer exports — 7 collected init errors, story still plays)
@@ -73,7 +73,6 @@ HEAD
 - Next up (not blockers): make `UPVN_GameBuilder` emit declarative forms (`character`/`state`/`set`/`choice`) instead of legacy `define`/`$`; wire `VNState.resolve_asset` into renderers so scene/show/play_music actually resolve manifest paths; wire `engine/ui/pointer.py` into `bge_frontend/frontend.py` (raycast object under cursor → `PointerTracker.update` → `controller.choose(i)`); publish GitHub release with dist zips
 
 ## Recommended next task
-HEAD
 - **Draw the widget trees in the UPBGE frontend too.** M23 proves the headless renderer can paint them; the 3D frontend still ignores `active_screens`. Walking the same widget list into blf + planes (text → blf, frame/vbox/hbox → quads from the `props` positions) makes `call screen` visible in-game, closing the loop the headless side now demonstrates.
 - A third corpus for regression breadth (a GPL Ren'Py game, e.g. an Everlasting Summer port) — the checker is corpus-agnostic, so this is config, not code
 - Publish a GitHub release with the `dist/` zips
