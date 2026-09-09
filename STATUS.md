@@ -47,17 +47,20 @@
 - M16 merge + debugging DONE (2026-09-08): merged `feat/declarative-rpy` into `main` (resolved 4 conflicts: vn_interpreter safe_eval kept delegating to expr_eval whitelist, STATUS/CHANGELOG combined, tests use shared TQ_SCRIPT) and pushed. Debug fixes: multi-file dirs no longer require `start` in every `.urpy` (`require_start=False`, checked on merged script); `store.x`/`renpy.store.x`/bare names share one namespace in python blocks (stale-copy overwrite fixed via StoreWrapper over the exec dict + runtime.store_dict); label re-entry resets to `_pristine_labels` so spliced while/if/menu nodes never accumulate; dialogue `[...]` interpolation evaluates whitelisted expressions (`[gold*2]`, `[store.gold]`) with verbatim fallback; `store` injected into expr `extra`. 108 passed, 2 skipped
 
 ## Currently failing / todo
-- None blocker — 200 passed, 0 skipped, 0 failures
+- None blocker — 224 passed, 0 skipped, 0 failures (CI green on GitHub, all 4 jobs)
 - Drop-in tier still **captures** (does not render) `screen`/`style`/`transform`/`translate` bodies; the editor-built UI layer is the consumer
 - `python:` blocks run for real: a game needing third-party modules or `renpy.display.*` classes needs `compat=True` (LearnToCodeRPG needs `supermemo2.SMTwo`, which its pinned dependency version no longer exports — 7 collected init errors, story still plays)
 - Full game-engine loop (pressing P, seeing/clicking dialogue) still needs a machine with a working GL display: bricks are created and linked (verified in X11/Xvfb), but the sandbox segfaults when the game engine itself starts (blenderplayer/view3d.game_start, llvmpipe) — user acceptance on a real GPU machine is the remaining check
-- Next up (not blockers): make `UPVN_GameBuilder` emit declarative forms (`character`/`state`/`set`/`choice`) instead of legacy `define`/`$`; wire `VNState.resolve_asset` into renderers so scene/show/play_music actually resolve manifest paths; wire `engine/ui/pointer.py` into `bge_frontend/frontend.py` (raycast object under cursor → `PointerTracker.update` → `controller.choose(i)`); CI workflow (pytest + package_game + package_addon); publish GitHub release with dist zips
+- Next up (not blockers): make `UPVN_GameBuilder` emit declarative forms (`character`/`state`/`set`/`choice`) instead of legacy `define`/`$`; wire `VNState.resolve_asset` into renderers so scene/show/play_music actually resolve manifest paths; wire `engine/ui/pointer.py` into `bge_frontend/frontend.py` (raycast object under cursor → `PointerTracker.update` → `controller.choose(i)`); publish GitHub release with dist zips
 
 ## Recommended next task
-- Wire the captured `screen:` bodies to the editor UI (or a minimal screen interpreter) so `call screen`/`show screen` actually draw something in UPBGE
-- Add a CI workflow: `pytest` + `tools.check_renpy_project examples/14_renpy_dropin --run` (and the corpus job behind `UPVN_RENPY_CORPUS`)
-- Second corpus for regression breadth (a GPL Ren'Py game, e.g. an Everlasting Summer port) — the checker is corpus-agnostic
+- Wire the captured `screen:` bodies to the editor UI (or a minimal screen interpreter) so `call screen`/`show screen` actually draw something in UPBGE — this is now the largest gap between "parses a real game" and "renders a real game"
+- A third corpus for regression breadth (a GPL Ren'Py game, e.g. an Everlasting Summer port) — the checker is corpus-agnostic, so this is config, not code
+- Publish a GitHub release with the `dist/` zips
 - Human-in-the-loop acceptance (user): open blend/UPVN_Template.blend in UPBGE → UPVN tab shows ✓ Engine → Create Project → P → click/Space to advance; report console output if anything looks off
+
+## CI (`.github/workflows/ci.yml`, green)
+Four jobs, all verified: `tests` (pytest), `examples` (every example validated in its own tier + played headless, and the syntax gallery must *fail*), `renpy-corpus` (LearnToCodeRPG) and `renpy-sdk` (the SDK's own games). Both corpora are fetched with a blob-filtered sparse checkout (~3 MB / ~6 MB instead of 288 MB / 500 MB) and their reports upload as artifacts. Jobs install `requirements.txt` — a bare `pip install pytest` left Pillow out and aborted test collection for the whole suite.
 - Wire `engine/ui/pointer.py` into `bge_frontend/frontend.py` + `VNController` (hover/click over editor-built choice objects → `controller.choose`) — the UI/input half of M15
 - Update `UPVN_GameBuilder.build_rpy()` to emit the canonical declarative forms (and update `test_arbitrary_saves.py::test_blender_builder_minimal_coding`)
 
