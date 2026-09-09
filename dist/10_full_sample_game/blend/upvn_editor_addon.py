@@ -1,6 +1,6 @@
 """
 UPVN Blender Editor Tools — create visual novel inside Blender with minimal coding
-v0.6.7 (2026-09-08): self-contained engine discovery — no more "Engine not available"
+v0.6.8 (2026-09-09): Camera_UI Front+bind, AllKeys sensor, inputs.queue (no keyboard.events)
 
 Why v0.6 exists
     Installing the old add-on copied this single .py into Blender's add-ons folder,
@@ -21,7 +21,7 @@ Why v0.6 exists
 
 Install (two supported ways)
   A. Dist zip (recommended):
-        dist/upvn_editor_addon_v0.6.7.zip  → Edit → Preferences → Add-ons →
+        dist/upvn_editor_addon_v0.6.8.zip  → Edit → Preferences → Add-ons →
            Install from Disk… (or Install…) → select the .zip → enable "UPVN".
      Engine, frontend and template travel inside the zip; nothing else needed.
   B. Repo checkout:
@@ -45,7 +45,7 @@ Headless fallback: when bpy unavailable (CI), the module still imports and expos
 bl_info = {
     "name": "UPVN — Visual Novel Editor",
     "author": "UPVN",
-    "version": (0, 6, 7),
+    "version": (0, 6, 8),
     "blender": (4, 2, 0),
     "location": "View3D > Sidebar > UPVN, Text Editor > Sidebar > UPVN",
     "description": "Create Ren'Py-like visual novel inside UPBGE with minimal coding — self-contained engine, one-click scene setup, characters, scenes, dialogue, menus, arbitrary saves, preview",
@@ -846,8 +846,8 @@ except Exception:
             d = parent
         return "//"
 
-    def _data_plane(name, size=10.0, color=(0.06, 0.06, 0.09, 1.0)):
-        """Plane mesh + material via data API (no bpy.ops)."""
+    def _data_plane(name, size=10.0, color=(0.06, 0.06, 0.09, 1.0), rot=None):
+        """Plane mesh + material via data API (no bpy.ops). Default rot = stand in XZ."""
         mesh = bpy.data.meshes.new(name + "_mesh")
         mesh.from_pydata([(-1, -1, 0), (1, -1, 0), (1, 1, 0), (-1, 1, 0)],
                          [], [(0, 1, 2, 3)])
@@ -863,10 +863,13 @@ except Exception:
             pass
         obj = bpy.data.objects.new(name, mesh)
         obj.scale = (size / 2, size / 2, 1)
+        if rot is None:
+            rot = (1.5707963267948966, 0.0, 0.0)
+        obj.rotation_euler = rot
         obj.data.materials.append(mat)
         return obj
 
-    def _data_camera(name, ortho=True, size=10.0, loc=(0, -10, 5), rot=(1.5708, 0, 0)):
+    def _data_camera(name, ortho=True, size=10.0, loc=(0.0, -10.0, 0.0), rot=(1.5707963267948966, 0.0, 0.0)):
         cam_data = bpy.data.cameras.new(name)
         if ortho:
             cam_data.type = "ORTHO"
@@ -913,16 +916,66 @@ except Exception:
                 scene.collection.children.link(col)
             collections[name] = col
 
-        # camera defaults (keep user cameras, add missing)
-        cam_ui = scene.objects.get("Camera_UI")
+        # camera — always re-apply the Front/ortho transform unless the user
+        # tagged the object upvn_camera_custom. Existing Camera_UI at the old
+        # (0,-10,5) pose looked at XY planes edge-on and was never bound.
+        try:
+            from engine.render.contract import (
+                CAMERA_UI, CAMERA_3D,
+                CAMERA_UI_LOCATION, CAMERA_UI_ROTATION, CAMERA_UI_ORTHO_SCALE,
+                CAMERA_3D_LOCATION, CAMERA_3D_ROTATION, PLANE_ROTATION,
+                DIALOGUE_LOCATION, DIALOGUE_SCALE,
+            )
+        except Exception:
+            CAMERA_UI, CAMERA_3D = "Camera_UI", "Camera_3D"
+            CAMERA_UI_LOCATION = (0.0, -10.0, 0.0)
+            CAMERA_UI_ROTATION = (1.5707963267948966, 0.0, 0.0)
+            CAMERA_UI_ORTHO_SCALE = 10.0
+            CAMERA_3D_LOCATION = (0.0, -6.0, 2.5)
+            CAMERA_3D_ROTATION = (1.15, 0.0, 0.0)
+            PLANE_ROTATION = (1.5707963267948966, 0.0, 0.0)
+            DIALOGUE_LOCATION = (0.0, -0.4, -3.2)
+            DIALOGUE_SCALE = (4.0, 1.2, 1.0)
+
+        cam_ui = scene.objects.get(CAMERA_UI)
         if cam_ui is None:
-            cam_ui = _data_camera("Camera_UI")
+            cam_ui = _data_camera(CAMERA_UI, ortho=True, size=CAMERA_UI_ORTHO_SCALE,
+                                  loc=CAMERA_UI_LOCATION, rot=CAMERA_UI_ROTATION)
             scene.collection.objects.link(cam_ui)
-        cam3d = scene.objects.get("Camera_3D")
+        elif not cam_ui.get("upvn_camera_custom"):
+            cam_ui.location = CAMERA_UI_LOCATION
+            cam_ui.rotation_euler = CAMERA_UI_ROTATION
+            try:
+                cam_ui.data.type = "ORTHO"
+                cam_ui.data.ortho_scale = CAMERA_UI_ORTHO_SCALE
+            except Exception:
+                pass
+        cam3d = scene.objects.get(CAMERA_3D)
         if cam3d is None:
-            cam3d = _data_camera("Camera_3D", ortho=False, loc=(0, -6, 2.5), rot=(1.15, 0, 0))
+            cam3d = _data_camera(CAMERA_3D, ortho=False,
+                                  loc=CAMERA_3D_LOCATION, rot=CAMERA_3D_ROTATION)
             scene.collection.objects.link(cam3d)
         scene.camera = cam_ui
+        # hide leftover factory cameras so P cannot pick the wrong one
+        for ob in list(scene.objects):
+            try:
+                if ob.type == "CAMERA" and ob.name not in (CAMERA_UI, CAMERA_3D):
+                    ob.hide_viewport = True
+                    ob.hide_render = True
+            except Exception:
+                pass
+        # 3D view → camera (so the editor matches what P will show)
+        try:
+            win = getattr(_b.context, "window", None)
+            screen = getattr(win, "screen", None) if win is not None else None
+            if screen is not None:
+                for area in screen.areas:
+                    if area.type == "VIEW_3D":
+                        space = area.spaces.active
+                        space.camera = cam_ui
+                        space.region_3d.view_perspective = "CAMERA"
+        except Exception:
+            pass
 
         # placeholder planes (only when missing — don't destroy user art)
         # names/materials follow engine/render/contract.py (single source)
@@ -935,7 +988,7 @@ except Exception:
             SPRITE_MATERIAL, DIALOGUE_PLANE = "MASprite", "Dialogue_Box"
             SPRITE_POSITIONS = ("far_left", "left", "center", "right", "far_right")
             POSITIONS = {p: ({"far_left": -5.0, "left": -3.0, "center": 0.0,
-                              "right": 3.0, "far_right": 5.0}[p], 0, 1.2)
+                              "right": 3.0, "far_right": 5.0}[p], -0.15, 0.0)
                          for p in SPRITE_POSITIONS}
 
         def _ensure_material(_b, name, color):
@@ -963,30 +1016,41 @@ except Exception:
                 pass
             ob.data.materials.append(mat)
 
+        def _apply_2d_layout(ob, loc, scale=None):
+            if ob.get("upvn_layout_custom"):
+                return
+            ob.location = loc
+            ob.rotation_euler = PLANE_ROTATION
+            if scale is not None:
+                ob.scale = scale
+
         bg = scene.objects.get(BG_PLANE)
         if bg is None:
-            bg = _data_plane(BG_PLANE, size=10.0)
+            bg = _data_plane(BG_PLANE, size=10.0, rot=PLANE_ROTATION)
             _single_material(bg, mat_bg)
             scene.collection.objects.link(bg)
             collections["VN_Backgrounds"].objects.link(bg)
+        _apply_2d_layout(bg, (0.0, 0.0, 0.0))
         dlg = scene.objects.get(DIALOGUE_PLANE)
         if dlg is None:
-            dlg = _data_plane(DIALOGUE_PLANE, size=8.0, color=(0.05, 0.05, 0.12, 1.0))
-            dlg.scale = (8 / 2, 8 / 2 * 0.3, 1)
+            dlg = _data_plane(DIALOGUE_PLANE, size=8.0, color=(0.05, 0.05, 0.12, 1.0),
+                              rot=PLANE_ROTATION)
             scene.collection.objects.link(dlg)
             collections["VN_UI"].objects.link(dlg)
+        _apply_2d_layout(dlg, DIALOGUE_LOCATION, DIALOGUE_SCALE)
 
         # sprite planes per position (SpriteRenderer looks these up by name)
         for pos in SPRITE_POSITIONS:
             name = f"Sprite_{pos}"
-            if scene.objects.get(name) is not None:
-                continue
-            x, _, z = POSITIONS.get(pos, (0.0, 0, 1.2))
-            sp = _data_plane(name, size=2.2, color=(0.3, 0.28, 0.4, 1.0))
-            sp.location = (x, 0, z)
-            _single_material(sp, mat_sprite)
-            scene.collection.objects.link(sp)
-            collections["VN_Characters"].objects.link(sp)
+            loc = POSITIONS.get(pos, (0.0, -0.15, 0.0))
+            sp = scene.objects.get(name)
+            if sp is None:
+                sp = _data_plane(name, size=2.2, color=(0.3, 0.28, 0.4, 1.0),
+                                 rot=PLANE_ROTATION)
+                _single_material(sp, mat_sprite)
+                scene.collection.objects.link(sp)
+                collections["VN_Characters"].objects.link(sp)
+            _apply_2d_layout(sp, loc)
 
         # VNController empty — reuse the existing object when present (UPBGE's
         # brick collections have no .remove(), so deleting/recreating the object
@@ -1028,27 +1092,30 @@ except Exception:
                 sensor_names, controller_names = set(), set()
             need_sensor = "Always" not in sensor_names
             need_controller = "UPVN_Main" not in controller_names
-            if not need_sensor and not need_controller:
+            need_keys = "AllKeys" not in sensor_names
+            need_mouse = "Mouse" not in sensor_names
+            if not any((need_sensor, need_controller, need_keys, need_mouse)):
                 ctrl["upvn_bricks"] = "existing"
             else:
                 brick_state = _add_logic_bricks(
                     _b, ctrl, launcher, controller_module,
-                    need_sensor=need_sensor, need_controller=need_controller)
+                    need_sensor=need_sensor, need_controller=need_controller,
+                    need_keys=need_keys, need_mouse=need_mouse)
                 ctrl["upvn_bricks"] = brick_state
         return ctrl
 
 
     def _add_logic_bricks(_b, obj, launcher_text, controller_module,
-                          need_sensor=True, need_controller=True):
-        """Wire Always(pulse) -> Python(launcher text) on obj via bpy.ops.logic.*.
+                          need_sensor=True, need_controller=True,
+                          need_keys=False, need_mouse=False):
+        """Wire Always(pulse)+AllKeys+Mouse -> Python(launcher) via bpy.ops.logic.*.
 
-        Only the missing pieces are added (need_sensor / need_controller), so a
-        repeated Setup Scene never creates duplicate bricks.
+        AllKeys is required in the embedded player (P): without it Blender eats
+        keystrokes while LMB still reaches bge.logic.mouse.
 
-        Returns 'yes' | 'skipped-background' | 'error: …' | 'already' when
-        nothing needed adding.
+        Returns 'yes' | 'skipped-background' | 'error: …' | 'already'.
         """
-        if not need_sensor and not need_controller:
+        if not any((need_sensor, need_controller, need_keys, need_mouse)):
             return "already"
         if getattr(_b.app, "background", True):
             return ("skipped-background: run 'Setup Scene' from the UPVN panel "
@@ -1060,23 +1127,47 @@ except Exception:
         try:
             if need_sensor:
                 _b.ops.logic.sensor_add(type="ALWAYS", object=obj.name, name="Always")
+            if need_keys:
+                _b.ops.logic.sensor_add(type="KEYBOARD", object=obj.name, name="AllKeys")
+            if need_mouse:
+                _b.ops.logic.sensor_add(type="MOUSE", object=obj.name, name="Mouse")
             if need_controller:
                 _b.ops.logic.controller_add(type="PYTHON", object=obj.name, name="UPVN_Main")
         except Exception as e:
             return f"error: {e}"
         try:
-            # pair the first sensor with the first controller (both must exist)
-            sensors = list(obj.game.sensors)
+            sensors = {s.name: s for s in obj.game.sensors}
             controllers = list(obj.game.controllers)
             if not sensors or not controllers:
                 return "error: brick created but pair incomplete"
-            sen = sensors[-1]
-            con = controllers[-1]
+            con = None
+            for c in controllers:
+                if c.name == "UPVN_Main":
+                    con = c
+                    break
+            if con is None:
+                con = controllers[-1]
+            always = sensors.get("Always") or list(sensors.values())[0]
             try:
-                sen.use_pulse_true_level = True
-                sen.frequency = 0
+                always.use_pulse_true_level = True
+                always.frequency = 0
             except Exception:
                 pass
+            keys = sensors.get("AllKeys")
+            if keys is not None:
+                try:
+                    keys.use_all_keys = True
+                    keys.use_pulse_true_level = True
+                    keys.frequency = 0
+                except Exception:
+                    pass
+            mouse = sensors.get("Mouse")
+            if mouse is not None:
+                try:
+                    mouse.mouse_type = "LEFTCLICK"
+                    mouse.use_pulse_true_level = True
+                except Exception:
+                    pass
             if need_controller and launcher_text is not None:
                 try:
                     con.text = launcher_text      # SCRIPT mode, Text datablock
@@ -1086,10 +1177,18 @@ except Exception:
                         con.module = controller_module
                     except Exception:
                         pass
-            try:
-                con.link(sensor=sen)
-            except TypeError:
-                con.link(sensor=sen, actuator=None)
+            for sen in (always, keys, mouse):
+                if sen is None:
+                    continue
+                try:
+                    con.link(sensor=sen)
+                except TypeError:
+                    try:
+                        con.link(sensor=sen, actuator=None)
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
             return "yes"
         except Exception as e:
             return f"error: {e}"
