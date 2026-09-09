@@ -682,3 +682,168 @@ def test_example_14_conditional_choice_group_is_filtered():
 def test_example_14_rejects_the_safe_tier():
     with pytest.raises(ParseError):
         parse_string(open(f"{EXAMPLE}/script.rpy", encoding="utf-8").read())
+
+
+# ------------------------------------------------------------------ M21: second corpus
+# Everything below was driven by validating against the Ren'Py SDK's own
+# `tutorial` game (MIT) — a second, independent FOSS corpus. Each test pins the
+# construct that corpus uses so a future refactor cannot silently drop it.
+
+
+def test_comment_only_file_is_not_an_error():
+    """A file that holds nothing but comments is legal in a multi-file game."""
+    d = parse_string_full("# just a note\n\n## another\n", require_start=False)
+    assert d["labels"] == {} and d["characters"] == {}
+    # …but a single-file script still needs an entry point
+    with pytest.raises(ParseError):
+        parse_string_full("# nothing here\n")
+
+
+def test_unterminated_plain_string_reports_a_friendly_error():
+    from engine.script.lexer import group_logical_lines
+    with pytest.raises(ParseError) as ei:
+        group_logical_lines('label start:\n    "never closed\n')
+    assert "unterminated string" in str(ei.value)
+    assert "triple-quoted" not in str(ei.value)
+
+
+def test_string_may_run_over_several_lines():
+    """Ren'Py lexes strings with re.DOTALL, so a quote may close on a later line."""
+    lines = group_logical_lines('label start:\n    e "one\n       two."\n')
+    assert len(lines) == 2
+    d = parse_string_full('label start:\n    e "one\n       two."\n')
+    assert d["labels"]["start"][0]["text"] == "one\n       two."
+
+
+def test_say_accepts_a_renpy_dialogue_id():
+    d = parse_string_full('label start:\n    e "hello" id demo_character_7e0d75aa\n')
+    node = d["labels"]["start"][0]
+    assert node["text"] == "hello"
+    assert node["id"] == "demo_character_7e0d75aa"
+
+
+def test_say_who_may_be_a_quoted_name():
+    d = parse_string_full('label start:\n    "Lucy" "Better watch out."\n')
+    node = d["labels"]["start"][0]
+    assert node["who"] == "Lucy"
+    assert node["text"] == "Better watch out."
+
+
+def test_show_and_scene_may_carry_an_atl_block():
+    src = ('label start:\n'
+           '    show pos:\n'
+           '       xanchor 0.5 yanchor 0.5\n'
+           '       subpixel True\n'
+           '    scene bg room:\n'
+           '        xalign 0.0\n'
+           '    "done"\n')
+    d = parse_string_full(src)
+    kinds = [n["cmd"] for n in d["labels"]["start"]]
+    assert kinds == ["show", "scene", "say"]
+    assert d["labels"]["start"][0]["atl"] == ["xanchor 0.5 yanchor 0.5", "subpixel True"]
+    assert d["labels"]["start"][1]["atl"] == ["xalign 0.0"]
+
+
+def test_bare_scene_clears_the_layer():
+    """`scene` with no target is valid Ren'Py — it empties the scene layer."""
+    d = parse_string_full('label start:\n    scene\n    show a\n')
+    assert [n["cmd"] for n in d["labels"]["start"]] == ["scene", "show"]
+    assert d["labels"]["start"][0]["asset"] == ""
+    with pytest.raises(ParseError):        # safe tier still demands a target
+        parse_string('label start:\n    scene\n')
+
+
+def test_define_accepts_augmented_assignment():
+    d = parse_string_full('define config.lint_ignore_redefine += [ "store.menu" ]\n'
+                          'label start:\n    "x"\n')
+    assert "config.lint_ignore_redefine" in d["defines"]
+
+
+def test_style_block_is_allowed_inside_a_label():
+    d = parse_string_full('label start:\n'
+                          '    style green_text:\n'
+                          '        color "#c8ffc8"\n'
+                          '    "x"\n')
+    assert d["styles"]["green_text"]["lines"] == ['color "#c8ffc8"']
+
+
+def test_window_and_nvl_take_a_transition():
+    d = parse_string_full('label start:\n'
+                          '    window hide None\n'
+                          '    nvl show dissolve\n'
+                          '    window show\n')
+    win, nvl, win2 = d["labels"]["start"]
+    assert (win["value"], win["transition"]) == ("hide", "None")
+    assert (nvl["action"], nvl["transition"]) == ("show", "dissolve")
+    assert win2["transition"] is None
+
+
+def test_project_registered_statements_are_accepted():
+    """`renpy.register_statement("example", …)` makes `example` a legal keyword."""
+    reg = ('init python:\n'
+           '    renpy.register_statement("example", parse=p, execute=e, block="script")\n')
+    use = ('label start:\n'
+           '    example thing:\n'
+           '        "inside the block"\n'
+           '    "after"\n')
+    # per-file parsing cannot see the registration…
+    with pytest.raises(ParseError):
+        parse_string_full(use, require_start=False)
+    # …but the project-wide pass supplies it, exactly as Ren'Py does
+    from engine.script.parser import discover_custom_statements
+    found = discover_custom_statements([reg, use])
+    assert found["example"] == "script"
+    d = parse_string_full(use, require_start=False, custom_statements=found)
+    assert [n["cmd"] for n in d["labels"]["start"]] == ["custom_statement", "say"]
+    assert d["custom_statements"]["example"][0]["args"] == "thing"
+
+
+def test_registered_script_blocks_expose_their_labels():
+    """block="script" means the body is script, so its labels are real targets."""
+    from engine.script.parser import discover_custom_statements
+    reg = 'init python:\n    renpy.register_statement("example", block="script")\n'
+    use = ('example minigame hide:\n'
+           '    label play_pong:\n'
+           '        "pong"\n'
+           'label pong_done:\n'
+           '    jump play_pong\n')
+    found = discover_custom_statements([reg, use])
+    d = parse_string_full(use, require_start=False, custom_statements=found)
+    assert set(d["labels"]) >= {"play_pong", "pong_done"}
+
+
+def test_unknown_body_inside_a_foreign_statement_does_not_abort_the_file():
+    from engine.script.parser import discover_custom_statements
+    reg = 'init python:\n    renpy.register_statement("example", block="script")\n'
+    use = ('example odd:\n'
+           '    this is not script at all ???\n'
+           'label start:\n'
+           '    "still parsed"\n')
+    found = discover_custom_statements([reg, use])
+    d = parse_string_full(use, require_start=False, custom_statements=found)
+    assert "start" in d["labels"]                       # the file survived
+    assert d["custom_statement_errors"], "the bad body is recorded, not raised"
+    assert d["custom_statement_errors"][0]["statement"] == "example"
+
+
+def test_builtin_test_statements_are_captured():
+    """testcase/testsuite are Ren'Py's own test DSL (renpy/parser.py:1230/1239)."""
+    d = parse_string_full('testsuite global:\n'
+                          '    after testsuite:\n'
+                          '        run MainMenu(confirm=False)\n'
+                          '    teardown:\n'
+                          '        exit\n'
+                          'label start:\n'
+                          '    "x"\n', require_start=False)
+    assert d["custom_statements"]["testsuite"][0]["args"] == "global"
+    assert "start" in d["labels"]
+
+
+def test_registered_statement_names_win_over_builtins_only_when_multiword():
+    """`show example` is registered, so it must not be read as a plain `show`."""
+    from engine.script.parser import discover_custom_statements
+    reg = 'init python:\n    renpy.register_statement("show example", parse=p)\n'
+    use = 'label start:\n    show example large\n    "x"\n'
+    found = discover_custom_statements([reg, use])
+    d = parse_string_full(use, require_start=False, custom_statements=found)
+    assert d["labels"]["start"][0]["cmd"] == "custom_statement"

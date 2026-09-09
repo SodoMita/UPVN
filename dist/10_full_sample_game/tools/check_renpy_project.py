@@ -32,7 +32,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from engine.core.vn_errors import ParseError  # noqa: E402
-from engine.script.parser import Parser  # noqa: E402
+from engine.script.parser import Parser, discover_custom_statements  # noqa: E402
 
 RENPY_API = re.compile(r"\brenpy\.([A-Za-z_]\w*)")
 STORE_API = re.compile(r"\bstore\.([A-Za-z_]\w*)")
@@ -115,15 +115,28 @@ def check_project(root: Path, verbose: bool = False) -> dict:
     renpy_apis: Counter = Counter()
     jumps, calls, call_screens = [], [], []
 
+    # Pass 1: read everything and find the statement keywords the project
+    # registers for itself — a registration in one file makes the keyword legal
+    # in every other file, exactly as in Ren'Py.
+    sources: dict = {}
+    for path in files:
+        try:
+            sources[path] = path.read_text(encoding="utf-8", errors="replace")
+        except OSError as e:  # pragma: no cover - unreadable file
+            report["parse_errors"].append(
+                {"file": str(path.relative_to(game_dir)), "error": str(e)})
+    registered = discover_custom_statements(sources.values())
+    report["custom_statements"] = sorted(set(registered) - {"testsuite", "testcase"})
+    report["custom_statement_errors"] = []
+
     for path in files:
         rel = str(path.relative_to(game_dir))
-        try:
-            src = path.read_text(encoding="utf-8", errors="replace")
-        except OSError as e:  # pragma: no cover - unreadable file
-            report["parse_errors"].append({"file": rel, "error": str(e)})
+        src = sources.get(path)
+        if src is None:
             continue
         try:
-            parsed = Parser(src, str(path), full=True, require_start=False).parse()
+            parsed = Parser(src, str(path), full=True, require_start=False,
+                            custom_statements=registered).parse()
         except ParseError as e:
             report["parse_errors"].append({"file": rel, "line": getattr(e, "lineno", None),
                                            "error": str(e).splitlines()[0]})
@@ -131,6 +144,9 @@ def check_project(root: Path, verbose: bool = False) -> dict:
         except Exception as e:  # noqa: BLE001 - report, never crash the checker
             report["parse_errors"].append({"file": rel, "error": f"{type(e).__name__}: {e}"})
             continue
+
+        for err in parsed.get("custom_statement_errors", []):
+            report["custom_statement_errors"].append({**err, "file": rel})
 
         file_labels = parsed.get("labels", {})
         for name, block in file_labels.items():

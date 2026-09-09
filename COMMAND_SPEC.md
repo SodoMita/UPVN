@@ -263,6 +263,23 @@ and keeps playing, and unknown globals in `python:` blocks resolve to recorded n
 
 In safe mode all of the above raise `ParseError` with hint `parse with mode='full'`.
 
+### M21 additions (driven by the Ren'Py SDK's own games)
+
+| Command | AST / effect | Notes |
+| --- | --- | --- |
+| a keyword from `renpy.register_statement("NAME", …)` | `custom_statement` (no-op event) | discovery is **project-wide** — a registration in one file makes `NAME` legal in every file; the body is captured, never executed |
+| … registered with `block="script"` | body parsed as script | labels inside become real jump targets (`label play_pong:` in the SDK tutorial); an unreadable body lands in `custom_statement_errors`, not an exception |
+| `testcase n:` / `testsuite n:` | `custom_statement` | Ren'Py's own test DSL (`renpy/parser.py:1230/1239`) — recognised without any registration |
+| `e "one` ⏎ `   two."` | one `say` | Ren'Py lexes strings with `re.DOTALL`, so a plain quote may close on a later line; unterminated → friendly error naming the delimiter |
+| `e "text" id a1b2c3d4` | `say` with `id` | the automatic dialogue IDs Ren'Py's translation tooling writes into every shipped game |
+| `"Lucy" "text"` | `say` with `who="Lucy"` | the who is an expression, so a bare string literal is a dynamic name |
+| `show pos:` + indented ATL / `scene bg:` + ATL | `show`/`scene` with `atl` (raw lines) | captured, not animated |
+| `scene` (no target) | `scene` with empty asset | clears the layer — `ast.Scene(loc, None, layer)` |
+| `define x += [ … ]` | `defines` | augmented form |
+| `style n:` inside a label | `styles` | `style` is legal as a statement, not only at top level |
+| `window show\|hide\|auto [t]`, `nvl show\|hide\|clear [t]` | `window`/`nvl` with `transition` | the transition is optional |
+| a file holding only comments | empty IR | legal in a multi-file project; a single-file script still needs `label start:` |
+
 ## What is NOT in the declarative tiers (tiers 1–2)
 
 - ATL (`transform`, `at`, `parallel`), `screen` language, `translate`, `init python`, `call screen`, `image` declaration, `layeredimage`, video — all explicit anti-goals in `docs/renpy_criticism.md`; they exist only in the full tier and are captured (not auto-rendered).

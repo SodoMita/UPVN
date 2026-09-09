@@ -267,6 +267,44 @@ errors. Beyond the list above it accepts:
 
 Run `python -m tools.check_renpy_project <project> --run` for a full report.
 
+### M21 — verified against a second corpus (the Ren'Py SDK's own games)
+
+One game proves the parser can read that game. So the tier was re-validated
+against the games that ship inside `renpy/renpy` itself (MIT) — `tutorial/`
+(23 scripts) and `the_question/` — written by different people in a different
+style. Result: **23/23** files, 75 labels, every jump/call resolves. Beyond M20:
+
+- **Custom statements.** Ren'Py lets a project define its own keywords with
+  `renpy.register_statement("NAME", parse=…, execute=…)`. Registration is
+  project-wide, so discovery is too: `discover_custom_statements()` scans every
+  file first and the resulting map is passed to each `Parser` (the checker,
+  `tools/validate.py` and `VNController` all do this). UPVN **captures** these
+  bodies and never executes the foreign callback; at runtime the node is a
+  no-op event. `testcase`/`testsuite` are built into Ren'Py and need no
+  registration.
+- **`block="script"`.** That argument tells Ren'Py the body *is* script, so
+  UPVN parses it as such — labels declared inside become real jump targets (the
+  tutorial hides `label play_pong:` inside an `example` block). A body we
+  cannot read is recorded in `custom_statement_errors` rather than aborting the
+  file; our own `init:` errors stay hard.
+- **Strings may span lines.** Ren'Py lexes string literals with `re.DOTALL`
+  (`renpy/lexer.py`), so `e "one` ⏎ `   two."` is one string. An unterminated
+  quote now reports `unterminated string` with the delimiter named.
+- **Say:** Ren'Py's automatic dialogue IDs (`e "text" id a1b2c3d4`, written by
+  the translation tooling) and a quoted who (`"Lucy" "text"`).
+- **Display:** `show`/`scene` may carry an ATL block; bare `scene` clears the
+  layer.
+- **Other:** `define x += [ … ]`, `style n:` as a statement inside a label,
+  `window show|hide|auto [transition]`, `nvl show|hide|clear [transition]`,
+  comment-only files.
+
+Point `UPVN_RENPY_SDK` at a `renpy/renpy` checkout to run the gate:
+
+```bash
+git clone --depth 1 https://github.com/renpy/renpy ~/renpy_sdk
+UPVN_RENPY_SDK=~/renpy_sdk pytest tests/test_renpy_sdk_corpus.py
+```
+
 ## Diagnostics (LLM-friendly)
 
 Every `ParseError` includes:

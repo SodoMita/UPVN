@@ -47,76 +47,53 @@ def _count_indent(line: str) -> int:
 _TRIPLE = ('"""', "'''")
 
 
-def _scan_line(line: str, in_triple: Optional[str]) -> Tuple[str, Optional[str]]:
-    """Scan one physical line, returning (code, still_in_triple_quote).
+def _scan_line(line: str, open_str: Optional[str]) -> Tuple[str, Optional[str]]:
+    """Scan one physical line, returning ``(code, still_open_string)``.
 
     ``code`` is the line with any trailing ``#`` comment removed (comments are
-    only recognised outside of strings).  ``still_in_triple`` is the delimiter
-    (``\"\"\"`` or ``'''``) when a triple-quoted string was left open — the
-    logical line then continues on the next physical line, exactly like
-    Ren'Py's own lexer.
+    only recognised outside of strings).  ``still_open_string`` is the delimiter
+    (``\"\"\"``, ``'''``, ``\"`` or ``'``) when a string was left open — the
+    logical line then continues on the next physical line.
+
+    That is not a workaround: Ren'Py lexes string literals with ``re.DOTALL``
+    (renpy/lexer.py ``match_regexp``), so ``e "one\n   two."`` written across
+    two physical lines is one string in Ren'Py and must be one here too.
     """
     out: List[str] = []
     i = 0
     n = len(line)
     while i < n:
         ch = line[i]
-        if in_triple:
-            if line.startswith(in_triple, i):
-                out.append(in_triple)
-                i += 3
-                in_triple = None
+        if open_str:                            # inside a string opened earlier
+            if ch == "\\" and i + 1 < n:
+                out.append(ch)
+                out.append(line[i + 1])
+                i += 2
+                continue
+            if line.startswith(open_str, i):
+                out.append(open_str)
+                i += len(open_str)
+                open_str = None
                 continue
             out.append(ch)
             i += 1
             continue
-        # not inside a triple-quoted string
-        if line.startswith('"""', i) or line.startswith("'''", i):
-            in_triple = line[i : i + 3]
-            out.append(in_triple)
+        # not inside a string
+        if line.startswith('\"\"\"', i) or line.startswith("'''", i):
+            open_str = line[i : i + 3]
+            out.append(open_str)
             i += 3
             continue
-        if ch == "\\" and i + 1 < n:
-            # escaped character (inside a single-quoted string, most often)
-            out.append(ch)
-            out.append(line[i + 1])
-            i += 2
-            continue
-        if ch == '"':
+        if ch in ('"', "'"):
+            open_str = ch
             out.append(ch)
             i += 1
-            while i < n:                      # single-quoted ("…") string body
-                c2 = line[i]
-                if c2 == "\\" and i + 1 < n:
-                    out.append(c2)
-                    out.append(line[i + 1])
-                    i += 2
-                    continue
-                out.append(c2)
-                i += 1
-                if c2 == '"':
-                    break
             continue
-        if ch == "'":
-            out.append(ch)
-            i += 1
-            while i < n:
-                c2 = line[i]
-                if c2 == "\\" and i + 1 < n:
-                    out.append(c2)
-                    out.append(line[i + 1])
-                    i += 2
-                    continue
-                out.append(c2)
-                i += 1
-                if c2 == "'":
-                    break
-            continue
-        if ch == "#":                          # comment — rest of line dropped
+        if ch == "#":                           # comment — rest of line dropped
             break
         out.append(ch)
         i += 1
-    return "".join(out), in_triple
+    return "".join(out), open_str
 
 
 def _strip_comment_outside_strings(line: str) -> str:
@@ -178,7 +155,7 @@ def group_logical_lines(source: str, filename: str = "<string>") -> List[Logical
     start_lineno = 0
     start_raw = ""
     indent: Optional[int] = None
-    in_triple: Optional[str] = None
+    open_str: Optional[str] = None   # delimiter of a string left open (1 or 3 chars)
 
     def flush():
         nonlocal parts, indent, acc
@@ -196,7 +173,7 @@ def group_logical_lines(source: str, filename: str = "<string>") -> List[Logical
     for idx, raw in enumerate(physical, start=1):
         if not parts:
             start_lineno, start_raw = idx, raw
-        code, in_triple_after = _scan_line(raw, in_triple)
+        code, open_after = _scan_line(raw, open_str)
         if indent is None:
             try:
                 indent = _count_indent(code)
@@ -204,12 +181,12 @@ def group_logical_lines(source: str, filename: str = "<string>") -> List[Logical
                 raise ParseError("tabs are not allowed — use spaces", filename, idx, 1, raw,
                                  hint="Use spaces, not tabs.")
 
-        if in_triple_after:                       # triple-quoted string continues
+        if open_after:                          # string continues on the next line
             parts.append((code, True))
-            in_triple = in_triple_after
+            open_str = open_after
             acc = "".join(c + ("\n" if nl else "") for c, nl in parts)
             continue
-        in_triple = None
+        open_str = None
 
         stripped = code.rstrip()
         if stripped.endswith("\\") and not stripped.endswith("\\\\"):
@@ -223,11 +200,18 @@ def group_logical_lines(source: str, filename: str = "<string>") -> List[Logical
             continue
         flush()
 
-    if in_triple:
+    if open_str:
+        if len(open_str) == 3:
+            raise ParseError(
+                "unterminated triple-quoted string",
+                filename, start_lineno, 1, start_raw,
+                hint='close it with the same delimiter (""" … """)',
+            )
         raise ParseError(
-            "unterminated triple-quoted string",
+            "unterminated string",
             filename, start_lineno, 1, start_raw,
-            hint='close it with the same delimiter (""" … """)',
+            hint=f"close it with {open_str} — Ren'Py lets a string run over several\n"
+                 f"lines, but it still needs its closing {open_str}",
         )
     flush()   # tolerate a trailing continuation at EOF
     return lines
