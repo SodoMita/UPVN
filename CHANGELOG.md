@@ -134,6 +134,181 @@
   sanity, add-on error-field behavior) → **131 passed, 2 skipped**.
 - Add-on version 0.6.5; dist rebuilt.
 
+## 0.6.8 — 2026-09-09 Screens draw in the golden trace (M23)
+
+M22 produced a widget tree but nothing painted it, so a `show screen` was
+correct in JSON and invisible in a frame. The headless renderer now walks
+`VNState.active_screens` (sorted by `zorder`, so a modal `confirm` lands above a
+HUD) and paints each tree: `vbox`/`hbox` flow layout, `frame`/`window` plates,
+`text`/`label`, `textbutton` boxes (bright edge when the button has an action),
+`add`/`imagebutton` labelled plates, `bar`/`vbar`, and a full-frame dim for
+`modal` screens. Positions honour the `xalign`/`yalign`/`spacing`/`xsize` hints
+M22 leaves in `props`.
+
+Two deliberate limits, consistent with M22: Ren'Py's real layout engine is **not**
+reimplemented (this is a golden-trace renderer, screenshots stay for human review),
+and a screen that cannot be laid out never fails the frame — `draw_active_screens`
+is wrapped so a bad widget degrades to nothing rather than dropping the shot.
+
+Also fixed a real evaluation gap M22 left: a screen *parameter* was not visible
+inside a compound condition. `screen hud(score=0)` with `if score > 5:` never
+rendered the button, because `score > 5` was evaluated against the store alone.
+`VNInterpreter._eval_screen_expr` now takes an overlay scope, so `score > 5`
+resolves. Pinned by `tests/test_screen_render.py`.
+
+
+## 0.6.7 — 2026-09-09 Screens actually render (M22)
+
+The drop-in tier *parsed* `screen:` blocks and then threw the information away:
+the body was captured as stripped text, so `show screen` / `call screen` emitted
+an event with a name and nothing to draw. The SDK tutorial has **99** screens and
+LearnToCodeRPG has **23**, and every one of them was inert. This milestone makes
+them real.
+
+- **`engine/ui/screen_lang.py`** — a screen-language interpreter. It rebuilds the
+  widget tree from a captured body and evaluates it: containers (`vbox`, `hbox`,
+  `frame`, `window`, `fixed`, `null`, `bar`), leaves (`text`, `textbutton`,
+  `imagebutton`, `add`, `label`, `input`, `key`), control flow
+  (`if`/`elif`/`else`, `for`, `$`), screen-local `default`s, `use` composition
+  with `transclude`, `has vbox` (a declaration, not a block — the container is
+  synthesised from the siblings that follow), and `[expr]` interpolation.
+  Output is JSON-serialisable, so it survives a save and reaches a frontend.
+- **Layout is not modelled, on purpose.** Positions, sizes, styles and anchors
+  stay in `props` for the consumer to interpret. UPVN's UI is built in the 3D
+  scene, so a second layout engine would only compete with it.
+- **Screens are wired into the interpreter.** `show screen` / `call screen`
+  render and record into `VNState.active_screens` (so a load restores the same
+  UI); `hide screen` clears it. `run_headless` prints `SHOW SCREEN hud -> 5
+  widgets`, and a screen that cannot be resolved says so on the same line.
+- **A broken screen never stops the story.** Rendering does not raise: an
+  undefined screen, an unresolvable condition or a non-iterable `for` yields an
+  empty tree plus a diagnostic, which is what compat mode is for.
+- **Parser:** captured `screen:` blocks keep their relative indentation and
+  their parameter list — a `screen choice(items):` is not usable without them,
+  and without indentation the body has no tree to build.
+- **Validated on both corpora:** SDK tutorial **99/99** screens render (97
+  non-empty, 716 widgets), LearnToCodeRPG **23/23** (22 non-empty, 346 widgets).
+
+
+## 0.6.6 — 2026-09-09 Second corpus: the Ren'Py SDK's own games (M21)
+
+M20 proved the drop-in tier on **one** shipped game. That is not the same as
+proving it on Ren'Py, so this milestone validates against a second, unrelated
+FOSS codebase — the games that ship inside the SDK itself
+([`renpy/renpy`](https://github.com/renpy/renpy), MIT): `tutorial/` (23 scripts,
+screen/style/ATL heavy, and it **registers its own statement keywords**) and
+`the_question/`. Before: **7/23** tutorial files parsed. After: **23/23**,
+75 labels, 1672 statements, every `jump`/`call`/`call screen` resolves.
+
+- **Project-registered statements** (`renpy.register_statement`): a keyword a
+  project registers in one file is legal in every other file, so discovery is
+  project-wide (`discover_custom_statements`) and runs *before* parsing in the
+  checker, `tools/validate.py` and `VNController`. Unknown bodies are captured,
+  never executed. `testcase`/`testsuite` (Ren'Py's own test DSL,
+  `renpy/parser.py:1230/1239`) are recognised out of the box.
+- **`block="script"` is honoured**: that argument tells Ren'Py to parse the
+  statement's body as script, so labels declared inside are real jump targets —
+  the tutorial hides `label play_pong:` inside an `example` block, and it now
+  resolves. A body we cannot read is recorded in `custom_statement_errors`
+  instead of aborting the file; our own `init:` errors stay hard.
+- **Lexer**: a plain `"…"` string may run over several lines — Ren'Py lexes
+  strings with `re.DOTALL` (`renpy/lexer.py`), so `e "one\n   two."` written on
+  two lines is one string. An unterminated one now gets a friendly error naming
+  the delimiter instead of silently eating the rest of the file.
+- **Say statements**: Ren'Py's automatic dialogue IDs (`e "…" id a1b2c3d4`,
+  inserted by the translation tooling into every shipped game) and a quoted who
+  (`"Lucy" "Better watch out."` — the who is an expression).
+- **Display**: `show`/`scene` may carry an ATL block (`show pos:` + indented
+  ATL), and a bare `scene` clears the layer (`ast.Scene(loc, None, layer)`).
+- **Other**: `define x += [ … ]` (augmented form), `style NAME:` as a statement
+  inside a label, `window show|hide|auto [transition]` and
+  `nvl show|hide|clear [transition]`, comment-only files no longer error in a
+  multi-file project.
+- **Runtime**: `custom_statement` nodes pass through the interpreter as no-op
+  events rather than tripping `unknown command`.
+- **CI** (`.github/workflows/ci.yml`, new): `tests`, `examples` (every example
+  validated in its own tier + played headless, the syntax gallery must fail),
+  `renpy-corpus` (LearnToCodeRPG, blob-filtered sparse checkout ~3 MB) and
+  `renpy-sdk` (this corpus). Reports upload as artifacts.
+- **Docs**: README gained a "Drop-in Ren'Py compatibility" section with the
+  corpus commands; `tools/` and `examples/` listings refreshed; 20 regexes and a
+  helper left dead by the M20 rewrite were removed (97 → 77 regexes, none
+  unused).
+- **Tests**: 224 passed, 0 skipped — `tests/test_renpy_compat.py` grew 15 tests
+  pinning every construct above, plus `tests/test_renpy_sdk_corpus.py` (9, skips
+  without `UPVN_RENPY_SDK`).
+
+## 0.6.5 — 2026-09-09 Drop-in Ren'Py compatibility, verified on a real game (M20)
+
+The full `.rpy` tier went from "demo subset" to **a real Ren'Py project parses and
+plays**. Driver: `freeCodeCamp/LearnToCodeRPG` (BSD-3-Clause, 61 `.rpy`/`.rpym`
+files, ~2 MB of script) — before this milestone **0/61** files parsed; now
+**61/61**, 127 labels, 5560 statements, every `jump`/`call`/`call screen` resolves,
+and the story runs headless.
+
+- **Lexer**: triple-quoted strings spanning lines, trailing-`\` continuation and
+  *unbalanced-bracket* continuation (`call screen f(` … `)`) — the single biggest
+  blocker for real scripts; BOM stripped anywhere (concatenated sources carry one
+  per file); `#` recognised only outside strings; unterminated `"""` gets a hint.
+- **Parser**: `from` clauses (`call x from _call_x_3`, bare `from`), `call screen
+  f(args) with t`, `show/hide screen f(args)`, `for x in items:` (tuple targets too),
+  voice attributes (`player @ surprised "…"`), negated image attributes
+  (`e -sweat "…"`), `nointeract`, `extend`, `centered`/`vcentered`,
+  `with <expression>` (`Dissolve(0.5)`, `None`), `scene`/`show`/`hide` clause
+  splitting in **any** order (`as`/`at`/`behind`/`zorder`/`onlayer`) that never
+  matches inside dialogue text, `pause` with an expression, playlists +
+  `loop`/`noloop`/`fadeout`, `voice sustain`, `stop audio`.
+- **Menus**: named menus (`menu day_choices:` — registered as a jump/call target,
+  as Ren'Py does), `set var`, `if`/`elif`/`else` choice groups (conditions flatten
+  to `(a)` / `not (a) and (b)`), dialogue/`$`/`set`/`python:` before the choices
+  (`menu.pre`), `"Text" (icon="x") if cond:` — the caption is parsed first, so a
+  literal "if" inside the text stays text.
+- **Top level**: `default` with an expression (deferred to init), dotted
+  (`default preferences.text_cps`), or inside a label; dotted `define` builds store
+  **namespaces** (`gui`/`config`/`build`) so `gui.accent_color` and
+  `gui.init(1920, 1080)` work; `image n = <expr>` and `layeredimage:` blocks;
+  style property statements (both `style x.y = v` and `style.x.y = v`);
+  `screen f(a) tag/modal/zorder:`, `transform f(a):`; `init python hide:`,
+  `python early:`; multi-line `Character(...)` defines.
+- **Indentation**: safe/.urpy tiers still demand exactly 4 spaces (gallery intact);
+  the drop-in tier accepts any *consistent* indent — real projects use 2, 4 or 8.
+- **Multi-file loading fixed**: `VNController` concatenated every `.rpy` into one
+  buffer (BOM in the middle broke it and line numbers were fiction). Files are now
+  parsed individually with `require_start=False` and merged; `start` is checked on
+  the merged script with a friendly error.
+- **Interpreter**: `for` loops (spliced like `while`, `break`/`continue` supported),
+  `from_clause` no-ops, `menu.pre` spliced in front of the menu, `call_screen`/
+  `show_screen` args, expression `pause`, `voice_sustain`, say extras
+  (`voice_attr`/`extend`/`centered`/`nointeract` → `wait: false`),
+  `stop_sound`/`stop_voice`/`stop_audio`, dotted defines injected as namespaces,
+  `_()`/`_p()` identity translation helper, `base_dir` wired so `renpy.loadable`
+  resolves real files.
+- **Loose expressions (full tier only)**: unknown names/attributes/functions →
+  `None` (recorded in `ExpressionEvaluator.missing`), `None` comparisons → `False`,
+  keyword args and comprehensions allowed, more pure builtins (`any`, `all`,
+  `sorted`, …). **Dunder access is still blocked in both modes** — the sandbox
+  escape stays closed (tested).
+- **Compat mode** (`VNController(..., mode="full", compat=True)`): failing
+  `init python:`/`python:` blocks are collected in `interp.init_errors` /
+  `interp.python_errors` and the story continues; unknown globals in `python:`
+  blocks resolve to recorded no-ops (`PermissiveEnv`); unknown `renpy.*` members
+  are no-ops that can even be subclassed (`__mro_entries__`) and logged in
+  `renpy.compat_log`. Default behaviour still raises.
+- **New tool `tools/check_renpy_project.py`**: parses every `.rpy`/`.rpym` of a
+  project, merges like Ren'Py, and reports files/labels/screens/statements,
+  duplicate labels, unresolved `jump`/`call`/`call screen`, the `renpy.*` APIs used
+  by `python:` blocks, `--json`, and `--run` (headless smoke run in compat mode).
+- **New example `examples/14_renpy_dropin`** — three files of stock Ren'Py syntax
+  (no UPVN keywords) exercising every construct above; runs headless both routes.
+- **Tests**: `tests/test_renpy_compat.py` (64 tests: lexer, parser, interpreter,
+  sandbox, compat objects, multi-file loading, example 14) and
+  `tests/test_renpy_corpus.py` (5 tests against a real project, skipped unless
+  `UPVN_RENPY_CORPUS` is set). The Question was re-added at `~/renpy_src`, so the
+  two long-skipped tests run again → **200 passed, 0 skipped**.
+- Docs: `COMMAND_SPEC.md` + `SCRIPT_LANGUAGE_SPEC.md` gained M20 tables, `ROADMAP.md`
+  M20 flipped to done, `STATUS.md` updated.
+
+
 ## 0.6.4 — 2026-09-08 Explicit scene↔code contract (M19)
 - **New `engine/render/contract.py`** — single source of truth for the naming
   convention between interface code and scene objects: every object, material,

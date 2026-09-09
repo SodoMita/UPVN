@@ -166,6 +166,73 @@
     - "Setup Scene (UPBGE UI) wires camera/collections/controller object/launcher + Always→Python brick using the same bpy.ops.logic.* API as UPBGE's own add-ons; --background runs skip bricks with an explicit note"
     - "pytest green: 113 passed, 2 skipped"
   example_project: blend/UPVN_Template.blend
+
+- id: M18
+  name: Gameplay input — playable menus + QA keys in the real engine
+  status: done   # 2026-09-08: _menu_choice_from_keycodes (digits 1-9), F1 state dump, F12 screenshot, modal overlays draw text
+  depends_on: [M09]
+  acceptance:
+    - "menu choices selectable with number keys in UPBGE (no more freeze at the prompt)"
+    - "pytest green"
+  example_project: examples/01_branching_choice
+
+- id: M19
+  name: Explicit scene-object contract (registry + sprite planes + wiring checker)
+  status: done   # 2026-09-08: engine/render/contract.py, renderers import identifiers, Check Scene Wiring operator, template regenerated
+  depends_on: [M02, M17]
+  acceptance:
+    - "renderers import object/material names from contract.py (no literals)"
+    - "tools/tests guard against re-introducing hard-coded names"
+  example_project: blend/UPVN_Template.blend
+
+- id: M20
+  name: Drop-in Ren'Py compatibility — a real shipped game parses and plays
+  status: done   # 2026-09-09: driven by freeCodeCamp/LearnToCodeRPG (BSD-3-Clause, 61 files) — 0/61 -> 61/61 files parse, 127 labels, 5560 statements, every jump/call/call-screen resolves, story runs headless; lexer triple-quoted + bracket continuation, from clauses, call screen args, for loops, voice attributes, nointeract/extend/centered, with <expr>, show clause splitting, named menus as labels, menu if/else groups, dotted defines as store namespaces, loose full-tier expressions, compat mode, tools/check_renpy_project.py, examples/14_renpy_dropin, 64+5 new tests
+  depends_on: [M16, M19]
+  acceptance:
+    - "every .rpy/.rpym of the corpus parses in the drop-in tier (tests/test_renpy_corpus.py, 0 errors)"
+    - "merged project: all jump/call/call-screen targets resolve; named menus are labels"
+    - "headless smoke run plays real dialogue (compat mode collects python: failures)"
+    - "safe/.urpy tiers unchanged: 4-space rule + strict expressions + blocked escapes"
+    - "pytest green: 200 passed, 0 skipped"
+  example_project: examples/14_renpy_dropin
+
+- id: M21
+  name: Second corpus — the Ren'Py SDK's own games, and the constructs they need
+  status: done   # 2026-09-09: validated on renpy/renpy (MIT) tutorial/ + the_question/ — 7/23 -> 23/23 files, 75 labels, 1672 statements, every jump/call resolves. Added project-wide renpy.register_statement discovery (+block="script" bodies parsed as script, so labels inside resolve), testcase/testsuite, multi-line plain strings (re.DOTALL parity), say dialogue ids + quoted who, show/scene ATL blocks, bare scene, define +=, style-in-label, window/nvl transitions, comment-only files, custom_statement no-op in the interpreter, CI workflow
+  depends_on: [M20]
+  acceptance:
+    - "every .rpy of renpy/renpy tutorial/ and the_question/ parses in the drop-in tier"
+    - "a keyword registered with renpy.register_statement is legal in every file of the project"
+    - "block=\"script\" bodies contribute real labels; unreadable bodies are recorded, not fatal"
+    - "CI runs both corpora plus every example headless"
+    - "pytest green: 224 passed, 0 skipped"
+  example_project: examples/14_renpy_dropin
+
+- id: M22
+  name: Screens actually render — a screen-language interpreter
+  status: done   # 2026-09-09: engine/ui/screen_lang.py evaluates captured `screen:` bodies into JSON-serialisable widget trees (containers, leaves, if/elif/else, for, $, screen-local default, use + transclude, has, [expr] interpolation); show/hide/call screen record into VNState.active_screens and carry widgets on the event; parser keeps body indents + params. SDK tutorial 99/99 screens render (716 widgets), LearnToCodeRPG 23/23 (346 widgets). Layout stays in props — UPVN draws in the 3D scene.
+  depends_on: [M21]
+  acceptance:
+    - "every `screen:` in both corpora renders to a widget tree without raising"
+    - "`show screen` / `call screen` carry the widgets; `hide screen` clears state.active_screens"
+    - "control flow (if/elif/else, for), `use` + `transclude`, `has`, `default` params and `[expr]` all evaluate"
+    - "a broken screen degrades to an empty tree plus a diagnostic — the story keeps playing"
+    - "active screens survive a save round-trip (JSON only)"
+    - "pytest green: 253 passed, 0 skipped"
+  example_project: examples/14_renpy_dropin
+
+- id: M23
+  name: Screens draw in the golden trace
+  status: done   # 2026-09-09: render_state walks VNState.active_screens (zorder-sorted) and paints each M22 widget tree — vbox/hbox flow, frame/window plates, text/label, textbutton boxes, add/imagebutton plates, bar/vbar, modal dim. Ren'Py layout engine intentionally NOT reimplemented; a bad widget never drops the frame. Also fixed: screen params now visible inside compound conditions (`if score > 5:`), via an overlay scope in _eval_screen_expr.
+  depends_on: [M22]
+  acceptance:
+    - "an active screen visibly changes the rendered frame (pixel-level test)"
+    - "a modal screen dims the backdrop; zorder orders the layers"
+    - "`if <param> > n:` inside a screen renders its branch (scope overlay)"
+    - "an unlayable widget degrades to nothing instead of raising"
+    - "pytest green: 257 passed, 0 skipped"
+  example_project: examples/14_renpy_dropin
 ```
 
 ## Agent protocol (repeat every session)
@@ -180,7 +247,8 @@
 ## NEXT_STEPS (for next turn)
 
 - M17 Blender UX hardening DONE 2026-09-08 — add-on v0.6 (engine discovery: repo/module-dir/zipimport/prefs/blend-file; status rows; Locate/Check/Bundle; friendly reports), one-click Setup Scene (data-API scene + official bpy.ops.logic.* bricks in UI), frontend reads VNController.script_path + sys.path bootstrap, make_template regenerates 110KB template (was brickless 96KB), tools/package_addon.py → dist/upvn_editor_addon_v0.6.0.zip self-contained (zipimport-verified in clean subprocess), tests/test_m17_addon_init.py 5 tests, verified in real UPBGE 0.50 headless (libpulse stub): engine OK/register OK/scene OK; 113 passed 2 skipped
-- Next candidate: run the full interactive loop in UPBGE UI (Setup Scene → P) on a machine with a display; publish dist zips + addon zip as GitHub release; CI workflow (pytest + package_game + package_addon)
+- M23 screens-draw DONE 2026-09-09 — headless renderer paints M22 widget trees into golden traces (zorder + modal dim); scope overlay makes screen params visible in `if`; 257 passed
+- Next candidate: draw the rendered widget trees in the UPBGE frontend (blf + planes) so `call screen` is visible in-game (the headless side is now proven); run the full interactive loop in UPBGE UI (Setup Scene → P) on a machine with a display; publish dist zips + addon zip as GitHub release
 - Optional: migrate editor GameBuilder to declarative forms (character/state/set/choice) per STATUS; asset browser thumbnails; side-image live preview
 - 0.5.2 Audit fixes DONE 2026-09-08 — M-1 safe_eval AST whitelist (blocks Attribute/Subscript/ListComp), L-1 save _sanitize_slot/_slot_path is_relative_to, L-2 load schema validation, I-1 tests skip when the_question missing (42+2 skipped vs 44 passed both green, stub 555B), I-2 zip hygiene no pyc 52 files 214KB (was 76 324KB) LICENSE included, I-3 MIT LICENSE, requirements dev black, package copies LICENSE, exploit/traversal blocked verified, headless 59 events still
 - 0.5.1 Polish DONE 2026-09-07 21:20 — editor v0.5 preserve+asset browser+side image+arbitrary slot spinner, headless desks (board+teacher+3 rows), StageManager LibLoad+addObject+playAction+camera preset, make_template richer VN_3DStage (floor+3 markers+3 presets+9 desks+board+capsules, 150KB+ when libpulse available), showcase regenerated 27 PNGs desks behind sprite (36K), zip 324KB → now 214KB clean, 44 tests green, preserve test PASS

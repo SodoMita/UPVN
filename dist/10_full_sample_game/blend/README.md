@@ -29,7 +29,7 @@ Scene: VN_Main
 - `frontend.main` reads **`script_path` from the `VNController` object** — the same
   property the UPVN panel writes (`project_path`) — so the built game is the game that
   plays. It then ticks `VNController` each frame and handles click/space.
-- `blf` overlay draws typewriter text; or `Text` objects (`Dialogue_Text`) — both supported.
+- No blf overlay. Dialogue/menus are FONT + `choice_*` planes on **the open scene**.
 - In `--background` runs the brick operators are skipped on purpose (they need an
   interactive context in UPBGE 0.50) — the console says so, and the panel button does it
   in one click in the UI.

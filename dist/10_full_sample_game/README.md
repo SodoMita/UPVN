@@ -110,7 +110,8 @@ upvn/
   SCRIPT_LANGUAGE_SPEC.md  ← precise .rpy subset grammar
   engine/
     core/   vn_state.py, vn_controller.py, vn_interpreter.py, vn_errors.py
-    script/ lexer.py, parser.py, ast_nodes.py   # direct .rpy → AST, no YAML
+    script/ lexer.py, parser.py, urpy_parser.py, expr_eval.py,
+            renpy_compat.py, ast_nodes.py        # direct .rpy → AST, no YAML
     render/ scene_manager.py, sprite_renderer.py, stage_manager.py # hybrid
     ui/     dialogue_box.py                      # plane + blf; python-extensible
     audio/  audio_manager.py                     # aud wrapper
@@ -121,8 +122,15 @@ upvn/
     01_branching_choice/  (Tier 1: menu/jump)
     02_sprites_backgrounds/ (Tier 2: scene/show + 3D stubs)
     03_variables_routes/ (Tier 2: default/$/if + [interpolation])
+    05_declarative_script/ (Tier 1 canonical: state:/character/choice)
+    10_full_sample_game/  (30-min showcase)
+    11_syntax_error_gallery/ (every friendly error, one file each)
+    12_full_rpy_tier/     (Tier 3: python:/init/while/label params)
+    13_urpy_tier/         (Tier 1 strict .urpy)
+    14_renpy_dropin/      (Tier 3 multi-file, stock Ren'Py syntax — see below)
   tests/          # golden trace tests (headless, no bge)
-  tools/ run_headless.py, validate.py, extract_upbge.py
+  tools/ run_headless.py, validate.py, check_renpy_project.py,
+         package_game.py, package_addon.py, upvn_game_creator.py
   blend/ UPVN_Template.blend + generation script
   docs/           # design notes, Ren'Py criticism inventory
 ```
@@ -161,12 +169,127 @@ See `tools/run_headless.py` for replay.
 
 ---
 
+## Drop-in Ren'Py compatibility (Tier 3, M20–M21)
+
+The full tier is verified against **two real Ren'Py codebases**, not just
+hand-written snippets.
+
+```bash
+git clone --depth 1 https://github.com/freeCodeCamp/LearnToCodeRPG ~/renpy_corpus/LearnToCodeRPG
+
+python -m tools.check_renpy_project ~/renpy_corpus/LearnToCodeRPG --run
+#   files         : 34/34 parsed
+#   labels        : 127 (start: yes)
+#   characters    : 43   screens: 49   transforms: 6
+#   statements    : 5560
+#   HEADLESS SMOKE RUN (drop-in compat): events: 17 …
+#   RESULT: OK — every file parsed and every jump/call resolves
+
+UPVN_RENPY_CORPUS=~/renpy_corpus/LearnToCodeRPG pytest tests/test_renpy_corpus.py
+```
+
+Corpus two (M21) is the games that ship inside the SDK itself — a different set of
+authors, a different style, and a project that registers **its own statement
+keywords**. [`renpy/renpy`](https://github.com/renpy/renpy), MIT:
+
+```bash
+git clone --depth 1 --filter=blob:none --no-checkout https://github.com/renpy/renpy ~/renpy_sdk
+cd ~/renpy_sdk && git sparse-checkout init --no-cone \
+  && git sparse-checkout set 'tutorial/game/**/*.rpy' 'tutorial/game/*.rpy' 'the_question/game/**/*.rpy' \
+  && git checkout                       # ~6 MB instead of the full 500 MB
+
+python -m tools.check_renpy_project ~/renpy_sdk/tutorial
+#   files         : 23/23 parsed
+#   labels        : 75 (start: yes)
+#   characters    : 20   screens: 99   transforms: 16
+#   statements    : 1672
+#   RESULT: OK — every file parsed and every jump/call resolves
+
+UPVN_RENPY_SDK=~/renpy_sdk pytest tests/test_renpy_sdk_corpus.py
+```
+
+Validating against two unrelated codebases is what keeps this tier from being
+quietly fitted to one game's habits: the second corpus is what surfaced
+`renpy.register_statement`, `block="script"`, multi-line strings, dialogue IDs and
+`show … :` ATL blocks. Neither corpus is vendored — without the env vars those
+tests skip.
+
+`tools/check_renpy_project.py` parses every script, merges them the way Ren'Py does
+(one namespace per `game/`), and reports duplicate labels, unresolved
+`jump`/`call`/`call screen` targets, the `renpy.*` APIs the project's `python:`
+blocks use, and (with `--run`) plays the story headless. The corpus is not vendored —
+without `UPVN_RENPY_CORPUS` those tests skip.
+
+What Tier 3 accepts beyond the safe subset is listed in `COMMAND_SPEC.md`
+("M20 additions" and "M21 additions") — `from` clauses, `for` loops,
+`call screen f(args)`, voice attributes (`who @ attr "text"`),
+`nointeract`/`extend`/`centered`, `with <expr>`, named menus, `menu` `if`/`else`
+groups, dotted `define` namespaces, `layeredimage`, triple-quoted text and bracket
+continuations, any consistent indentation, project-registered statements
+(`renpy.register_statement`, including `block="script"` bodies), `testcase`/
+`testsuite`, strings that run over several lines, dialogue IDs, a quoted `who`,
+`show`/`scene` ATL blocks, bare `scene`, `define x += [ … ]`, `style n:` inside a
+label, and `window`/`nvl` transitions.
+
+### Screens render, they are not just captured (M22)
+
+A `screen:` block used to be stored as text and ignored, so `show screen` /
+`call screen` produced an event with a name and nothing to draw — 99 screens in
+the SDK tutorial and 23 in LearnToCodeRPG were inert. `engine/ui/screen_lang.py`
+now evaluates a screen body into a **JSON-serialisable widget tree**:
+
+```bash
+python -m tools.run_headless examples/14_renpy_dropin --mode full --choices 1
+#   CALL SCREEN confirm -> 4 widgets
+#   SHOW SCREEN hud -> 5 widgets
+#   HIDE SCREEN hud
+```
+
+It handles containers (`vbox`, `hbox`, `frame`, `window`, `fixed`, `null`,
+`bar`), leaves (`text`, `textbutton`, `imagebutton`, `add`, `label`, `input`,
+`key`), control flow (`if`/`elif`/`else`, `for`, `$`), screen-local `default`s,
+`use` with `transclude`, `has vbox`, and `[expr]` interpolation. Rendered
+screens land in `VNState.active_screens`, so a save restores the same UI.
+
+Two deliberate limits: **layout is not modelled** — positions, sizes, styles and
+anchors stay in each widget's `props`, because UPVN draws its UI in the 3D scene
+and a second layout engine would only compete with it; and **a broken screen
+never stops the story** — an undefined screen or an unresolvable condition
+yields an empty tree plus a diagnostic instead of raising.
+
+Across both corpora: **99/99** and **23/23** screens render (716 and 346
+widgets).
+
+### The golden trace paints the screens (M23)
+
+`render_state` now walks `VNState.active_screens` (sorted by `zorder`) and
+draws each tree into the frame, so a `show screen` is visible in the screenshots
+the CI gate diffs, not only correct in JSON. `vbox`/`hbox` flow, `frame`/`window`
+plates, `textbutton` boxes (bright edge when there is an action), `add`/
+`imagebutton` labelled plates, `bar`/`vbar`, and a full-frame dim for `modal`
+screens. A widget that cannot be laid out degrades to nothing rather than
+dropping the frame.
+
+```bash
+python -m tools.run_headless examples/14_renpy_dropin --mode full --choices 0
+```
+
+`examples/14_renpy_dropin` is three files of **stock Ren'Py syntax** (no UPVN
+keywords) covering all of the above.
+
+**Sandbox note.** Story expressions still go through the AST whitelist. In the full
+tier unknown identifiers degrade to `None` so a real game keeps running, but dunder
+access (`().__class__.__mro__…`) stays blocked in *every* tier — see
+`tests/test_renpy_compat.py::test_sandbox_escape_is_blocked_in_both_modes`.
+
+---
+
 ## Next for agents (read ROADMAP.md)
 
 ```
-M0 harness (done) → M1 kinetic (done) → M2 sprites (stub) → M3 transitions
-→ M4 The Question parity (done headless) → M5 audio/save → M6 DSL validation
-→ M9 screens → M10 ATL-lite → M13 3D classroom
+M0–M19 done (harness → kinetic → sprites → transitions → The Question parity →
+audio/save → validation → screens → ATL-lite → 3D → editor → packaging →
+declarative tiers → Blender UX → scene contract) → M20 drop-in Ren'Py (done)
 ```
 
 Each milestone has `examples/exNN_*/expected_behavior.md` + `tests/test_exNN*.py` golden traces. Agent protocol: open `ROADMAP.md`, find first `todo` with deps `done`, read its `SPEC`, implement, run `pytest`, flip status, commit.

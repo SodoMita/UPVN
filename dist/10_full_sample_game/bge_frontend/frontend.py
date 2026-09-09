@@ -155,17 +155,42 @@ def _get_obj(name):
         return None
 
 
+def _show_mouse():
+    if not HAS_BGE:
+        return
+    try:
+        import bge as _bge
+        try:
+            _bge.render.showMouse(True)
+        except Exception:
+            pass
+        try:
+            _bge.logic.mouse.visible = True
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+
 def _sync_world_ui(ctrl):
     if not HAS_BGE or ctrl is None:
         return
     try:
         from engine.ui.world_ui import build_world_ui, apply_world_ui
+        from engine.render.contract import CAMERA_UI_ORTHO_SCALE
         payload = build_world_ui(
             getattr(ctrl, "current_event", None),
             ui_mgr=getattr(ctrl, "ui_mgr", None),
             diag=getattr(ctrl, "_load_diag", None),
         )
-        apply_world_ui(_get_obj, payload)
+        ortho = CAMERA_UI_ORTHO_SCALE
+        try:
+            import bge as _bge
+            cam = _bge.logic.getCurrentScene().active_camera
+            ortho = float(getattr(cam, "ortho_scale", ortho) or ortho)
+        except Exception:
+            pass
+        apply_world_ui(_get_obj, payload, ortho=ortho)
     except Exception:
         pass
 
@@ -178,7 +203,19 @@ def _object_under_cursor():
         sc = _bge.logic.getCurrentScene()
         cam = sc.active_camera
         x, y = _bge.logic.mouse.position
-        hit = cam.getScreenRay(x, y, 80.0)
+        hit = None
+        try:
+            hit = cam.getScreenRay(x, y, 80.0)
+        except Exception:
+            hit = None
+        if hit is None:
+            try:
+                vect = cam.getScreenVect(x, y)
+                origin = cam.worldPosition
+                target = origin + vect * 80.0
+                hit, _p, _n = cam.rayCast(target, origin, 80.0)
+            except Exception:
+                hit = None
         if hit is None:
             return None
         return getattr(hit, "name", None)
@@ -245,6 +282,7 @@ def main(cont=None):
     logic = _bge.logic
     ensure_engine_syspath()
     _bind_camera()
+    _show_mouse()
 
     if not hasattr(logic, "_upvn_ctrl"):
         from engine.core.vn_controller import VNController
