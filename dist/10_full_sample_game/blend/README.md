@@ -8,12 +8,12 @@ Installable release: `dist/upvn_editor_addon_v0.6.0.zip` (engine bundled — see
 
 ```
 Scene: VN_Main
-  Camera_UI (Ortho, size 10)
-  Camera_3D (Perspective)
+  Camera_UI (Ortho scale 10, loc (0,-10,0), rot X=90° — Front, looking +Y)
+  Camera_3D (Perspective, loc (0,-6,2.5))
   Empty: VNController  (props: script_path, upvn_root, upvn_bricks;
                         logic: Always True pulse → Python controller)
-  Collection: VN_Backgrounds  (plane “BG_Plane” at z=0)
-  Collection: VN_Characters   (planes “Sprite_left/center/right” at z=1)
+  Collection: VN_Backgrounds  (plane “BG_Plane” standing in XZ, y=0)
+  Collection: VN_Characters   (planes “Sprite_*” at contract POSITIONS, y=-0.15)
   Collection: VN_UI           (plane “Dialogue_Box” + Text objects)
   Collection: VN_Effects      (for fade/dissolve shader planes)
   Collection: VN_3DStage      (empty markers: marker_eileen etc., 3D classroom mesh)
@@ -88,7 +88,9 @@ objects up **by name** in the current scene. The authoritative list lives in
 | `Sprite_far_left` … `Sprite_far_right` | objects | `SpriteRenderer._bge_show` | one plane per position (`left/center/right/far_left/far_right`); texture swapped on `show` events |
 | `MASprite` | material | same | material slot of every `Sprite_*` plane |
 | `Dialogue_Box` | object | visual only | decorative panel — **dialogue text is NOT a scene Text object**; it is drawn by the blf overlay in `bge_frontend/frontend.py::draw_overlay()` (the game engine cannot edit Text datablocks at runtime) |
-| `VNController` | object | `frontend.main`, launcher | carries `script_path`, `upvn_root`, `upvn_bricks` properties and the `Always → Python` brick |
+| `Camera_UI` | object | `frontend._bind_camera`, Setup Scene | ortho Front camera; runtime sets `scene.active_camera` |
+| `Camera_3D` | object | stage_manager | perspective camera for hybrid 3D |
+| `VNController` | object | `frontend.main`, launcher | carries `script_path`, `upvn_root`, `upvn_bricks` properties and the `Always+AllKeys+Mouse → Python` brick |
 | `upvn_launcher` | text | Python controller (SCRIPT mode) | path-bootstrap script |
 | `VN_Backgrounds` / `VN_Characters` / `VN_UI` / `VN_Effects` / `VN_3DStage` | collections | organisation | layer grouping in the outliner |
 | `//assets/backgrounds/…`, `//assets/sprites/…` | file paths | both renderers | texture files relative to the .blend |

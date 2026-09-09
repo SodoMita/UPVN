@@ -44,18 +44,106 @@ except ImportError:
     bge = None  # type: ignore
 
 
-def _menu_choice_from_keycodes(keys: dict, just_activated: int = 1,
-                               max_index: int = 9) -> int | None:
-    """Map number-key state dict (bge.logic.keyboard.events) to a menu choice
-    index. Digit key codes are ASCII (ONEKEY==ord('1')==49). Pure helper so the
-    bge-only branch stays unit-testable. Returns None when no digit was just
-    activated (or the digit is beyond max_index)."""
-    if not keys:
+def _digit_choice_index(states: dict, count: int) -> int | None:
+    """Map per-digit states to a menu choice index. Pure helper (unit-testable).
+
+    states: {digit key code: 'just' | 'active' | None} — produced by
+    _bge_input_state for each of the first 9 digits. Digit key codes are ASCII
+    (ONEKEY == ord('1') == 49). Returns the index (0-based) of the lowest digit
+    that is 'just' and within count; None otherwise.
+    """
+    if not states:
         return None
-    for i in range(min(9, max_index)):
-        if keys.get(ord("1") + i) == just_activated:
+    for i in range(min(9, count)):
+        if states.get(ord("1") + i) == "just":
             return i
     return None
+
+
+def _classify_input_entry(entry, just_code: int = 1, active_code: int = 2):
+    """Map one SCA_InputEvent (or a legacy int) to 'just' | 'active' | None.
+
+    UPBGE 0.50: JUST_ACTIVATED lives in entry.queue (list), ACTIVE in
+    entry.status (list). Convenience bools .activated/.active exist on
+    SCA_InputEvent. Never reads device.events (deprecated). Pure; unit-testable.
+    """
+    if entry is None:
+        return None
+    if isinstance(entry, int):
+        if entry == just_code:
+            return "just"
+        if entry == active_code:
+            return "active"
+        return None
+    try:
+        queue = getattr(entry, "queue", None)
+        if queue is not None and just_code in queue:
+            return "just"
+    except Exception:
+        pass
+    try:
+        if getattr(entry, "activated", False):
+            return "just"
+    except Exception:
+        pass
+    try:
+        status = getattr(entry, "status", None)
+        if status is not None:
+            if status == just_code or (isinstance(status, (list, tuple)) and just_code in status):
+                return "just"
+    except Exception:
+        pass
+    try:
+        if getattr(entry, "active", False):
+            return "active"
+    except Exception:
+        pass
+    try:
+        status = getattr(entry, "status", None)
+        if status is not None:
+            if status == active_code or (isinstance(status, (list, tuple)) and active_code in status):
+                return "active"
+    except Exception:
+        pass
+    return None
+
+
+def _bge_input_state(device_name: str, key: int):
+    """Input state for one key on a bge device: 'just' | 'active' | None.
+
+    Uses device.inputs[key] only (UPBGE 0.50). Never touches device.events
+    (deprecated; conversion is lossy — LMB can work while keys do not).
+    Headless (no bge) returns None. Never raises.
+    """
+    if not HAS_BGE:
+        return None
+    try:
+        import bge as _bge_imp
+        dev = getattr(_bge_imp.logic, device_name, None)
+        if dev is None:
+            return None
+    except Exception:
+        return None
+    try:
+        just_c = _bge_imp.logic.KX_INPUT_JUST_ACTIVATED
+        active_c = _bge_imp.logic.KX_INPUT_ACTIVE
+    except Exception:
+        just_c, active_c = 1, 2
+    try:
+        inputs = getattr(dev, "inputs", None)
+        if inputs is None:
+            return None
+        return _classify_input_entry(inputs[key], just_c, active_c)
+    except Exception:
+        return None
+
+
+def _bge_just(device_name: str, key: int) -> bool:
+    return _bge_input_state(device_name, key) == "just"
+
+
+def _bge_active(device_name: str, key: int) -> bool:
+    return _bge_input_state(device_name, key) in ("just", "active")
 
 
 def _merge_scripts(a: dict | None, b: dict | None) -> dict:
@@ -306,11 +394,11 @@ class VNController:
             # allow ESC to dismiss modal via handle_key
             if HAS_BGE:
                 try:
-                    import bge
-                    keys = bge.logic.keyboard.events
-                    if keys[bge.events.ESCKEY] == bge.logic.KX_INPUT_JUST_ACTIVATED:
+                    import bge as _bge_imp
+                    if _bge_just("keyboard", _bge_imp.events.ESCKEY):
                         self.screen_mgr.handle_key("escape")
-                except: pass
+                except Exception:
+                    pass
             return
         # M07 skip/auto handling (BGE)
         if self._waiting and self._current_event and (self.state.skip or self.state.auto):
@@ -360,10 +448,12 @@ class VNController:
             if self._current_event.get("type") == "menu" and HAS_BGE:
                 try:
                     import bge as _bge_imp
-                    idx = _menu_choice_from_keycodes(
-                        _bge_imp.logic.keyboard.events,
-                        just_activated=_bge_imp.logic.KX_INPUT_JUST_ACTIVATED,
-                        max_index=len(self._current_event.get("choices", [])))
+                    count = len(self._current_event.get("choices", []))
+                    digit_states = {}
+                    for i in range(min(9, count)):
+                        key = ord("1") + i
+                        digit_states[key] = _bge_input_state("keyboard", key)
+                    idx = _digit_choice_index(digit_states, count)
                     if idx is not None:
                         self.choose(idx)
                         return
@@ -372,25 +462,26 @@ class VNController:
             # skip/auto toggles via keys + screens H/Q (M09)
             if HAS_BGE:
                 try:
-                    import bge
-                    keys = bge.logic.keyboard.events
-                    if keys[bge.events.SKEY] == bge.logic.KX_INPUT_JUST_ACTIVATED:  # S for skip
+                    import bge as _bge_imp
+                    ev = _bge_imp.events
+                    if _bge_just("keyboard", ev.SKEY):  # S for skip
                         self.toggle_skip()
-                    if keys[bge.events.AKEY] == bge.logic.KX_INPUT_JUST_ACTIVATED:  # A for auto
+                    if _bge_just("keyboard", ev.AKEY):  # A for auto
                         self.toggle_auto()
-                    if keys[bge.events.HKEY] == bge.logic.KX_INPUT_JUST_ACTIVATED:  # H for history
+                    if _bge_just("keyboard", ev.HKEY):  # H for history
                         if self.screen_mgr:
                             self.screen_mgr.handle_key("h")
-                    if keys[bge.events.QKEY] == bge.logic.KX_INPUT_JUST_ACTIVATED:  # Q for quick menu
+                    if _bge_just("keyboard", ev.QKEY):  # Q for quick menu
                         if self.screen_mgr:
                             self.screen_mgr.handle_key("q")
-                    if keys[bge.events.SKEY] == bge.logic.KX_INPUT_JUST_ACTIVATED and keys[bge.events.LEFTCTRLKEY] == bge.logic.KX_INPUT_ACTIVE:  # Ctrl+S quick save
+                    if _bge_just("keyboard", ev.SKEY) and _bge_active("keyboard", ev.LEFTCTRLKEY):  # Ctrl+S quick save
                         if self.screen_mgr:
                             self.screen_mgr.show("save")
-                    if keys[bge.events.LKEY] == bge.logic.KX_INPUT_JUST_ACTIVATED and keys[bge.events.LEFTCTRLKEY] == bge.logic.KX_INPUT_ACTIVE:  # Ctrl+L quick load
+                    if _bge_just("keyboard", ev.LKEY) and _bge_active("keyboard", ev.LEFTCTRLKEY):  # Ctrl+L quick load
                         if self.screen_mgr:
                             self.screen_mgr.show("load")
-                except: pass
+                except Exception:
+                    pass
         # rollback: mouse wheel up, forward wheel down (M08)
         if HAS_BGE and self._is_rollback_pressed():
             self.rollback()
@@ -418,36 +509,35 @@ class VNController:
     def _is_advance_pressed(self) -> bool:
         if not HAS_BGE:
             return False
-        # bge.events
-        events = bge.events  # type: ignore
-        logic = bge.logic  # type: ignore
+        try:
+            import bge as _bge_imp
+            ev = _bge_imp.events
+        except Exception:
+            return False
         # Mouse left, Space, Enter
-        if logic.mouse.events[events.LEFTMOUSE] == logic.KX_INPUT_JUST_ACTIVATED:
+        if _bge_just("mouse", ev.LEFTMOUSE):
             return True
-        keys = logic.keyboard.events
-        if keys[events.SPACEKEY] == logic.KX_INPUT_JUST_ACTIVATED:
+        if _bge_just("keyboard", ev.SPACEKEY):
             return True
-        if keys[events.ENTERKEY] == logic.KX_INPUT_JUST_ACTIVATED:
+        if _bge_just("keyboard", ev.ENTERKEY):
             return True
         return False
 
     def _is_rollback_pressed(self) -> bool:
         if not HAS_BGE:
             return False
-        import bge  # type: ignore
-        # mouse wheel up or PageUp/Z
-        # simplified: check WHEELUPMOUSE
         try:
-            return bge.logic.mouse.events[bge.events.WHEELUPMOUSE] == bge.logic.KX_INPUT_JUST_ACTIVATED
+            import bge as _bge_imp
+            return _bge_just("mouse", _bge_imp.events.WHEELUPMOUSE)
         except Exception:
             return False
 
     def _is_rollforward_pressed(self) -> bool:
         if not HAS_BGE:
             return False
-        import bge  # type: ignore
         try:
-            return bge.logic.mouse.events[bge.events.WHEELDOWNMOUSE] == bge.logic.KX_INPUT_JUST_ACTIVATED
+            import bge as _bge_imp
+            return _bge_just("mouse", _bge_imp.events.WHEELDOWNMOUSE)
         except Exception:
             return False
 

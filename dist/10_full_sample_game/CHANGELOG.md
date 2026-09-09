@@ -1,5 +1,112 @@
 # Changelog
 
+## 0.6.9 — 2026-09-09 3D-only UI (no overlay)
+
+- **No `blf` / `post_draw` HUD.** Dialogue, speaker, load-fail text and menus
+  live on scene FONT + plane objects (`Speaker_Text`, `Dialogue_Text`,
+  `choice_0..8` + `_text`). `engine/ui/world_ui.py` writes `.text` / visibility
+  every frame. Frontend unregisters leftover overlay callbacks.
+- **Choice clicks work in 3D.** LMB `Camera_UI.getScreenRay` →
+  `PointerTracker` → `VNController.choose(i)`. Number keys 1–9 still work.
+  Choice planes are STATIC ghost so they raycast.
+- **Unlit plates.** Setup Scene rewrites BG/sprite/UI materials to Emission
+  (no Principled), hides scene lights, zeros world Background. Sprites stay
+  visible without PNGs (silhouette + object color).
+- Add-on v0.6.9. Tests `tests/test_m23_world_ui.py`. **Re-run Setup Scene.**
+
+## 0.6.8 — 2026-09-09 Camera bind + keyboard capture (field: LMB works, keys don't)
+
+- **Camera is now a Front ortho that the game actually uses.** `Camera_UI` was
+  created at `(0,-10,5)` looking +Y at **XY** planes (edge-on) and never assigned
+  to `scene.active_camera`, so P showed the leftover editor camera. Contract now
+  owns the pose: planes stand in XZ (`PLANE_ROTATION` X=90°), `Camera_UI` at
+  `(0,-10,0)` rot X=90° ortho 10; `Setup Scene` **resets** that transform every
+  time (unless `upvn_camera_custom`); leftover factory cameras are hidden;
+  viewport switches to CAMERA; `frontend._bind_camera()` sets
+  `scene.active_camera = Camera_UI` once at play start.
+- **Keys work in the embedded player.** LMB reached `bge.logic.mouse` without a
+  sensor; keystrokes were eaten by Blender because no Keyboard brick existed.
+  `Setup Scene` now adds `AllKeys` (`use_all_keys`, True pulse) + `Mouse`
+  LEFTCLICK, both linked to `UPVN_Main`. Idempotent: added only when missing.
+- **No more `keyboard.events`.** UPBGE 0.50 deprecates it and the conversion is
+  lossy. Polling uses `device.inputs[key]` only: `JUST_ACTIVATED in entry.queue`
+  / `.activated` / `ACTIVE in entry.status`. Pure `_classify_input_entry`.
+  Frontend F1/F12 goes through `_bge_just`. `_device_states` removed.
+- Add-on v0.6.8; tests `tests/test_m22_upbge_play.py`.
+
+## 0.6.7 — 2026-09-09 Script discovery across directories + on-screen diagnostics
+- **The game now finds its script.rpy on its own.** The packaged game layout is
+  `<package>/blend/UPVN_Template.blend` + `<package>/game/script.rpy`, but the
+  runtime only searched next to the .blend, so pressing P fell back to the
+  placeholder ("no script found yet"). `frontend.resolve_script_path` now also
+  probes the parent and grandparent of the .blend directory (`//../game/script.rpy`,
+  `//../../game/script.rpy`) plus the example layouts; the VNController
+  `script_path` property still wins when it points at an existing file.
+- **Load failures are explained on screen, not only in the console.** When no
+  script is found, the game now draws a red diagnostic panel listing the paths
+  that were searched and the exact fix (UPVN panel → Create Project → Setup
+  Scene → P) — players no longer stare at a cryptic placeholder.
+- **Setup Scene no longer reports a false warning for intact wiring.** The value
+  `upvn_bricks = "existing"` was treated as an error ("Brick wiring issue") —
+  it now reports success: "Scene wiring already present and intact".
+- **Input API updated to UPBGE 0.50's non-deprecated form.** The runtime used
+  `keyboard.events` / `mouse.events`, which UPBGE 0.50 deprecates in favour of
+  `keyboard.inputs` / `mouse.inputs` (per-key `KX_InputDevice`). New pure helpers
+  `_bge_input_state/_bge_just/_bge_active` prefer the new API and fall back to
+  the legacy one; all polling sites (advance, menu digits, skip/auto, history,
+  quick menu, Ctrl+S/L, ESC, wheel rollback) now go through them. The digit
+  selector is now the pure `_digit_choice_index`.
+- **Registration banner prints the real add-on version** (read from `bl_info`)
+  instead of a hard-coded "v0.6".
+- Tests: menu-input tests rewritten for the new helpers + packaged-layout path
+  discovery test → **135 passed, 2 skipped**.
+- Add-on version 0.6.7; dist rebuilt.
+
+## 0.6.6 — 2026-09-08 Idempotent Setup Scene + live Pillow probe (field reports)
+- **Setup Scene no longer fails on a second run.** Field error
+  `bpy_prop_collection: attribute "remove" not found`: the generator deleted the
+  existing `VNController` by iterating the read-only brick collections
+  (sensors/controllers have no `.remove()` in UPBGE 0.50). `build_vn_scene` now
+  **reuses** the existing object — properties are refreshed, the launcher text is
+  rewritten, and only the missing pieces (Always sensor / UPVN_Main controller)
+  are added by name; an intact wiring is reported as `upvn_bricks = "existing"`
+  and never touched. Repeated presses are safe by construction.
+- **Preview works immediately after installing Pillow.** The static module flag
+  `HAS_PIL` went stale when Pillow was installed mid-session (a module imported
+  earlier without Pillow stays `False`). `render_state()` now performs a live
+  probe (`from PIL import …` at call time) and binds the names then; the add-on
+  preview paths use a new `pil_live_available()` that imports `PIL` afresh on
+  every attempt. The "Install Pillow" operator installs with
+  `pip --target <purelib of the running interpreter>` — that directory is
+  already on `sys.path`, so the package is visible without restarting Blender;
+  the operator verifies visibility and, if still absent, advises one restart.
+- Tests: `tests/test_m20_upbge_runtime.py` extended (7 tests, incl. static guard
+  that the add-on never calls `.remove()` on brick collections and reuses
+  `VNController`) → **133 passed, 2 skipped**.
+- Add-on version 0.6.6; dist rebuilt.
+
+## 0.6.5 — 2026-09-08 Runtime fixes from the field (UPBGE console reports)
+- **`blf.color()` signature fixed.** UPBGE 0.50 requires
+  `blf.color(fontid, r, g, b, a)`; the overlay passed four values under the old
+  convention, so every dialogue/menu frame printed
+  `blf.color() takes exactly 5 arguments (4 given)` and the on-screen text
+  never got its color set. All calls in `bge_frontend/frontend.py::draw_overlay`
+  now pass font id + RGBA.
+- **Preview no longer leaks a `ModuleNotFoundError: PIL` traceback.** UPBGE runs
+  its own bundled Python (`<upbge>/5.0/python/bin/python3.11`), where Pillow may
+  be absent even if the system Python has it. `engine/render/headless_renderer.py`
+  now imports without Pillow (font constants degrade to `None`) and `render_state`
+  raises one clear RuntimeError with the exact install command; the add-on's
+  preview paths catch it, store the reason in `UPVN_GameBuilder.last_error`, and
+  report it in the panel instead of a raw traceback.
+- **New operator "Install Pillow"** in the UPVN panel: locates UPBGE's bundled
+  Python next to `bpy.app.binary_path` and runs
+  `python3.11 -m pip install pillow`, reporting the result directly.
+- Tests: `tests/test_m20_upbge_runtime.py` (5 tests: blf.color 5-arg static
+  checks, import-without-Pillow + instructive RuntimeError, real-Pillow render
+  sanity, add-on error-field behavior) → **131 passed, 2 skipped**.
+- Add-on version 0.6.5; dist rebuilt.
+
 ## 0.6.8 — 2026-09-09 Screens draw in the golden trace (M23)
 
 M22 produced a widget tree but nothing painted it, so a `show screen` was
@@ -173,6 +280,7 @@ and the story runs headless.
   two long-skipped tests run again → **200 passed, 0 skipped**.
 - Docs: `COMMAND_SPEC.md` + `SCRIPT_LANGUAGE_SPEC.md` gained M20 tables, `ROADMAP.md`
   M20 flipped to done, `STATUS.md` updated.
+
 
 ## 0.6.4 — 2026-09-08 Explicit scene↔code contract (M19)
 - **New `engine/render/contract.py`** — single source of truth for the naming

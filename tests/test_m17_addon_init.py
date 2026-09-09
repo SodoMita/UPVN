@@ -102,7 +102,7 @@ def test_m17_frontend_script_path_resolution():
 
 
 def test_m17_package_addon_zip_single_folder():
-    """v0.6.4 zip layout: ONE top-level folder (Blender extracts it on install).
+    """v0.6.9 zip layout: ONE top-level folder (Blender extracts it on install).
     Simulates the install by extracting into a fake add-ons dir and importing
     from there — engine must be discovered right next to the add-on. Also checks
     that a compressed zip WITHOUT extraction yields a helpful message, not a crash."""
@@ -121,7 +121,7 @@ def test_m17_package_addon_zip_single_folder():
         assert "engine/script/parser.py" not in names          # no zip-root dup
         assert "bge_frontend/frontend.py" not in names
         assert not any(n.endswith(".pyc") for n in names)
-        assert "upvn_editor_addon_v0.6.4.zip" in zpath.name
+        assert "upvn_editor_addon_v0.6.9.zip" in zpath.name
 
         # simulate Blender's UI install: extract into a fake addons dir
         addons_dir = Path(td) / "addons"
