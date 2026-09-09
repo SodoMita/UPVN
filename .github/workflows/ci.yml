@@ -21,7 +21,10 @@ jobs:
       - name: Install test deps
         run: |
           python -m pip install --upgrade pip
-          pip install pytest
+          # requirements.txt, not a bare `pip install pytest`: the headless
+          # renderer draws golden-trace PNGs with Pillow, and a missing dep
+          # used to abort test collection for the whole suite.
+          pip install -r requirements.txt
 
       - name: pytest
         run: python -m pytest tests/ -q
@@ -78,7 +81,10 @@ jobs:
       - name: Install test deps
         run: |
           python -m pip install --upgrade pip
-          pip install pytest
+          # requirements.txt, not a bare `pip install pytest`: the headless
+          # renderer draws golden-trace PNGs with Pillow, and a missing dep
+          # used to abort test collection for the whole suite.
+          pip install -r requirements.txt
 
       # Only the scripts are needed — blob-filtered sparse checkout keeps this
       # at ~3 MB instead of the full 288 MB repository.
@@ -120,7 +126,10 @@ jobs:
       - name: Install test deps
         run: |
           python -m pip install --upgrade pip
-          pip install pytest
+          # requirements.txt, not a bare `pip install pytest`: the headless
+          # renderer draws golden-trace PNGs with Pillow, and a missing dep
+          # used to abort test collection for the whole suite.
+          pip install -r requirements.txt
 
       # A different codebase, written by different people in a different style:
       # this is what stops the drop-in tier from being fitted to one game.

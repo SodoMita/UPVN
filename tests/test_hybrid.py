@@ -1,6 +1,10 @@
 from engine.script.parser import parse_string
 from engine.core.vn_state import VNState
 from engine.core.vn_interpreter import VNInterpreter
+# Pillow backs the headless renderer; without it these tests skip rather
+# than aborting collection (which would take the rest of the suite down).
+import pytest
+pytest.importorskip("PIL", reason="Pillow is required by the headless renderer")
 from engine.render.headless_renderer import render_state
 from pathlib import Path
 

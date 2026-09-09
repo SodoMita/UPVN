@@ -25,6 +25,7 @@ Tiers:
 """
 from __future__ import annotations
 import re
+import warnings
 import copy
 from typing import Any, Dict, List, Optional, Generator, Tuple
 
@@ -107,6 +108,20 @@ def _is_state_value(v) -> bool:
 
 
 # ------------------------------------------------------------------ text substitution
+def _exec_script_code(code: str, env: dict):
+    r"""``exec`` a `python:` / `init python:` block taken from a script.
+
+    Wrapped so a *syntax* warning in the author's own code does not pollute our
+    output: real games ship regexes written as ``"\s+"`` rather than ``r"\s+"``,
+    which Python flags with SyntaxWarning. Those warnings are about the game's
+    code, not about UPVN. Genuine errors still propagate and are handled by the
+    caller's compat logic.
+    """
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", SyntaxWarning)
+        exec(code, env)
+
+
 _bracket_pat = re.compile(r"\[([^\]\[]+)\]")  # Ren'Py [expr] interpolation
 
 def interpolate(text: str, variables: dict, extra: Optional[dict] = None) -> str:
@@ -265,7 +280,7 @@ class VNInterpreter:
         env = self._python_env()
         for line in code_lines:
             try:
-                exec(line, env)
+                _exec_script_code(line, env)
             except Exception as e:
                 first = (line or "").strip().splitlines()[0] if line else ""
                 msg = f"init python error: {e}\n  in: {first[:120]}"
@@ -710,7 +725,7 @@ class VNInterpreter:
             code = node.get("code", "")
             env = self._python_env()
             try:
-                exec(code, env)
+                _exec_script_code(code, env)
             except ScriptRuntimeError:
                 raise
             except Exception as e:

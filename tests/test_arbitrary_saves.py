@@ -2,6 +2,10 @@ import tempfile, pathlib
 from engine.core.vn_state import VNState
 from engine.save.save_manager import SaveManager
 from engine.ui.screen_manager import ScreenManager
+# Pillow backs the headless renderer; without it these tests skip rather
+# than aborting collection (which would take the rest of the suite down).
+import pytest
+pytest.importorskip("PIL", reason="Pillow is required by the headless renderer")
 from engine.render.headless_renderer import render_state
 
 def test_arbitrary_slots_not_limited_to_6():

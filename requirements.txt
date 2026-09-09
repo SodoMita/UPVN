@@ -4,6 +4,10 @@
 # testing
 pytest>=7
 fake-bge-module>=2023.0; python_version < "3.13"
+# engine/render/headless_renderer.py draws the golden-trace PNGs with Pillow.
+# Not optional for the render tests — but its absence must skip, not abort
+# collection (a collection error takes the whole suite down with it).
+pillow>=10
 
 # dev / lint (not required to run game)
 black
