@@ -69,8 +69,7 @@ class HotspotMap:
         Choice i maps to editor object named f"{prefix}_{i}".
         """
         m = cls()
-        for c in choices:
-            i = c.get("id", 0)
+        for i, _c in enumerate(choices):
             m.add(Hotspot(name=f"{prefix}_{i}", action="choice", choice_index=i))
         return m
 

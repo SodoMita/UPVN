@@ -1,6 +1,7 @@
-# Current Status — 2026-09-09 (M23.1 Setup Scene → open scene)
+# Current Status — 2026-09-09 (M24 cursor/ortho15/zoom-stable UI)
 
 ## Last completed
+- M24 play feel (2026-09-09): mouse visible; ortho 15; UI NDC-laid so zoom leaves text; placeholder PNG sprites/BGs; LibLoad skipped if missing (crash fix); choice rayCast + SENSOR physics + keys/numpad. v0.6.11. Restart UPBGE, Setup Scene, P.
 - M23.1 Setup Scene writes the OPEN scene (2026-09-09): field 18/27 missing choice_* because objects landed on VN_Main while the template Scene stayed old. v0.6.10. Restart UPBGE, Setup Scene, Check Wiring on that scene.
 - M23 3D-only UI DONE (2026-09-09): no blf overlay; FONT Speaker_Text/Dialogue_Text + choice_0..8 planes; LMB getScreenRay → PointerTracker.choose; Emission unlit + lights off; sprites visible without PNG. Add-on v0.6.9. Re-run Setup Scene.
 - M22 UPBGE play: camera bind + keyboard capture DONE (2026-09-09): Camera_UI Front (XZ planes, (0,-10,0) rot X=90°) reset every Setup Scene; runtime `scene.active_camera = Camera_UI`; AllKeys+Mouse bricks so embedded P receives keys (LMB already worked); input path is `inputs.queue` only — `keyboard.events` gone (deprecation + lossy conversion). Add-on v0.6.8. tests/test_m22_upbge_play.py
