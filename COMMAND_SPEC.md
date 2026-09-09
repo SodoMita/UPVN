@@ -218,7 +218,7 @@ pause 0.5
 | `voice "…"` | `play_voice` | |
 | `queue music\|sound "…"` | `play_music`/`play_sound` with `queue: true` | |
 | `show/hide/call screen x` | `show_screen`/`hide_screen`/`call_screen` | `call_screen` waits for input |
-| `screen:` / `style:` / `transform:` / `translate:` | `screens`/`styles`/`transforms`/`translations` | captured as raw lines for the editor-built UI layer |
+| `screen:` / `style:` / `transform:` / `translate:` | `screens`/`styles`/`transforms`/`translations` | captured with relative indents + params; `screen:` bodies are then **evaluated** into widget trees (see M22) |
 | `renpy.jump/call/quit`, `renpy.loadable`, `renpy.has_label`, `renpy.get_playing`, `renpy.random.*`, `renpy.store.*` | `engine/script/renpy_compat.py` | allowlist stand-in object, not a real import |
 
 ### M20 additions (driven by a real 61-file Ren'Py game)
@@ -279,6 +279,26 @@ In safe mode all of the above raise `ParseError` with hint `parse with mode='ful
 | `style n:` inside a label | `styles` | `style` is legal as a statement, not only at top level |
 | `window show\|hide\|auto [t]`, `nvl show\|hide\|clear [t]` | `window`/`nvl` with `transition` | the transition is optional |
 | a file holding only comments | empty IR | legal in a multi-file project; a single-file script still needs `label start:` |
+
+### M22 additions (screens render)
+
+| Construct | Effect | Notes |
+| --- | --- | --- |
+| `screen n(params):` body | evaluated by `engine/ui/screen_lang.py` into a JSON widget tree | containers `vbox`/`hbox`/`frame`/`window`/`fixed`/`null`/`bar`; leaves `text`/`textbutton`/`imagebutton`/`add`/`label`/`input`/`key` |
+| `if` / `elif` / `else` in a screen | branch chosen against the store | an unresolvable condition is a diagnostic, not an exception |
+| `for x in items:` | one copy of the body per item | a non-iterable is a diagnostic |
+| `$ expr` in a screen | executed against the store | feeds `[expr]` in the same screen |
+| `default x = e` | screen-local binding | applied unless the caller passed the name |
+| `use other(args):` | inlines another screen | `transclude` inside it receives the `use` body |
+| `has vbox` | the following siblings become that container's children | a declaration, not a block — the container is synthesised |
+| `text "Hi [name]"` | `[expr]` interpolated | unresolvable brackets stay verbatim |
+| `show screen f(args)` | `show_screen` + `widgets`, recorded in `VNState.active_screens` | `modal: false` |
+| `call screen f(args)` | `call_screen` + `widgets`, `wait: true` | `modal: true`; positional **and** keyword args bind by name |
+| `hide screen f` | `hide_screen` | clears `VNState.active_screens[f]` |
+
+Layout is intentionally **not** modelled: positions, sizes, styles and anchors
+stay in each widget's `props`. A screen that cannot be resolved yields an empty
+tree plus `errors`, so the story keeps playing.
 
 ## What is NOT in the declarative tiers (tiers 1–2)
 

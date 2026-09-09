@@ -1,6 +1,14 @@
-# Current Status — 2026-09-09 (M21 second corpus: the Ren'Py SDK's own games)
+# Current Status — 2026-09-09 (M22 screens actually render)
 
 ## Last completed
+- **M22 Screen-language interpreter DONE (2026-09-09, branch `feat/renpy-corpus-compat`)**: the drop-in tier *parsed* `screen:` blocks and then discarded them — the body was captured as stripped text, so `show screen` / `call screen` emitted an event with a name and nothing to draw. The SDK tutorial has **99** screens and LearnToCodeRPG **23**; all were inert.
+  - **`engine/ui/screen_lang.py`**: rebuilds the widget tree from a captured body and evaluates it — containers (`vbox`/`hbox`/`frame`/`window`/`fixed`/`null`/`bar`), leaves (`text`/`textbutton`/`imagebutton`/`add`/`label`/`input`/`key`), control flow (`if`/`elif`/`else`, `for`, `$`), screen-local `default`s, `use` + `transclude`, `has vbox` (a declaration, not a block — the container is synthesised from the siblings that follow), and `[expr]` interpolation. Output is JSON-serialisable.
+  - **Layout deliberately not modelled**: positions, sizes, styles and anchors stay in `props`. UPVN's UI is built in the 3D scene, so a second layout engine would only compete with it.
+  - **Wired into the interpreter**: `show screen`/`call screen` render and record into `VNState.active_screens` (a load restores the same UI); `hide screen` clears it. `run_headless` prints `SHOW SCREEN hud -> 5 widgets`, plus the first diagnostic when a screen could not be resolved.
+  - **A broken screen never stops the story**: rendering does not raise — an undefined screen, an unresolvable condition or a non-iterable `for` yields an empty tree plus a diagnostic.
+  - **Parser**: captured `screen:` blocks keep relative indentation and their parameter list; without them there is no tree to build and `screen choice(items):` is unusable.
+  - **Validated on both corpora**: SDK tutorial **99/99** screens render (97 non-empty, 716 widgets), LearnToCodeRPG **23/23** (22 non-empty, 346 widgets).
+  - Tests: **253 passed, 0 skipped** — `tests/test_screen_lang.py` (29) covers tokenising, tree shape, `has`, condition chains, control flow, `use`/`transclude`, param and keyword binding, degradation, the interpreter wiring and a save round-trip.
 - **M21 Second corpus DONE (2026-09-09, branch `feat/renpy-corpus-compat`)**: M20 proved the drop-in tier on one shipped game; that is not the same as proving it on Ren'Py, so this milestone validates against a second, unrelated FOSS codebase — the games that ship inside the SDK itself (`renpy/renpy`, MIT): `tutorial/` (23 scripts) and `the_question/`. Before: **7/23** tutorial files parsed. After: **23/23**, 75 labels, 1672 statements, every `jump`/`call`/`call screen` resolves.
   - **Project-registered statements**: `renpy.register_statement("example", …)` in one file makes `example` legal in every other file — discovery is project-wide (`discover_custom_statements`) and runs before parsing in the checker, `tools/validate.py` and `VNController`. Bodies are captured, never executed. `testcase`/`testsuite` (Ren'Py's own test DSL, `renpy/parser.py:1230/1239`) recognised out of the box.
   - **`block="script"` honoured**: labels declared inside such a body are real jump targets — the tutorial hides `label play_pong:` inside an `example` block and it now resolves. A body we cannot read is recorded in `custom_statement_errors` instead of aborting the file; our own `init:` errors stay hard.
@@ -54,7 +62,7 @@
 - Next up (not blockers): make `UPVN_GameBuilder` emit declarative forms (`character`/`state`/`set`/`choice`) instead of legacy `define`/`$`; wire `VNState.resolve_asset` into renderers so scene/show/play_music actually resolve manifest paths; wire `engine/ui/pointer.py` into `bge_frontend/frontend.py` (raycast object under cursor → `PointerTracker.update` → `controller.choose(i)`); publish GitHub release with dist zips
 
 ## Recommended next task
-- Wire the captured `screen:` bodies to the editor UI (or a minimal screen interpreter) so `call screen`/`show screen` actually draw something in UPBGE — this is now the largest gap between "parses a real game" and "renders a real game"
+- **Draw the rendered widget trees.** M22 produces the widget list; nothing in `bge_frontend/` consumes it yet. Walking `event["widgets"]` into blf + planes (text → blf, frame/vbox/hbox → quads using the `props` positions) is what makes `call screen` visible in-game rather than merely correct in a trace.
 - A third corpus for regression breadth (a GPL Ren'Py game, e.g. an Everlasting Summer port) — the checker is corpus-agnostic, so this is config, not code
 - Publish a GitHub release with the `dist/` zips
 - Human-in-the-loop acceptance (user): open blend/UPVN_Template.blend in UPBGE → UPVN tab shows ✓ Engine → Create Project → P → click/Space to advance; report console output if anything looks off

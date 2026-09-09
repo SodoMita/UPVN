@@ -228,6 +228,15 @@ class VNInterpreter:
             self._expr_extra["_p"] = identity_translation
         self._expr_extra.update(self.namespaces)
 
+        # M22: captured `screen:` bodies become real widgets instead of inert
+        # text. `show screen` / `call screen` hand a frontend something to draw.
+        from ..ui.screen_lang import ScreenLang
+        self.screen_lang = ScreenLang(
+            screens=self.screens,
+            evaluator=self._eval_screen_expr,
+            executor=self._exec_screen_code,
+        )
+
         # execution pointer stack for call/return
         # each entry: (label, next_index, param_saves) where param_saves is
         # a list of (name, existed_before, old_value) to restore on return.
@@ -323,6 +332,34 @@ class VNInterpreter:
                 continue
             if k in before or _is_state_value(v):
                 self.state.variables[k] = v
+
+    def _eval_screen_expr(self, expr: str):
+        """Evaluate one screen-language expression (full tier is permissive).
+
+        Screen bodies see the store, the screen's own parameters (injected by
+        the caller's scope) and the renpy compat namespace — the same surface
+        a `python:` block gets.
+        """
+        return self._eval_expr(expr)
+
+    def _render_screen(self, name: str, args: List[str]) -> dict:
+        """Evaluate a `screen:` body into a widget tree.
+
+        Never raises: an undefined or broken screen yields an empty tree plus
+        diagnostics, because in compat mode the story must keep playing. A
+        frontend can still show the name; the trace shows why it is empty.
+        """
+        try:
+            return self.screen_lang.render(name, args)
+        except Exception as e:  # pragma: no cover - defensive
+            return {"name": name, "props": {}, "widgets": [],
+                    "errors": [f"screen {name!r} failed to render: {e}"]}
+
+    def _exec_screen_code(self, code: str):
+        """Run a `$` line from inside a screen body."""
+        env = self._python_env()
+        _exec_script_code(code, env)
+        self._sync_variables(env)
 
     def _eval_expr(self, expr: str):
         extra = self._expr_extra if self.full else None
@@ -834,16 +871,38 @@ class VNInterpreter:
             return {"type": "nvl_mode", "mode": self.state.nvl_mode, "wait": False, "_loc": loc}
 
         elif cmd == "call_screen":
-            return {"type": "call_screen", "screen": node.get("screen"),
-                    "args": node.get("args") or [], "transition": node.get("transition"),
+            name = node.get("screen")
+            args = node.get("args") or []
+            view = self._render_screen(name, args)
+            # a modal screen owns the screen until dismissed; Ren'Py's
+            # `call screen` blocks and yields the Return() value
+            self.state.active_screens[name] = {
+                "args": list(args), "widgets": view["widgets"],
+                "props": view["props"], "modal": True,
+            }
+            return {"type": "call_screen", "screen": name, "args": args,
+                    "transition": node.get("transition"),
+                    "widgets": view["widgets"], "props": view["props"],
+                    "errors": view["errors"],
                     "wait": True, "_loc": loc}
 
         elif cmd == "show_screen":
-            return {"type": "show_screen", "screen": node.get("screen"),
-                    "args": node.get("args") or [], "wait": False, "_loc": loc}
+            name = node.get("screen")
+            args = node.get("args") or []
+            view = self._render_screen(name, args)
+            self.state.active_screens[name] = {
+                "args": list(args), "widgets": view["widgets"],
+                "props": view["props"], "modal": False,
+            }
+            return {"type": "show_screen", "screen": name, "args": args,
+                    "widgets": view["widgets"], "props": view["props"],
+                    "errors": view["errors"],
+                    "wait": False, "_loc": loc}
 
         elif cmd == "hide_screen":
-            return {"type": "hide_screen", "screen": node.get("screen"), "wait": False, "_loc": loc}
+            name = node.get("screen")
+            self.state.active_screens.pop(name, None)
+            return {"type": "hide_screen", "screen": name, "wait": False, "_loc": loc}
 
         # 3D stubs — record state, yield event for frontend
         elif cmd == "load_stage":
