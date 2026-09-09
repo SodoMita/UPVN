@@ -35,7 +35,7 @@ CAMERA_UI = "Camera_UI"
 CAMERA_3D = "Camera_3D"
 CAMERA_UI_LOCATION = (0.0, -10.0, 0.0)
 CAMERA_UI_ROTATION = (math.pi / 2.0, 0.0, 0.0)
-CAMERA_UI_ORTHO_SCALE = 10.0
+CAMERA_UI_ORTHO_SCALE = 15.0
 CAMERA_3D_LOCATION = (0.0, -6.0, 2.5)
 CAMERA_3D_ROTATION = (1.15, 0.0, 0.0)
 PLANE_ROTATION = (math.pi / 2.0, 0.0, 0.0)
@@ -59,16 +59,16 @@ CHOICE_COUNT = 9
 UI_MATERIAL = "MAUI"
 SPEAKER_LOCATION = (-3.6, -0.55, -2.55)
 DIALOGUE_TEXT_LOCATION = (-3.6, -0.55, -3.15)
-SPRITE_SCALE = (1.5, 2.4, 1.0)  # local XY after rot X=90 → world X / Z height
+SPRITE_SCALE = (1.8, 3.2, 1.0)  # local XY after rot X=90 → world X / Z height
 
 # UPBGE world positions (X = screen X, Y = depth toward camera, Z = screen Y).
-# Camera_UI at (0,-10,0) looking +Y, ortho_scale=10.
+# Camera_UI at (0,-10,0) looking +Y, ortho_scale=15.
 POSITIONS = {
-    "far_left": (-5.0, -0.15, 0.0),
-    "left": (-3.0, -0.15, 0.0),
+    "far_left": (-6.0, -0.15, 0.0),
+    "left": (-3.5, -0.15, 0.0),
     "center": (0.0, -0.15, 0.0),
-    "right": (3.0, -0.15, 0.0),
-    "far_right": (5.0, -0.15, 0.0),
+    "right": (3.5, -0.15, 0.0),
+    "far_right": (6.0, -0.15, 0.0),
 }
 
 # collections that make scene order explicit in the editor

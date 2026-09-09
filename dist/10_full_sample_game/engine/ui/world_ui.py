@@ -98,7 +98,70 @@ def _set_visible(obj: Any, vis: bool) -> None:
         pass
 
 
-def apply_world_ui(get_obj: Callable[[str], Any], payload: dict) -> None:
+def _set_pos(obj: Any, loc) -> None:
+    if obj is None:
+        return
+    try:
+        obj.worldPosition = loc
+    except Exception:
+        try:
+            obj.location = loc
+        except Exception:
+            pass
+
+
+def _set_scale(obj: Any, scl) -> None:
+    if obj is None:
+        return
+    try:
+        obj.worldScale = scl
+    except Exception:
+        try:
+            obj.localScale = scl
+        except Exception:
+            pass
+
+
+def layout_screen_ui(get_obj: Callable[[str], Any], payload: dict, ortho: float = 15.0) -> None:
+    """Place UI as a fraction of the current ortho frustum so zoom leaves text on screen."""
+    half = max(1.0, float(ortho) / 2.0)
+    y_ui = -0.55
+    box = get_obj("Dialogue_Box")
+    sp = get_obj("Speaker_Text")
+    dt = get_obj("Dialogue_Text")
+    _set_pos(box, (0.0, y_ui + 0.05, -half * 0.72))
+    _set_scale(box, (half * 0.92, half * 0.14, 1.0))
+    _set_pos(sp, (-half * 0.85, y_ui, -half * 0.62))
+    _set_pos(dt, (-half * 0.85, y_ui, -half * 0.70))
+    try:
+        if sp is not None:
+            sp.size = half * 0.045
+    except Exception:
+        pass
+    try:
+        if dt is not None:
+            dt.size = half * 0.040
+    except Exception:
+        pass
+    vis_n = sum(1 for c in payload.get("choices", []) if c.get("visible"))
+    for i, ch in enumerate(payload.get("choices", [])):
+        plane = get_obj(ch["name"])
+        text_obj = get_obj(ch["name"] + "_text")
+        if not ch.get("visible"):
+            continue
+        z = half * 0.42 - i * (half * 0.12)
+        _set_pos(plane, (0.0, y_ui + 0.02, z))
+        _set_scale(plane, (half * 0.70, half * 0.045, 1.0))
+        _set_pos(text_obj, (-half * 0.62, y_ui, z + half * 0.01))
+        try:
+            if text_obj is not None:
+                text_obj.size = half * 0.038
+        except Exception:
+            pass
+    _ = vis_n
+
+
+def apply_world_ui(get_obj: Callable[[str], Any], payload: dict, ortho: float | None = None) -> None:
     """Write payload onto named scene objects. `get_obj(name) -> obj|None`."""
     speaker_obj = get_obj("Speaker_Text")
     dialogue_obj = get_obj("Dialogue_Text")
@@ -116,6 +179,8 @@ def apply_world_ui(get_obj: Callable[[str], Any], payload: dict) -> None:
         _set_visible(plane, on)
         _set_visible(text_obj, on)
         set_font_text(text_obj, ch.get("text") or "")
+    if ortho is not None:
+        layout_screen_ui(get_obj, payload, ortho=ortho)
 
 
 def normalize_hit_name(name: Optional[str]) -> Optional[str]:

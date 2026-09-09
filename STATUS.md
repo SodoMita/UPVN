@@ -1,6 +1,7 @@
-# Current Status — 2026-09-09 (M23.1 open scene · M23 Ren'Py screens)
+# Current Status — 2026-09-09 (M24 play feel · M23 Ren'Py screens)
 
 ## Last completed
+- M24 play feel (2026-09-09): mouse visible; ortho 15; UI NDC-laid so zoom leaves text; placeholder PNG sprites/BGs; LibLoad skipped if missing (crash fix); choice rayCast + SENSOR physics + keys/numpad. v0.6.11. Restart UPBGE, Setup Scene, P.
 - M23.1 Setup Scene writes the OPEN scene (2026-09-09): field 18/27 missing choice_* because objects landed on VN_Main while the template Scene stayed old. v0.6.10. Restart UPBGE, Setup Scene, Check Wiring on that scene.
 - **M22 Screen-language interpreter DONE (2026-09-09, branch `feat/renpy-corpus-compat`)**: the drop-in tier *parsed* `screen:` blocks and then discarded them — the body was captured as stripped text, so `show screen` / `call screen` emitted an event with a name and nothing to draw. The SDK tutorial has **99** screens and LearnToCodeRPG **23**; all were inert.
   - **`engine/ui/screen_lang.py`**: rebuilds the widget tree from a captured body and evaluates it — containers (`vbox`/`hbox`/`frame`/`window`/`fixed`/`null`/`bar`), leaves (`text`/`textbutton`/`imagebutton`/`add`/`label`/`input`/`key`), control flow (`if`/`elif`/`else`, `for`, `$`), screen-local `default`s, `use` + `transclude`, `has vbox` (a declaration, not a block — the container is synthesised from the siblings that follow), and `[expr]` interpolation. Output is JSON-serialisable.

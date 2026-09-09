@@ -75,16 +75,21 @@ class SceneManager:
                 mat_id = -1
             if mat_id < 0:
                 mat_id = 0  # first material slot fallback
-            tex_path = bge.logic.expandPath(f"//{ASSET_BACKGROUNDS}/{asset}.png")
-            # fallback to jpg
             import os
-            if not os.path.exists(tex_path):
-                for ext in (".jpg", ".png", ".webp"):
-                    alt = bge.logic.expandPath(f"//{ASSET_BACKGROUNDS}/{asset}{ext}")
-                    if os.path.exists(alt):
-                        tex_path = alt
+            stems = [asset, asset.replace(" ", "_"), asset.replace(" ", "/")]
+            tex_path = None
+            for stem in stems:
+                for ext in (".png", ".jpg", ".webp"):
+                    for prefix in (f"//{ASSET_BACKGROUNDS}/", f"//game/{ASSET_BACKGROUNDS}/"):
+                        alt = bge.logic.expandPath(f"{prefix}{stem}{ext}")
+                        if os.path.exists(alt):
+                            tex_path = alt
+                            break
+                    if tex_path:
                         break
-            if os.path.exists(tex_path):
+                if tex_path:
+                    break
+            if tex_path and os.path.exists(tex_path):
                 img = vt.ImageFFmpeg(tex_path)
                 img.scale = False
                 tex = vt.Texture(plane, mat_id)

@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.6.11 — 2026-09-09 Cursor, ortho 15, zoom-stable UI, art, LibLoad crash
+
+- Mouse cursor shown (`bge.render.showMouse(True)`). Choice clicks use
+  `getScreenRay` then `rayCast` fallback; planes are SENSOR+BOX. Keys 1–9 and
+  numpad. `HotspotMap` always `choice_<index>`.
+- `Camera_UI` ortho_scale **15**. Zoom changes ortho but UI is re-laid as NDC
+  fractions of the frustum — dialogue stays on screen. `camera_preset` does not
+  move `Camera_UI`.
+- Placeholder PNG sprites/backgrounds in `assets/` and the sample game.
+  Materials get an Image Texture node so VideoTexture has a slot.
+- `LibLoad` only if the `.blend` exists (crash in `_load_stage_bge`).
+- Add-on v0.6.11. **Restart UPBGE**, Setup Scene, P.
+
 ## 0.6.10 — 2026-09-09 Setup Scene writes the OPEN scene
 
 - Field: Check Wiring 18/27, all `choice_*` missing. `build_vn_scene` always
