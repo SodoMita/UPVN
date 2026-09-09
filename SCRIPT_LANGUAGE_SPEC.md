@@ -239,6 +239,72 @@ access is permitted *only* on the injected `renpy`/`store` objects (never `_`-pr
 never on arbitrary values) — so `renpy.loadable("…")` works while
 `().__class__.__mro__…` escapes stay closed.
 
+### M20 — what the drop-in tier now accepts (verified on a real game)
+
+The full tier is no longer a demo subset: it parses a complete shipped game
+(freeCodeCamp/LearnToCodeRPG, BSD-3-Clause, 61 files, 5.5k statements) with zero
+errors. Beyond the list above it accepts:
+
+- **Lexical:** triple-quoted strings across lines, trailing-`\` continuation, and
+  *unbalanced-bracket* continuation (`call screen f(` … `)`), BOM anywhere,
+  `#` only outside strings.
+- **Statements:** `from` clauses, `call screen f(args) with t`, `show/hide screen f(args)`,
+  `for` loops (incl. tuple targets), voice attributes (`who @ attr "text"`), negated
+  image attributes (`who -sweat "text"`), `nointeract`, `extend`, `centered`/`vcentered`,
+  `with <any expression>`, `show` clauses in any order (`as`/`at`/`behind`/`zorder`/`onlayer`),
+  `pause` with an expression, playlists + `loop`/`noloop`/`fadeout`, `voice sustain`,
+  `stop audio`.
+- **Menus:** `menu name:` (also a jump/call target), `set var`, `if`/`elif`/`else`
+  choice groups, dialogue/`$`/`python:` before the choices, `"Text" (props) if cond:`.
+- **Top level:** `default` with an expression / dotted name / inside a label,
+  dotted `define` (store namespaces `gui`/`config`/`build`), `image … = <expr>`,
+  `layeredimage:` blocks, style property statements, `screen`/`transform` with
+  parameters, `init python hide:` / `python early:`.
+- **Indentation:** the safe/.urpy tiers still demand exactly 4 spaces; the drop-in
+  tier accepts any *consistent* indent (real projects use 2, 4 or 8).
+- **Multi-file:** each file is parsed on its own (`require_start=False`) and merged,
+  so errors keep their real `file:line` and `start` may live in any file.
+
+Run `python -m tools.check_renpy_project <project> --run` for a full report.
+
+### M21 — verified against a second corpus (the Ren'Py SDK's own games)
+
+One game proves the parser can read that game. So the tier was re-validated
+against the games that ship inside `renpy/renpy` itself (MIT) — `tutorial/`
+(23 scripts) and `the_question/` — written by different people in a different
+style. Result: **23/23** files, 75 labels, every jump/call resolves. Beyond M20:
+
+- **Custom statements.** Ren'Py lets a project define its own keywords with
+  `renpy.register_statement("NAME", parse=…, execute=…)`. Registration is
+  project-wide, so discovery is too: `discover_custom_statements()` scans every
+  file first and the resulting map is passed to each `Parser` (the checker,
+  `tools/validate.py` and `VNController` all do this). UPVN **captures** these
+  bodies and never executes the foreign callback; at runtime the node is a
+  no-op event. `testcase`/`testsuite` are built into Ren'Py and need no
+  registration.
+- **`block="script"`.** That argument tells Ren'Py the body *is* script, so
+  UPVN parses it as such — labels declared inside become real jump targets (the
+  tutorial hides `label play_pong:` inside an `example` block). A body we
+  cannot read is recorded in `custom_statement_errors` rather than aborting the
+  file; our own `init:` errors stay hard.
+- **Strings may span lines.** Ren'Py lexes string literals with `re.DOTALL`
+  (`renpy/lexer.py`), so `e "one` ⏎ `   two."` is one string. An unterminated
+  quote now reports `unterminated string` with the delimiter named.
+- **Say:** Ren'Py's automatic dialogue IDs (`e "text" id a1b2c3d4`, written by
+  the translation tooling) and a quoted who (`"Lucy" "text"`).
+- **Display:** `show`/`scene` may carry an ATL block; bare `scene` clears the
+  layer.
+- **Other:** `define x += [ … ]`, `style n:` as a statement inside a label,
+  `window show|hide|auto [transition]`, `nvl show|hide|clear [transition]`,
+  comment-only files.
+
+Point `UPVN_RENPY_SDK` at a `renpy/renpy` checkout to run the gate:
+
+```bash
+git clone --depth 1 https://github.com/renpy/renpy ~/renpy_sdk
+UPVN_RENPY_SDK=~/renpy_sdk pytest tests/test_renpy_sdk_corpus.py
+```
+
 ## Diagnostics (LLM-friendly)
 
 Every `ParseError` includes:

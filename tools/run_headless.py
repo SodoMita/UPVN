@@ -19,6 +19,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from engine.core.vn_controller import VNController
 
+def _count_widgets(widgets):
+    """Total widgets in a rendered screen tree (containers included)."""
+    n = 0
+    for w in widgets or []:
+        n += 1 + _count_widgets(w.get("children"))
+    return n
+
+
 def main():
     ap = argparse.ArgumentParser(description="UPVN headless runner")
     ap.add_argument("script", help="path to .rpy file or directory")
@@ -55,6 +63,15 @@ def main():
                 print(f'SHOW {e["asset"]} at {e.get("position")}')
             elif t == "assign":
                 print(f'ASSIGN {e["target"]} {e["op"]} {e["expr"]} => {e["value"]}')
+            elif t in ("show_screen", "call_screen", "hide_screen"):
+                # M22: screens render to real widgets, so show what came out
+                n = _count_widgets(e.get("widgets"))
+                label = {"show_screen": "SHOW SCREEN", "call_screen": "CALL SCREEN",
+                         "hide_screen": "HIDE SCREEN"}[t]
+                extra = f" -> {n} widgets" if t != "hide_screen" else ""
+                errs = e.get("errors") or []
+                note = f"  ({errs[0]})" if errs else ""
+                print(f'{label} {e.get("screen")}{extra}{note}')
             elif t == "end":
                 print(f'END ({e.get("label")})')
             else:
