@@ -1,6 +1,6 @@
 """
 UPVN Blender Editor Tools — create visual novel inside Blender with minimal coding
-v0.6.4 (2026-09-08): self-contained engine discovery — no more "Engine not available"
+v0.6.9 (2026-09-09): 3D UI only (no blf overlay), unlit sprites/BG, clickable choice_* planes
 
 Why v0.6 exists
     Installing the old add-on copied this single .py into Blender's add-ons folder,
@@ -21,7 +21,7 @@ Why v0.6 exists
 
 Install (two supported ways)
   A. Dist zip (recommended):
-        dist/upvn_editor_addon_v0.6.4.zip  → Edit → Preferences → Add-ons →
+        dist/upvn_editor_addon_v0.6.9.zip  → Edit → Preferences → Add-ons →
            Install from Disk… (or Install…) → select the .zip → enable "UPVN".
      Engine, frontend and template travel inside the zip; nothing else needed.
   B. Repo checkout:
@@ -45,7 +45,7 @@ Headless fallback: when bpy unavailable (CI), the module still imports and expos
 bl_info = {
     "name": "UPVN — Visual Novel Editor",
     "author": "UPVN",
-    "version": (0, 6, 4),
+    "version": (0, 6, 9),
     "blender": (4, 2, 0),
     "location": "View3D > Sidebar > UPVN, Text Editor > Sidebar > UPVN",
     "description": "Create Ren'Py-like visual novel inside UPBGE with minimal coding — self-contained engine, one-click scene setup, characters, scenes, dialogue, menus, arbitrary saves, preview",
@@ -279,6 +279,18 @@ def engine_diag_text():
     return "\n".join(lines)
 
 
+def pil_live_available():
+    """Live probe for Pillow in the CURRENT interpreter. A static HAS_PIL flag
+    goes stale when the user installs Pillow mid-session (Python caches failed
+    imports at module level), so every preview attempt re-checks with a real
+    import. Returns True/False, never raises."""
+    try:
+        import PIL  # noqa: F401
+        return True
+    except Exception:
+        return False
+
+
 def engine_parser_available():
     """(parse_string, parse_file) or (None, None) once engine is bound."""
     if not ENGINE_AVAILABLE or _engine_api is None:
@@ -325,6 +337,7 @@ class UPVN_GameBuilder:
 
     def __init__(self, script_path: str = "game/script.rpy"):
         self.script_path = pathlib.Path(script_path)
+        self.last_error: str | None = None
         self.characters = {}  # id -> {name, color}
         self.labels = {"start": []}  # label -> list of lines
         self.current_label = "start"
@@ -549,10 +562,22 @@ class UPVN_GameBuilder:
             return False, str(e)
 
     def preview_screenshot(self, out_path: str = "screenshots/upvn_preview.png"):
-        """Headless screenshot via headless_renderer. Returns Path or None."""
+        """Headless screenshot via headless_renderer. Returns Path or None;
+        on failure the reason is stored in self.last_error."""
+        self.last_error = None
         if not ENGINE_AVAILABLE or _engine_api is None:
+            self.last_error = "engine not found"
             return None
-        from engine.render.headless_renderer import render_state
+        try:
+            from engine.render.headless_renderer import render_state
+        except ImportError as e:
+            self.last_error = f"headless renderer import failed: {e}"
+            return None
+        if not pil_live_available():
+            self.last_error = ("Pillow (PIL) is not visible to this Python "
+                               "interpreter — press 'Install Pillow' in the UPVN panel "
+                               "(if you already did, restart Blender/UPBGE once)")
+            return None
         from engine.core.vn_state import VNState
         from engine.core.vn_interpreter import VNInterpreter
         _p, _vc, _sm = _engine_api
@@ -568,6 +593,7 @@ class UPVN_GameBuilder:
             try:
                 script = _p.parse_string(rpy)
             except Exception as e:
+                self.last_error = f"script parse failed: {e}"
                 return None
         state = VNState()
         interp = VNInterpreter(script, state)
@@ -578,7 +604,11 @@ class UPVN_GameBuilder:
                 ev = next(gen)
         except StopIteration:
             ev = {"type": "say", "who": None, "text": "Preview"}
-        img = render_state(state, ev, pathlib.Path(out_path))
+        try:
+            img = render_state(state, ev, pathlib.Path(out_path))
+        except Exception as e:
+            self.last_error = f"rendering failed: {e}"
+            return None
         return pathlib.Path(out_path)
 
     # ------------------------------------------------------------------
@@ -674,6 +704,68 @@ if HAS_BPY:
             self.report({"INFO"}, msg)
             return {"FINISHED"}
 
+    def _upbge_python_path():
+        """Path to the Python interpreter bundled with UPBGE/Blender, or None."""
+        import glob as _glob
+        if bpy is None:
+            return None
+        try:
+            base = pathlib.Path(bpy.app.binary_path).resolve().parent
+        except Exception:
+            return None
+        for rel in ("5.0", "4.5", "4.6", "python"):
+            for name in ("python3.11", "python3.10", "python3.9"):
+                c = base / rel / "python" / "bin" / name
+                if c.exists():
+                    return str(c)
+        for rel in ("5.0", "python"):
+            hits = sorted(_glob.glob(str(base / rel / "python" / "bin" / "python3*")))
+            if hits:
+                return hits[-1]
+        return None
+
+    class UPVN_OT_InstallPillow(bpy.types.Operator):
+        bl_idname = "upvn.install_pillow"
+        bl_label = "Install Pillow (Preview)"
+        bl_description = ("Install Pillow into UPBGE's bundled Python so 'Preview' can render "
+                          "PNG screenshots (Preview needs Pillow; the game itself does not)")
+
+        def execute(self, context):
+            py = _upbge_python_path()
+            if not py:
+                self.report({"ERROR"}, "Bundled Python of UPBGE not found next to " +
+                            str(getattr(bpy.app, "binary_path", "")))
+                return {"FINISHED"}
+            import subprocess
+            # Install into the site-packages of the RUNNING interpreter (already
+            # on sys.path), so the package becomes visible without a restart.
+            target = None
+            try:
+                import sysconfig
+                target = sysconfig.get_paths().get("purelib")
+            except Exception:
+                target = None
+            cmd = [py, "-m", "pip", "install", "pillow"]
+            if target:
+                cmd += ["--target", target]
+            try:
+                r = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+            except Exception as e:
+                self.report({"ERROR"}, f"pip failed: {e}")
+                return {"FINISHED"}
+            if r.returncode == 0:
+                # verify: does the RUNNING interpreter see it now?
+                if pil_live_available():
+                    self.report({"INFO"}, "Pillow installed and visible — Preview should work now.")
+                else:
+                    self.report({"WARNING"},
+                                "Pillow installed into the bundled Python, but this Blender "
+                                "session does not see it yet — restart Blender/UPBGE once, then Preview.")
+            else:
+                tail = (r.stderr or r.stdout or "").strip().splitlines()
+                self.report({"ERROR"}, "pip install failed: " + ("; ".join(tail[-3:]) if tail else "?"))
+            return {"FINISHED"}
+
     # properties
     class UPVN_SceneProps(bpy.types.PropertyGroup):
         project_path: bpy.props.StringProperty(name="Script Path", default="//game/script.rpy", subtype='FILE_PATH')
@@ -754,8 +846,8 @@ except Exception:
             d = parent
         return "//"
 
-    def _data_plane(name, size=10.0, color=(0.06, 0.06, 0.09, 1.0)):
-        """Plane mesh + material via data API (no bpy.ops)."""
+    def _data_plane(name, size=10.0, color=(0.06, 0.06, 0.09, 1.0), rot=None):
+        """Plane mesh + material via data API (no bpy.ops). Default rot = stand in XZ."""
         mesh = bpy.data.meshes.new(name + "_mesh")
         mesh.from_pydata([(-1, -1, 0), (1, -1, 0), (1, 1, 0), (-1, 1, 0)],
                          [], [(0, 1, 2, 3)])
@@ -771,10 +863,59 @@ except Exception:
             pass
         obj = bpy.data.objects.new(name, mesh)
         obj.scale = (size / 2, size / 2, 1)
+        if rot is None:
+            rot = (1.5707963267948966, 0.0, 0.0)
+        obj.rotation_euler = rot
         obj.data.materials.append(mat)
         return obj
 
-    def _data_camera(name, ortho=True, size=10.0, loc=(0, -10, 5), rot=(1.5708, 0, 0)):
+    def _rewrite_unlit(mat, color):
+        """Emission-only — VN planes must not pick up scene lights."""
+        mat.use_nodes = True
+        nt = mat.node_tree
+        try:
+            nt.nodes.clear()
+        except Exception:
+            pass
+        out = nt.nodes.new("ShaderNodeOutputMaterial")
+        em = nt.nodes.new("ShaderNodeEmission")
+        em.inputs["Color"].default_value = color
+        try:
+            em.inputs["Strength"].default_value = 1.0
+        except Exception:
+            pass
+        nt.links.new(em.outputs[0], out.inputs[0])
+        for attr, val in (("blend_method", "OPAQUE"), ("shadow_method", "NONE"),
+                          ("use_backface_culling", False)):
+            try:
+                setattr(mat, attr, val)
+            except Exception:
+                pass
+        return mat
+
+    def _data_text(name, body="", size=0.32, loc=(0, -0.55, -3.0), rot=None):
+        curve = bpy.data.curves.new(name + "_font", "FONT")
+        curve.body = body
+        curve.size = size
+        try:
+            curve.align_x = "LEFT"
+            curve.align_y = "TOP"
+        except Exception:
+            pass
+        obj = bpy.data.objects.new(name, curve)
+        obj.location = loc
+        obj.rotation_euler = rot if rot is not None else (1.5707963267948966, 0.0, 0.0)
+        return obj
+
+    def _static_ghost(obj):
+        try:
+            g = obj.game
+            g.physics_type = "STATIC"
+            g.use_ghost = True
+        except Exception:
+            pass
+
+    def _data_camera(name, ortho=True, size=10.0, loc=(0.0, -10.0, 0.0), rot=(1.5707963267948966, 0.0, 0.0)):
         cam_data = bpy.data.cameras.new(name)
         if ortho:
             cam_data.type = "ORTHO"
@@ -821,26 +962,67 @@ except Exception:
                 scene.collection.children.link(col)
             collections[name] = col
 
-        # remove previous controller object (idempotent re-run)
-        old = scene.objects.get("VNController")
-        if old is not None:
-            for c in list(old.game.controllers) if has_game else []:
-                old.game.controllers.remove(c)
-            for s in list(old.game.sensors) if has_game else []:
-                old.game.sensors.remove(s)
-            scene.collection.objects.unlink(old)
-            _b.data.objects.remove(old, do_unlink=True)
+        # camera — always re-apply the Front/ortho transform unless the user
+        # tagged the object upvn_camera_custom. Existing Camera_UI at the old
+        # (0,-10,5) pose looked at XY planes edge-on and was never bound.
+        try:
+            from engine.render.contract import (
+                CAMERA_UI, CAMERA_3D,
+                CAMERA_UI_LOCATION, CAMERA_UI_ROTATION, CAMERA_UI_ORTHO_SCALE,
+                CAMERA_3D_LOCATION, CAMERA_3D_ROTATION, PLANE_ROTATION,
+                DIALOGUE_LOCATION, DIALOGUE_SCALE, SPRITE_SCALE,
+            )
+        except Exception:
+            CAMERA_UI, CAMERA_3D = "Camera_UI", "Camera_3D"
+            CAMERA_UI_LOCATION = (0.0, -10.0, 0.0)
+            CAMERA_UI_ROTATION = (1.5707963267948966, 0.0, 0.0)
+            CAMERA_UI_ORTHO_SCALE = 10.0
+            CAMERA_3D_LOCATION = (0.0, -6.0, 2.5)
+            CAMERA_3D_ROTATION = (1.15, 0.0, 0.0)
+            PLANE_ROTATION = (1.5707963267948966, 0.0, 0.0)
+            DIALOGUE_LOCATION = (0.0, -0.4, -3.2)
+            DIALOGUE_SCALE = (4.0, 1.2, 1.0)
+            SPRITE_SCALE = (1.5, 2.4, 1.0)
 
-        # cameras (keep user cameras, add missing defaults)
-        cam_ui = scene.objects.get("Camera_UI")
+        cam_ui = scene.objects.get(CAMERA_UI)
         if cam_ui is None:
-            cam_ui = _data_camera("Camera_UI")
+            cam_ui = _data_camera(CAMERA_UI, ortho=True, size=CAMERA_UI_ORTHO_SCALE,
+                                  loc=CAMERA_UI_LOCATION, rot=CAMERA_UI_ROTATION)
             scene.collection.objects.link(cam_ui)
-        cam3d = scene.objects.get("Camera_3D")
+        elif not cam_ui.get("upvn_camera_custom"):
+            cam_ui.location = CAMERA_UI_LOCATION
+            cam_ui.rotation_euler = CAMERA_UI_ROTATION
+            try:
+                cam_ui.data.type = "ORTHO"
+                cam_ui.data.ortho_scale = CAMERA_UI_ORTHO_SCALE
+            except Exception:
+                pass
+        cam3d = scene.objects.get(CAMERA_3D)
         if cam3d is None:
-            cam3d = _data_camera("Camera_3D", ortho=False, loc=(0, -6, 2.5), rot=(1.15, 0, 0))
+            cam3d = _data_camera(CAMERA_3D, ortho=False,
+                                  loc=CAMERA_3D_LOCATION, rot=CAMERA_3D_ROTATION)
             scene.collection.objects.link(cam3d)
         scene.camera = cam_ui
+        # hide leftover factory cameras so P cannot pick the wrong one
+        for ob in list(scene.objects):
+            try:
+                if ob.type == "CAMERA" and ob.name not in (CAMERA_UI, CAMERA_3D):
+                    ob.hide_viewport = True
+                    ob.hide_render = True
+            except Exception:
+                pass
+        # 3D view → camera (so the editor matches what P will show)
+        try:
+            win = getattr(_b.context, "window", None)
+            screen = getattr(win, "screen", None) if win is not None else None
+            if screen is not None:
+                for area in screen.areas:
+                    if area.type == "VIEW_3D":
+                        space = area.spaces.active
+                        space.camera = cam_ui
+                        space.region_3d.view_perspective = "CAMERA"
+        except Exception:
+            pass
 
         # placeholder planes (only when missing — don't destroy user art)
         # names/materials follow engine/render/contract.py (single source)
@@ -853,24 +1035,21 @@ except Exception:
             SPRITE_MATERIAL, DIALOGUE_PLANE = "MASprite", "Dialogue_Box"
             SPRITE_POSITIONS = ("far_left", "left", "center", "right", "far_right")
             POSITIONS = {p: ({"far_left": -5.0, "left": -3.0, "center": 0.0,
-                              "right": 3.0, "far_right": 5.0}[p], 0, 1.2)
+                              "right": 3.0, "far_right": 5.0}[p], -0.15, 0.0)
                          for p in SPRITE_POSITIONS}
 
         def _ensure_material(_b, name, color):
             mat = _b.data.materials.get(name)
             if mat is None:
                 mat = _b.data.materials.new(name)
-                mat.use_nodes = True
-                try:
-                    pr = mat.node_tree.nodes.get("Principled BSDF")
-                    if pr:
-                        pr.inputs["Base Color"].default_value = color
-                except Exception:
-                    pass
+            _rewrite_unlit(mat, color)
             return mat
 
-        mat_bg = _ensure_material(_b, BG_MATERIAL, (0.06, 0.06, 0.09, 1.0))
-        mat_sprite = _ensure_material(_b, SPRITE_MATERIAL, (0.55, 0.5, 0.7, 1.0))
+        mat_bg = _ensure_material(_b, BG_MATERIAL, (0.12, 0.14, 0.22, 1.0))
+        mat_sprite = _ensure_material(_b, SPRITE_MATERIAL, (0.62, 0.78, 0.55, 1.0))
+        mat_ui = _ensure_material(_b, "MAUI", (0.05, 0.06, 0.14, 1.0))
+        mat_choice = _ensure_material(_b, "MAChoice", (0.12, 0.18, 0.32, 1.0))
+        mat_font = _ensure_material(_b, "MAFont", (0.92, 0.93, 1.0, 1.0))
 
         def _single_material(ob, mat):
             """Replace the plane's default material with the contract one so the
@@ -881,34 +1060,126 @@ except Exception:
                 pass
             ob.data.materials.append(mat)
 
+        def _apply_2d_layout(ob, loc, scale=None):
+            if ob.get("upvn_layout_custom"):
+                return
+            ob.location = loc
+            ob.rotation_euler = PLANE_ROTATION
+            if scale is not None:
+                ob.scale = scale
+
         bg = scene.objects.get(BG_PLANE)
         if bg is None:
-            bg = _data_plane(BG_PLANE, size=10.0)
+            bg = _data_plane(BG_PLANE, size=10.0, rot=PLANE_ROTATION)
             _single_material(bg, mat_bg)
             scene.collection.objects.link(bg)
             collections["VN_Backgrounds"].objects.link(bg)
+        _apply_2d_layout(bg, (0.0, 0.0, 0.0))
+        _single_material(bg, mat_bg)
         dlg = scene.objects.get(DIALOGUE_PLANE)
         if dlg is None:
-            dlg = _data_plane(DIALOGUE_PLANE, size=8.0, color=(0.05, 0.05, 0.12, 1.0))
-            dlg.scale = (8 / 2, 8 / 2 * 0.3, 1)
+            dlg = _data_plane(DIALOGUE_PLANE, size=8.0, color=(0.05, 0.05, 0.12, 1.0),
+                              rot=PLANE_ROTATION)
             scene.collection.objects.link(dlg)
             collections["VN_UI"].objects.link(dlg)
+        _apply_2d_layout(dlg, DIALOGUE_LOCATION, DIALOGUE_SCALE)
+        _single_material(dlg, mat_ui)
+        _static_ghost(bg)
+        _static_ghost(dlg)
+
+        try:
+            from engine.render.contract import (SPEAKER_TEXT, DIALOGUE_TEXT,
+                                                SPEAKER_LOCATION, DIALOGUE_TEXT_LOCATION,
+                                                CHOICE_COUNT, CHOICE_PREFIX)
+        except Exception:
+            SPEAKER_TEXT, DIALOGUE_TEXT = "Speaker_Text", "Dialogue_Text"
+            SPEAKER_LOCATION = (-3.6, -0.55, -2.55)
+            DIALOGUE_TEXT_LOCATION = (-3.6, -0.55, -3.15)
+            CHOICE_COUNT, CHOICE_PREFIX = 9, "choice_"
+
+        def _ensure_font(name, loc, size=0.32):
+            ob = scene.objects.get(name)
+            if ob is None:
+                ob = _data_text(name, body="", size=size, loc=loc, rot=PLANE_ROTATION)
+                scene.collection.objects.link(ob)
+                collections["VN_UI"].objects.link(ob)
+            if not ob.get("upvn_layout_custom"):
+                ob.location = loc
+                ob.rotation_euler = PLANE_ROTATION
+            try:
+                if not ob.data.materials:
+                    ob.data.materials.append(mat_font)
+            except Exception:
+                pass
+            _static_ghost(ob)
+            return ob
+
+        _ensure_font(SPEAKER_TEXT, SPEAKER_LOCATION, size=0.28)
+        _ensure_font(DIALOGUE_TEXT, DIALOGUE_TEXT_LOCATION, size=0.26)
+
+        for i in range(CHOICE_COUNT):
+            z = 2.4 - i * 0.7
+            loc = (0.0, -0.5, z)
+            cname = f"{CHOICE_PREFIX}{i}"
+            ch = scene.objects.get(cname)
+            if ch is None:
+                ch = _data_plane(cname, size=6.0, color=(0.12, 0.18, 0.32, 1.0),
+                                 rot=PLANE_ROTATION)
+                _single_material(ch, mat_choice)
+                scene.collection.objects.link(ch)
+                collections["VN_UI"].objects.link(ch)
+            _apply_2d_layout(ch, loc, (3.2, 0.28, 1.0))
+            _single_material(ch, mat_choice)
+            _static_ghost(ch)
+            tname = cname + "_text"
+            _ensure_font(tname, (loc[0] - 2.8, loc[1] - 0.05, loc[2] + 0.08), size=0.24)
+
+        for ob in list(scene.objects):
+            try:
+                if ob.type == "LIGHT":
+                    ob.hide_viewport = True
+                    ob.hide_render = True
+            except Exception:
+                pass
+        try:
+            world = scene.world
+            if world is not None and getattr(world, "use_nodes", False):
+                bg_n = world.node_tree.nodes.get("Background")
+                if bg_n:
+                    bg_n.inputs[0].default_value = (0.0, 0.0, 0.0, 1.0)
+                    bg_n.inputs[1].default_value = 0.0
+        except Exception:
+            pass
 
         # sprite planes per position (SpriteRenderer looks these up by name)
         for pos in SPRITE_POSITIONS:
             name = f"Sprite_{pos}"
-            if scene.objects.get(name) is not None:
-                continue
-            x, _, z = POSITIONS.get(pos, (0.0, 0, 1.2))
-            sp = _data_plane(name, size=2.2, color=(0.3, 0.28, 0.4, 1.0))
-            sp.location = (x, 0, z)
+            loc = POSITIONS.get(pos, (0.0, -0.15, 0.0))
+            sp = scene.objects.get(name)
+            if sp is None:
+                sp = _data_plane(name, size=4.0, color=(0.62, 0.78, 0.55, 1.0),
+                                 rot=PLANE_ROTATION)
+                _single_material(sp, mat_sprite)
+                scene.collection.objects.link(sp)
+                collections["VN_Characters"].objects.link(sp)
+            _apply_2d_layout(sp, loc, SPRITE_SCALE)
             _single_material(sp, mat_sprite)
-            scene.collection.objects.link(sp)
-            collections["VN_Characters"].objects.link(sp)
+            _static_ghost(sp)
+            try:
+                sp.hide_render = False
+            except Exception:
+                pass
 
-        # VNController empty
-        ctrl = _b.data.objects.new("VNController", None)
-        ctrl.empty_display_type = "CUBE"
+        # VNController empty — reuse the existing object when present (UPBGE's
+        # brick collections have no .remove(), so deleting/recreating the object
+        # is impossible without the logic UI operators; reuse keeps it simple and
+        # idempotent)
+        ctrl = scene.objects.get("VNController")
+        created = ctrl is None
+        if ctrl is None:
+            ctrl = _b.data.objects.new("VNController", None)
+            ctrl.empty_display_type = "CUBE"
+            scene.collection.objects.link(ctrl)
         ctrl["script_path"] = script_path
         # relative root to the folder that contains engine/ (launcher falls back
         # to the blend dir + parents when this is empty/stale)
@@ -918,15 +1189,13 @@ except Exception:
             blend_dir = None
         ctrl["upvn_root"] = _engine_root_relative(blend_dir)
 
-        scene.collection.objects.link(ctrl)
-
         # --- logic bricks (UPBGE only) ---
         # UPBGE 0.50 exposes brick editing through bpy.ops.logic.* (the same
         # operators UPBGE's own add-ons use) — the RNA collections themselves are
-        # read-only. bpy.ops.logic requires an interactive UI/GL context, so in
-        # --background mode we skip bricks and say so loudly (no silent half-wired
-        # scenes: the object + launcher text are still created, so the user can
-        # press "Setup Scene" once in the UPBGE UI to finish).
+        # read-only and lack .remove(). bpy.ops.logic requires an interactive
+        # UI/GL context, so in --background mode we skip adding bricks and say so
+        # loudly. Existing bricks are never touched: Setup Scene is idempotent and
+        # preserves a working wiring when the object already has it.
         ctrl["upvn_bricks"] = "no"
         if has_game and install_launcher:
             launcher = _b.data.texts.get("upvn_launcher")
@@ -934,16 +1203,38 @@ except Exception:
                 launcher = _b.data.texts.new("upvn_launcher")
             launcher.clear()
             launcher.write(_UPVN_LAUNCHER_TEXT)
-            brick_state = _add_logic_bricks(_b, ctrl, launcher, controller_module)
-            ctrl["upvn_bricks"] = brick_state
+            try:
+                sensor_names = {s.name for s in ctrl.game.sensors}
+                controller_names = {c.name for c in ctrl.game.controllers}
+            except Exception:
+                sensor_names, controller_names = set(), set()
+            need_sensor = "Always" not in sensor_names
+            need_controller = "UPVN_Main" not in controller_names
+            need_keys = "AllKeys" not in sensor_names
+            need_mouse = "Mouse" not in sensor_names
+            if not any((need_sensor, need_controller, need_keys, need_mouse)):
+                ctrl["upvn_bricks"] = "existing"
+            else:
+                brick_state = _add_logic_bricks(
+                    _b, ctrl, launcher, controller_module,
+                    need_sensor=need_sensor, need_controller=need_controller,
+                    need_keys=need_keys, need_mouse=need_mouse)
+                ctrl["upvn_bricks"] = brick_state
         return ctrl
 
 
-    def _add_logic_bricks(_b, obj, launcher_text, controller_module):
-        """Wire Always(pulse) -> Python(launcher text) on obj via bpy.ops.logic.*.
+    def _add_logic_bricks(_b, obj, launcher_text, controller_module,
+                          need_sensor=True, need_controller=True,
+                          need_keys=False, need_mouse=False):
+        """Wire Always(pulse)+AllKeys+Mouse -> Python(launcher) via bpy.ops.logic.*.
 
-        Returns 'yes' | 'skipped-background' | 'error: …'.
+        AllKeys is required in the embedded player (P): without it Blender eats
+        keystrokes while LMB still reaches bge.logic.mouse.
+
+        Returns 'yes' | 'skipped-background' | 'error: …' | 'already'.
         """
+        if not any((need_sensor, need_controller, need_keys, need_mouse)):
+            return "already"
         if getattr(_b.app, "background", True):
             return ("skipped-background: run 'Setup Scene' from the UPVN panel "
                     "inside the UPBGE UI (bpy.ops.logic needs an interactive context)")
@@ -952,19 +1243,50 @@ except Exception:
         except Exception:
             pass
         try:
-            _b.ops.logic.sensor_add(type="ALWAYS", object=obj.name, name="Always")
-            _b.ops.logic.controller_add(type="PYTHON", object=obj.name, name="UPVN_Main")
+            if need_sensor:
+                _b.ops.logic.sensor_add(type="ALWAYS", object=obj.name, name="Always")
+            if need_keys:
+                _b.ops.logic.sensor_add(type="KEYBOARD", object=obj.name, name="AllKeys")
+            if need_mouse:
+                _b.ops.logic.sensor_add(type="MOUSE", object=obj.name, name="Mouse")
+            if need_controller:
+                _b.ops.logic.controller_add(type="PYTHON", object=obj.name, name="UPVN_Main")
         except Exception as e:
             return f"error: {e}"
         try:
-            sen = obj.game.sensors[-1]
-            con = obj.game.controllers[-1]
+            sensors = {s.name: s for s in obj.game.sensors}
+            controllers = list(obj.game.controllers)
+            if not sensors or not controllers:
+                return "error: brick created but pair incomplete"
+            con = None
+            for c in controllers:
+                if c.name == "UPVN_Main":
+                    con = c
+                    break
+            if con is None:
+                con = controllers[-1]
+            always = sensors.get("Always") or list(sensors.values())[0]
             try:
-                sen.use_pulse_true_level = True
-                sen.frequency = 0
+                always.use_pulse_true_level = True
+                always.frequency = 0
             except Exception:
                 pass
-            if launcher_text is not None:
+            keys = sensors.get("AllKeys")
+            if keys is not None:
+                try:
+                    keys.use_all_keys = True
+                    keys.use_pulse_true_level = True
+                    keys.frequency = 0
+                except Exception:
+                    pass
+            mouse = sensors.get("Mouse")
+            if mouse is not None:
+                try:
+                    mouse.mouse_type = "LEFTCLICK"
+                    mouse.use_pulse_true_level = True
+                except Exception:
+                    pass
+            if need_controller and launcher_text is not None:
                 try:
                     con.text = launcher_text      # SCRIPT mode, Text datablock
                 except Exception:
@@ -973,10 +1295,18 @@ except Exception:
                         con.module = controller_module
                     except Exception:
                         pass
-            try:
-                con.link(sensor=sen)
-            except TypeError:
-                con.link(sensor=sen, actuator=None)
+            for sen in (always, keys, mouse):
+                if sen is None:
+                    continue
+                try:
+                    con.link(sensor=sen)
+                except TypeError:
+                    try:
+                        con.link(sensor=sen, actuator=None)
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
             return "yes"
         except Exception as e:
             return f"error: {e}"
@@ -1021,15 +1351,23 @@ except Exception:
                 return {"CANCELLED"}
             bricks = ctrl.get("upvn_bricks", "no")
             if bricks == "yes":
-                self.report({"INFO"}, "Scene wired: VNController + Always→Python launcher brick. Press P to play.")
+                self.report({"INFO"},
+                            "Scene wired: VNController + Always→Python launcher brick. Press P to play.")
+            elif bricks == "existing":
+                self.report({"INFO"},
+                            "Scene wiring already present and intact (nothing changed). "
+                            "script_path set — press P to play.")
             elif isinstance(bricks, str) and bricks.startswith("skipped"):
                 self.report({"WARNING"},
                             "Scene objects created, but logic bricks need the UPBGE UI: "
                             "run Setup Scene again from this panel (not --background).")
+            elif isinstance(bricks, str) and bricks.startswith("error"):
+                self.report({"ERROR"}, f"Brick wiring failed: {bricks}")
             else:
-                self.report({"WARNING"}, f"Brick wiring issue: {bricks} — see console.")
-                print("[UPVN] Setup Scene done, but bricks:", bricks)
-            print("[UPVN] Setup Scene done. script_path=", p.project_path)
+                self.report({"INFO"},
+                            "Scene objects refreshed. Press P to play (or run Setup Scene "
+                            "inside the UPBGE UI for the full brick wiring).")
+            print("[UPVN] Setup Scene done. script_path=", p.project_path, "| bricks:", bricks)
             return {"FINISHED"}
 
     class UPVN_OT_CheckWiring(bpy.types.Operator):
@@ -1245,11 +1583,15 @@ except Exception:
                 except Exception:
                     pass
             else:
+                reason = getattr(builder, "last_error", None)
                 ok, _info = ensure_engine()
                 if not ok:
                     self.report({'ERROR'}, "Engine not found — install the UPVN .zip release or set engine folder in add-on preferences.")
+                elif reason:
+                    self.report({'ERROR'}, "Preview failed: " + str(reason)[:250])
+                    print("[UPVN] preview error:", reason)
                 else:
-                    self.report({'ERROR'}, "Preview failed — see console (script may not parse / Pillow missing in this Blender python).")
+                    self.report({'ERROR'}, "Preview failed — see console.")
                     print("[UPVN] " + engine_diag_text())
             return {'FINISHED'}
 
@@ -1288,6 +1630,15 @@ except Exception:
             # generate a preview screenshot of save overlay pagination
             try:
                 from engine.render.headless_renderer import render_state
+            except ImportError as e:
+                self.report({'ERROR'}, f"headless renderer import failed: {e}")
+                return {'FINISHED'}
+            if not pil_live_available():
+                self.report({'ERROR'},
+                            "Pillow (PIL) is not visible to this Python — press 'Install Pillow' "
+                            "in the UPVN panel (restart Blender/UPBGE after installing).")
+                return {'FINISHED'}
+            try:
                 from engine.core.vn_state import VNState
                 from engine.save.save_manager import SaveManager
                 from engine.ui.screen_manager import ScreenManager
@@ -1412,6 +1763,8 @@ except Exception:
             row.operator("upvn.preview", icon='RENDER_RESULT')
             row.operator("upvn.check_wiring", icon='VIEWZOOM')
             layout.operator("upvn.save_demo", icon='FILE_TICK')
+            layout.operator("upvn.install_pillow", icon='CONSOLE',
+                            text="Install Pillow (for Preview)")
             layout.prop(props, "arbitrary_slot")
             layout.operator("upvn.preview_arbitrary", icon='IMAGE_REFERENCE')
             layout.label(text="Saves: arbitrary slots 1..∞ (←→ pagination)", icon='INFO')
@@ -1437,6 +1790,7 @@ except Exception:
             layout.operator("upvn.preview", icon='RENDER_RESULT')
 
     classes = (UPVN_SceneProps, UPVN_OT_LocateEngine, UPVN_OT_CheckEngine, UPVN_OT_BundleEngine,
+               UPVN_OT_InstallPillow,
                UPVN_OT_CreateProject, UPVN_OT_AddCharacter, UPVN_OT_AddScene,
                UPVN_OT_AddDialogue, UPVN_OT_AddShow, UPVN_OT_AddMenu, UPVN_OT_AddStage,
                UPVN_OT_SetupScene, UPVN_OT_CheckWiring, UPVN_OT_Validate,
@@ -1449,7 +1803,8 @@ except Exception:
                 bpy.utils.register_class(cls)
             bpy.types.Scene.upvn_props = bpy.props.PointerProperty(type=UPVN_SceneProps)
             ok, info = ensure_engine(retry=True)
-            print(f"[UPVN] Editor addon v0.6 registered — engine: {'OK via ' + str(info['source']) if ok else 'NOT FOUND (' + str(info['message'])[:120] + ')'}")
+            ver = ".".join(str(x) for x in bl_info.get("version", ()))
+            print(f"[UPVN] Editor addon v{ver} registered — engine: {'OK via ' + str(info['source']) if ok else 'NOT FOUND (' + str(info['message'])[:120] + ')'}")
             print("[UPVN] Panels: View3D > Sidebar > UPVN | Text Editor > Sidebar > UPVN")
         except Exception as exc:      # never let an add-on enable crash Blender startup
             print(f"[UPVN] register() error (add-on partially enabled): {exc}")
