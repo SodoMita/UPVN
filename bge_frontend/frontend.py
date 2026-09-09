@@ -253,12 +253,12 @@ def draw_overlay():
             # draw speaker
             blf.position(0, 50, 50, 0)
             blf.size(0, 18)
-            blf.color(0, 0.72, 0.76, 1)
+            blf.color(0, 0.72, 0.76, 1, 1.0)
             blf.draw(0, who)
             # draw dialogue
             blf.position(0, 50, 30, 0)
             blf.size(0, 20)
-            blf.color(0, 0.92, 0.93, 1)
+            blf.color(0, 0.92, 0.93, 1, 1.0)
             # wrap manually for blf (simple)
             blf.draw(0, text[:80])
         # menu: draw choices as blf clickable areas
@@ -267,12 +267,12 @@ def draw_overlay():
             for i, ch in enumerate(ev.get("choices", [])):
                 blf.position(0, width // 2 - 100, y - i * 40, 0)
                 blf.size(0, 20)
-                blf.color(0, 0.85, 0.95, 1)
+                blf.color(0, 0.85, 0.95, 1, 1.0)
                 blf.draw(0, f"{i + 1}. {ch['text']}")
             # footer hint (M18: number keys select)
             blf.position(0, width // 2 - 100, y - len(ev.get("choices", [])) * 40 - 30, 0)
             blf.size(0, 14)
-            blf.color(0, 0.6, 0.6, 0.6)
+            blf.color(0, 0.6, 0.6, 0.6, 1.0)
             blf.draw(0, "Press 1-9 to choose")
         # modal screens (save/load/history/quick menu): text fallback until the
         # 3D plane UI is wired — lets S/L/H/Q be usable without extra objects
@@ -283,13 +283,13 @@ def draw_overlay():
             y = height - 60
             blf.position(0, width // 2 - 150, y, 0)
             blf.size(0, 24)
-            blf.color(0, 0.95, 0.85, 0.4)
+            blf.color(0, 0.95, 0.85, 0.4, 1.0)
             blf.draw(0, title)
             page = getattr(scr, "page", None)
             if page is not None:
                 blf.position(0, width // 2 - 150, y - 30, 0)
                 blf.size(0, 16)
-                blf.color(0, 0.8, 0.8, 0.8)
+                blf.color(0, 0.8, 0.8, 0.8, 1.0)
                 blf.draw(0, f"page {int(page) + 1} — ←/→ to page, ESC to close")
     except Exception as e:
         # blf errors are non-fatal

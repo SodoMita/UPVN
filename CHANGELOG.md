@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.6.5 — 2026-09-08 Runtime fixes from the field (UPBGE console reports)
+- **`blf.color()` signature fixed.** UPBGE 0.50 requires
+  `blf.color(fontid, r, g, b, a)`; the overlay passed four values under the old
+  convention, so every dialogue/menu frame printed
+  `blf.color() takes exactly 5 arguments (4 given)` and the on-screen text
+  never got its color set. All calls in `bge_frontend/frontend.py::draw_overlay`
+  now pass font id + RGBA.
+- **Preview no longer leaks a `ModuleNotFoundError: PIL` traceback.** UPBGE runs
+  its own bundled Python (`<upbge>/5.0/python/bin/python3.11`), where Pillow may
+  be absent even if the system Python has it. `engine/render/headless_renderer.py`
+  now imports without Pillow (font constants degrade to `None`) and `render_state`
+  raises one clear RuntimeError with the exact install command; the add-on's
+  preview paths catch it, store the reason in `UPVN_GameBuilder.last_error`, and
+  report it in the panel instead of a raw traceback.
+- **New operator "Install Pillow"** in the UPVN panel: locates UPBGE's bundled
+  Python next to `bpy.app.binary_path` and runs
+  `python3.11 -m pip install pillow`, reporting the result directly.
+- Tests: `tests/test_m20_upbge_runtime.py` (5 tests: blf.color 5-arg static
+  checks, import-without-Pillow + instructive RuntimeError, real-Pillow render
+  sanity, add-on error-field behavior) → **131 passed, 2 skipped**.
+- Add-on version 0.6.5; dist rebuilt.
+
 ## 0.6.4 — 2026-09-08 Explicit scene↔code contract (M19)
 - **New `engine/render/contract.py`** — single source of truth for the naming
   convention between interface code and scene objects: every object, material,

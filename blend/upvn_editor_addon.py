@@ -1,6 +1,6 @@
 """
 UPVN Blender Editor Tools — create visual novel inside Blender with minimal coding
-v0.6.4 (2026-09-08): self-contained engine discovery — no more "Engine not available"
+v0.6.5 (2026-09-08): self-contained engine discovery — no more "Engine not available"
 
 Why v0.6 exists
     Installing the old add-on copied this single .py into Blender's add-ons folder,
@@ -21,7 +21,7 @@ Why v0.6 exists
 
 Install (two supported ways)
   A. Dist zip (recommended):
-        dist/upvn_editor_addon_v0.6.4.zip  → Edit → Preferences → Add-ons →
+        dist/upvn_editor_addon_v0.6.5.zip  → Edit → Preferences → Add-ons →
            Install from Disk… (or Install…) → select the .zip → enable "UPVN".
      Engine, frontend and template travel inside the zip; nothing else needed.
   B. Repo checkout:
@@ -45,7 +45,7 @@ Headless fallback: when bpy unavailable (CI), the module still imports and expos
 bl_info = {
     "name": "UPVN — Visual Novel Editor",
     "author": "UPVN",
-    "version": (0, 6, 4),
+    "version": (0, 6, 5),
     "blender": (4, 2, 0),
     "location": "View3D > Sidebar > UPVN, Text Editor > Sidebar > UPVN",
     "description": "Create Ren'Py-like visual novel inside UPBGE with minimal coding — self-contained engine, one-click scene setup, characters, scenes, dialogue, menus, arbitrary saves, preview",
@@ -325,6 +325,7 @@ class UPVN_GameBuilder:
 
     def __init__(self, script_path: str = "game/script.rpy"):
         self.script_path = pathlib.Path(script_path)
+        self.last_error: str | None = None
         self.characters = {}  # id -> {name, color}
         self.labels = {"start": []}  # label -> list of lines
         self.current_label = "start"
@@ -549,10 +550,22 @@ class UPVN_GameBuilder:
             return False, str(e)
 
     def preview_screenshot(self, out_path: str = "screenshots/upvn_preview.png"):
-        """Headless screenshot via headless_renderer. Returns Path or None."""
+        """Headless screenshot via headless_renderer. Returns Path or None;
+        on failure the reason is stored in self.last_error."""
+        self.last_error = None
         if not ENGINE_AVAILABLE or _engine_api is None:
+            self.last_error = "engine not found"
             return None
-        from engine.render.headless_renderer import render_state
+        try:
+            from engine.render.headless_renderer import render_state, HAS_PIL
+        except ImportError as e:
+            self.last_error = f"headless renderer import failed: {e}"
+            return None
+        if not HAS_PIL:
+            self.last_error = ("Pillow (PIL) is not installed in this Python "
+                               "interpreter — use 'Install Pillow' in the UPVN panel "
+                               "or run: <upbge>/5.0/python/bin/python3.11 -m pip install pillow")
+            return None
         from engine.core.vn_state import VNState
         from engine.core.vn_interpreter import VNInterpreter
         _p, _vc, _sm = _engine_api
@@ -568,6 +581,7 @@ class UPVN_GameBuilder:
             try:
                 script = _p.parse_string(rpy)
             except Exception as e:
+                self.last_error = f"script parse failed: {e}"
                 return None
         state = VNState()
         interp = VNInterpreter(script, state)
@@ -578,7 +592,11 @@ class UPVN_GameBuilder:
                 ev = next(gen)
         except StopIteration:
             ev = {"type": "say", "who": None, "text": "Preview"}
-        img = render_state(state, ev, pathlib.Path(out_path))
+        try:
+            img = render_state(state, ev, pathlib.Path(out_path))
+        except Exception as e:
+            self.last_error = f"rendering failed: {e}"
+            return None
         return pathlib.Path(out_path)
 
     # ------------------------------------------------------------------
@@ -672,6 +690,52 @@ if HAS_BPY:
                 return {"FINISHED"}
             ensure_engine(retry=True)
             self.report({"INFO"}, msg)
+            return {"FINISHED"}
+
+    def _upbge_python_path():
+        """Path to the Python interpreter bundled with UPBGE/Blender, or None."""
+        import glob as _glob
+        if bpy is None:
+            return None
+        try:
+            base = pathlib.Path(bpy.app.binary_path).resolve().parent
+        except Exception:
+            return None
+        for rel in ("5.0", "4.5", "4.6", "python"):
+            for name in ("python3.11", "python3.10", "python3.9"):
+                c = base / rel / "python" / "bin" / name
+                if c.exists():
+                    return str(c)
+        for rel in ("5.0", "python"):
+            hits = sorted(_glob.glob(str(base / rel / "python" / "bin" / "python3*")))
+            if hits:
+                return hits[-1]
+        return None
+
+    class UPVN_OT_InstallPillow(bpy.types.Operator):
+        bl_idname = "upvn.install_pillow"
+        bl_label = "Install Pillow (Preview)"
+        bl_description = ("Install Pillow into UPBGE's bundled Python so 'Preview' can render "
+                          "PNG screenshots (Preview needs Pillow; the game itself does not)")
+
+        def execute(self, context):
+            py = _upbge_python_path()
+            if not py:
+                self.report({"ERROR"}, "Bundled Python of UPBGE not found next to " +
+                            str(getattr(bpy.app, "binary_path", "")))
+                return {"FINISHED"}
+            import subprocess
+            try:
+                r = subprocess.run([py, "-m", "pip", "install", "pillow"],
+                                   capture_output=True, text=True, timeout=600)
+            except Exception as e:
+                self.report({"ERROR"}, f"pip failed: {e}")
+                return {"FINISHED"}
+            if r.returncode == 0:
+                self.report({"INFO"}, f"Pillow installed into {py}")
+            else:
+                tail = (r.stderr or r.stdout or "").strip().splitlines()
+                self.report({"ERROR"}, "pip install failed: " + ("; ".join(tail[-3:]) if tail else "?"))
             return {"FINISHED"}
 
     # properties
@@ -1245,11 +1309,15 @@ except Exception:
                 except Exception:
                     pass
             else:
+                reason = getattr(builder, "last_error", None)
                 ok, _info = ensure_engine()
                 if not ok:
                     self.report({'ERROR'}, "Engine not found — install the UPVN .zip release or set engine folder in add-on preferences.")
+                elif reason:
+                    self.report({'ERROR'}, "Preview failed: " + str(reason)[:250])
+                    print("[UPVN] preview error:", reason)
                 else:
-                    self.report({'ERROR'}, "Preview failed — see console (script may not parse / Pillow missing in this Blender python).")
+                    self.report({'ERROR'}, "Preview failed — see console.")
                     print("[UPVN] " + engine_diag_text())
             return {'FINISHED'}
 
@@ -1287,7 +1355,15 @@ except Exception:
             p = context.scene.upvn_props
             # generate a preview screenshot of save overlay pagination
             try:
-                from engine.render.headless_renderer import render_state
+                from engine.render.headless_renderer import render_state, HAS_PIL
+                if not HAS_PIL:
+                    self.report({'ERROR'},
+                                "Pillow (PIL) is not installed in this Python — press 'Install Pillow' in the UPVN panel.")
+                    return {'FINISHED'}
+            except ImportError as e:
+                self.report({'ERROR'}, f"headless renderer import failed: {e}")
+                return {'FINISHED'}
+            try:
                 from engine.core.vn_state import VNState
                 from engine.save.save_manager import SaveManager
                 from engine.ui.screen_manager import ScreenManager
@@ -1412,6 +1488,8 @@ except Exception:
             row.operator("upvn.preview", icon='RENDER_RESULT')
             row.operator("upvn.check_wiring", icon='VIEWZOOM')
             layout.operator("upvn.save_demo", icon='FILE_TICK')
+            layout.operator("upvn.install_pillow", icon='CONSOLE',
+                            text="Install Pillow (for Preview)")
             layout.prop(props, "arbitrary_slot")
             layout.operator("upvn.preview_arbitrary", icon='IMAGE_REFERENCE')
             layout.label(text="Saves: arbitrary slots 1..∞ (←→ pagination)", icon='INFO')
@@ -1437,6 +1515,7 @@ except Exception:
             layout.operator("upvn.preview", icon='RENDER_RESULT')
 
     classes = (UPVN_SceneProps, UPVN_OT_LocateEngine, UPVN_OT_CheckEngine, UPVN_OT_BundleEngine,
+               UPVN_OT_InstallPillow,
                UPVN_OT_CreateProject, UPVN_OT_AddCharacter, UPVN_OT_AddScene,
                UPVN_OT_AddDialogue, UPVN_OT_AddShow, UPVN_OT_AddMenu, UPVN_OT_AddStage,
                UPVN_OT_SetupScene, UPVN_OT_CheckWiring, UPVN_OT_Validate,
