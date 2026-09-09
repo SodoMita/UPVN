@@ -20,6 +20,8 @@ def test_contract_core_identifiers():
     assert contract.SPRITE_MATERIAL == "MASprite"
     assert contract.SPRITE_POSITIONS == ("far_left", "left", "center", "right", "far_right")
     assert contract.CONTROLLER == "VNController"
+    assert contract.CAMERA_UI == "Camera_UI"
+    assert contract.CAMERA_3D == "Camera_3D"
     assert contract.LAUNCHER_TEXT == "upvn_launcher"
     assert set(contract.POSITIONS) == set(contract.SPRITE_POSITIONS)
 
@@ -46,7 +48,8 @@ def test_contract_required_objects_complete():
 
 
 def test_contract_check_full_scene_ok():
-    obj_names = {contract.BG_PLANE, contract.DIALOGUE_PLANE, contract.CONTROLLER}
+    obj_names = {contract.BG_PLANE, contract.DIALOGUE_PLANE, contract.CONTROLLER,
+                 contract.CAMERA_UI, contract.CAMERA_3D}
     obj_names |= {f"Sprite_{p}" for p in contract.SPRITE_POSITIONS}
     mats = {contract.BG_MATERIAL, contract.SPRITE_MATERIAL}
     res = contract.check_contract(obj_names, mats, set(contract.COLLECTIONS),

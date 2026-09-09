@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.6.8 — 2026-09-09 Camera bind + keyboard capture (field: LMB works, keys don't)
+
+- **Camera is now a Front ortho that the game actually uses.** `Camera_UI` was
+  created at `(0,-10,5)` looking +Y at **XY** planes (edge-on) and never assigned
+  to `scene.active_camera`, so P showed the leftover editor camera. Contract now
+  owns the pose: planes stand in XZ (`PLANE_ROTATION` X=90°), `Camera_UI` at
+  `(0,-10,0)` rot X=90° ortho 10; `Setup Scene` **resets** that transform every
+  time (unless `upvn_camera_custom`); leftover factory cameras are hidden;
+  viewport switches to CAMERA; `frontend._bind_camera()` sets
+  `scene.active_camera = Camera_UI` once at play start.
+- **Keys work in the embedded player.** LMB reached `bge.logic.mouse` without a
+  sensor; keystrokes were eaten by Blender because no Keyboard brick existed.
+  `Setup Scene` now adds `AllKeys` (`use_all_keys`, True pulse) + `Mouse`
+  LEFTCLICK, both linked to `UPVN_Main`. Idempotent: added only when missing.
+- **No more `keyboard.events`.** UPBGE 0.50 deprecates it and the conversion is
+  lossy. Polling uses `device.inputs[key]` only: `JUST_ACTIVATED in entry.queue`
+  / `.activated` / `ACTIVE in entry.status`. Pure `_classify_input_entry`.
+  Frontend F1/F12 goes through `_bge_just`. `_device_states` removed.
+- Add-on v0.6.8; tests `tests/test_m22_upbge_play.py`.
+
 ## 0.6.7 — 2026-09-09 Script discovery across directories + on-screen diagnostics
 - **The game now finds its script.rpy on its own.** The packaged game layout is
   `<package>/blend/UPVN_Template.blend` + `<package>/game/script.rpy`, but the
