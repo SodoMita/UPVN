@@ -538,7 +538,12 @@ class ScreenLang:
         return _resolve(expr, self.evaluator or self._missing)
 
     def _eval_in(self, env: Dict[str, Any]) -> Callable[[str], Any]:
-        """Evaluator that sees the screen's local scope as well as the store."""
+        """Evaluator that sees the screen's local scope as well as the store.
+
+        A bare name resolves straight from the local scope; a compound
+        expression (``score > 5``) is handed to the evaluator with the scope as
+        an overlay, so screen parameters are visible inside it too.
+        """
         outer = self.evaluator
 
         def _local(expr: str) -> Any:
@@ -546,7 +551,11 @@ class ScreenLang:
                 return env[expr]
             if outer is None:
                 raise KeyError(expr)
-            return outer(expr)
+            try:
+                return outer(expr, env)
+            except TypeError:
+                # a plain single-argument evaluator (tests) still works
+                return outer(expr)
         return _local
 
     def _eval_nodes(self, nodes: List[WidgetNode], env: Dict[str, Any],

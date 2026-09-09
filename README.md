@@ -255,8 +255,17 @@ never stops the story** — an undefined screen or an unresolvable condition
 yields an empty tree plus a diagnostic instead of raising.
 
 Across both corpora: **99/99** and **23/23** screens render (716 and 346
-widgets). Nothing draws them yet — the widget list is the contract a frontend
-consumes.
+widgets).
+
+### The golden trace paints the screens (M23)
+
+`render_state` now walks `VNState.active_screens` (sorted by `zorder`) and
+draws each tree into the frame, so a `show screen` is visible in the screenshots
+the CI gate diffs, not only correct in JSON. `vbox`/`hbox` flow, `frame`/`window`
+plates, `textbutton` boxes (bright edge when there is an action), `add`/
+`imagebutton` labelled plates, `bar`/`vbar`, and a full-frame dim for `modal`
+screens. A widget that cannot be laid out degrades to nothing rather than
+dropping the frame.
 
 ```bash
 python -m tools.run_headless examples/14_renpy_dropin --mode full --choices 0

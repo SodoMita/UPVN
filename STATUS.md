@@ -1,4 +1,4 @@
-# Current Status — 2026-09-09 (M22 screens actually render)
+# Current Status — 2026-09-09 (M23 screens draw in the golden trace)
 
 ## Last completed
 - **M22 Screen-language interpreter DONE (2026-09-09, branch `feat/renpy-corpus-compat`)**: the drop-in tier *parsed* `screen:` blocks and then discarded them — the body was captured as stripped text, so `show screen` / `call screen` emitted an event with a name and nothing to draw. The SDK tutorial has **99** screens and LearnToCodeRPG **23**; all were inert.
@@ -62,7 +62,7 @@
 - Next up (not blockers): make `UPVN_GameBuilder` emit declarative forms (`character`/`state`/`set`/`choice`) instead of legacy `define`/`$`; wire `VNState.resolve_asset` into renderers so scene/show/play_music actually resolve manifest paths; wire `engine/ui/pointer.py` into `bge_frontend/frontend.py` (raycast object under cursor → `PointerTracker.update` → `controller.choose(i)`); publish GitHub release with dist zips
 
 ## Recommended next task
-- **Draw the rendered widget trees.** M22 produces the widget list; nothing in `bge_frontend/` consumes it yet. Walking `event["widgets"]` into blf + planes (text → blf, frame/vbox/hbox → quads using the `props` positions) is what makes `call screen` visible in-game rather than merely correct in a trace.
+- **Draw the widget trees in the UPBGE frontend too.** M23 proves the headless renderer can paint them; the 3D frontend still ignores `active_screens`. Walking the same widget list into blf + planes (text → blf, frame/vbox/hbox → quads from the `props` positions) makes `call screen` visible in-game, closing the loop the headless side now demonstrates.
 - A third corpus for regression breadth (a GPL Ren'Py game, e.g. an Everlasting Summer port) — the checker is corpus-agnostic, so this is config, not code
 - Publish a GitHub release with the `dist/` zips
 - Human-in-the-loop acceptance (user): open blend/UPVN_Template.blend in UPBGE → UPVN tab shows ✓ Engine → Create Project → P → click/Space to advance; report console output if anything looks off

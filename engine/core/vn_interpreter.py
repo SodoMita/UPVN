@@ -333,14 +333,18 @@ class VNInterpreter:
             if k in before or _is_state_value(v):
                 self.state.variables[k] = v
 
-    def _eval_screen_expr(self, expr: str):
+    def _eval_screen_expr(self, expr: str, scope: Optional[Dict[str, Any]] = None):
         """Evaluate one screen-language expression (full tier is permissive).
 
-        Screen bodies see the store, the screen's own parameters (injected by
-        the caller's scope) and the renpy compat namespace — the same surface
-        a `python:` block gets.
+        Screen bodies see the store, the screen's own parameters (the overlay
+        ``scope``) and the renpy compat namespace — the same surface a
+        `python:` block gets. ``scope`` carries screen-local names (parameters,
+        `default`s) so compound conditions like ``score > 5`` resolve.
         """
-        return self._eval_expr(expr)
+        if not scope:
+            return self._eval_expr(expr)
+        return safe_eval(expr, {**self.state.variables, **scope},
+                         self._expr_extra if self.full else None, loose=self.full)
 
     def _render_screen(self, name: str, args: List[str]) -> dict:
         """Evaluate a `screen:` body into a widget tree.
