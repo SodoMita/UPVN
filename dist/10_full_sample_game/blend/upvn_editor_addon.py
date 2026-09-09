@@ -1,6 +1,6 @@
 """
 UPVN Blender Editor Tools — create visual novel inside Blender with minimal coding
-v0.6.8 (2026-09-09): Camera_UI Front+bind, AllKeys sensor, inputs.queue (no keyboard.events)
+v0.6.9 (2026-09-09): 3D UI only (no blf overlay), unlit sprites/BG, clickable choice_* planes
 
 Why v0.6 exists
     Installing the old add-on copied this single .py into Blender's add-ons folder,
@@ -21,7 +21,7 @@ Why v0.6 exists
 
 Install (two supported ways)
   A. Dist zip (recommended):
-        dist/upvn_editor_addon_v0.6.8.zip  → Edit → Preferences → Add-ons →
+        dist/upvn_editor_addon_v0.6.9.zip  → Edit → Preferences → Add-ons →
            Install from Disk… (or Install…) → select the .zip → enable "UPVN".
      Engine, frontend and template travel inside the zip; nothing else needed.
   B. Repo checkout:
@@ -45,7 +45,7 @@ Headless fallback: when bpy unavailable (CI), the module still imports and expos
 bl_info = {
     "name": "UPVN — Visual Novel Editor",
     "author": "UPVN",
-    "version": (0, 6, 8),
+    "version": (0, 6, 9),
     "blender": (4, 2, 0),
     "location": "View3D > Sidebar > UPVN, Text Editor > Sidebar > UPVN",
     "description": "Create Ren'Py-like visual novel inside UPBGE with minimal coding — self-contained engine, one-click scene setup, characters, scenes, dialogue, menus, arbitrary saves, preview",
@@ -869,6 +869,52 @@ except Exception:
         obj.data.materials.append(mat)
         return obj
 
+    def _rewrite_unlit(mat, color):
+        """Emission-only — VN planes must not pick up scene lights."""
+        mat.use_nodes = True
+        nt = mat.node_tree
+        try:
+            nt.nodes.clear()
+        except Exception:
+            pass
+        out = nt.nodes.new("ShaderNodeOutputMaterial")
+        em = nt.nodes.new("ShaderNodeEmission")
+        em.inputs["Color"].default_value = color
+        try:
+            em.inputs["Strength"].default_value = 1.0
+        except Exception:
+            pass
+        nt.links.new(em.outputs[0], out.inputs[0])
+        for attr, val in (("blend_method", "OPAQUE"), ("shadow_method", "NONE"),
+                          ("use_backface_culling", False)):
+            try:
+                setattr(mat, attr, val)
+            except Exception:
+                pass
+        return mat
+
+    def _data_text(name, body="", size=0.32, loc=(0, -0.55, -3.0), rot=None):
+        curve = bpy.data.curves.new(name + "_font", "FONT")
+        curve.body = body
+        curve.size = size
+        try:
+            curve.align_x = "LEFT"
+            curve.align_y = "TOP"
+        except Exception:
+            pass
+        obj = bpy.data.objects.new(name, curve)
+        obj.location = loc
+        obj.rotation_euler = rot if rot is not None else (1.5707963267948966, 0.0, 0.0)
+        return obj
+
+    def _static_ghost(obj):
+        try:
+            g = obj.game
+            g.physics_type = "STATIC"
+            g.use_ghost = True
+        except Exception:
+            pass
+
     def _data_camera(name, ortho=True, size=10.0, loc=(0.0, -10.0, 0.0), rot=(1.5707963267948966, 0.0, 0.0)):
         cam_data = bpy.data.cameras.new(name)
         if ortho:
@@ -924,7 +970,7 @@ except Exception:
                 CAMERA_UI, CAMERA_3D,
                 CAMERA_UI_LOCATION, CAMERA_UI_ROTATION, CAMERA_UI_ORTHO_SCALE,
                 CAMERA_3D_LOCATION, CAMERA_3D_ROTATION, PLANE_ROTATION,
-                DIALOGUE_LOCATION, DIALOGUE_SCALE,
+                DIALOGUE_LOCATION, DIALOGUE_SCALE, SPRITE_SCALE,
             )
         except Exception:
             CAMERA_UI, CAMERA_3D = "Camera_UI", "Camera_3D"
@@ -936,6 +982,7 @@ except Exception:
             PLANE_ROTATION = (1.5707963267948966, 0.0, 0.0)
             DIALOGUE_LOCATION = (0.0, -0.4, -3.2)
             DIALOGUE_SCALE = (4.0, 1.2, 1.0)
+            SPRITE_SCALE = (1.5, 2.4, 1.0)
 
         cam_ui = scene.objects.get(CAMERA_UI)
         if cam_ui is None:
@@ -995,17 +1042,14 @@ except Exception:
             mat = _b.data.materials.get(name)
             if mat is None:
                 mat = _b.data.materials.new(name)
-                mat.use_nodes = True
-                try:
-                    pr = mat.node_tree.nodes.get("Principled BSDF")
-                    if pr:
-                        pr.inputs["Base Color"].default_value = color
-                except Exception:
-                    pass
+            _rewrite_unlit(mat, color)
             return mat
 
-        mat_bg = _ensure_material(_b, BG_MATERIAL, (0.06, 0.06, 0.09, 1.0))
-        mat_sprite = _ensure_material(_b, SPRITE_MATERIAL, (0.55, 0.5, 0.7, 1.0))
+        mat_bg = _ensure_material(_b, BG_MATERIAL, (0.12, 0.14, 0.22, 1.0))
+        mat_sprite = _ensure_material(_b, SPRITE_MATERIAL, (0.62, 0.78, 0.55, 1.0))
+        mat_ui = _ensure_material(_b, "MAUI", (0.05, 0.06, 0.14, 1.0))
+        mat_choice = _ensure_material(_b, "MAChoice", (0.12, 0.18, 0.32, 1.0))
+        mat_font = _ensure_material(_b, "MAFont", (0.92, 0.93, 1.0, 1.0))
 
         def _single_material(ob, mat):
             """Replace the plane's default material with the contract one so the
@@ -1031,6 +1075,7 @@ except Exception:
             scene.collection.objects.link(bg)
             collections["VN_Backgrounds"].objects.link(bg)
         _apply_2d_layout(bg, (0.0, 0.0, 0.0))
+        _single_material(bg, mat_bg)
         dlg = scene.objects.get(DIALOGUE_PLANE)
         if dlg is None:
             dlg = _data_plane(DIALOGUE_PLANE, size=8.0, color=(0.05, 0.05, 0.12, 1.0),
@@ -1038,6 +1083,73 @@ except Exception:
             scene.collection.objects.link(dlg)
             collections["VN_UI"].objects.link(dlg)
         _apply_2d_layout(dlg, DIALOGUE_LOCATION, DIALOGUE_SCALE)
+        _single_material(dlg, mat_ui)
+        _static_ghost(bg)
+        _static_ghost(dlg)
+
+        try:
+            from engine.render.contract import (SPEAKER_TEXT, DIALOGUE_TEXT,
+                                                SPEAKER_LOCATION, DIALOGUE_TEXT_LOCATION,
+                                                CHOICE_COUNT, CHOICE_PREFIX)
+        except Exception:
+            SPEAKER_TEXT, DIALOGUE_TEXT = "Speaker_Text", "Dialogue_Text"
+            SPEAKER_LOCATION = (-3.6, -0.55, -2.55)
+            DIALOGUE_TEXT_LOCATION = (-3.6, -0.55, -3.15)
+            CHOICE_COUNT, CHOICE_PREFIX = 9, "choice_"
+
+        def _ensure_font(name, loc, size=0.32):
+            ob = scene.objects.get(name)
+            if ob is None:
+                ob = _data_text(name, body="", size=size, loc=loc, rot=PLANE_ROTATION)
+                scene.collection.objects.link(ob)
+                collections["VN_UI"].objects.link(ob)
+            if not ob.get("upvn_layout_custom"):
+                ob.location = loc
+                ob.rotation_euler = PLANE_ROTATION
+            try:
+                if not ob.data.materials:
+                    ob.data.materials.append(mat_font)
+            except Exception:
+                pass
+            _static_ghost(ob)
+            return ob
+
+        _ensure_font(SPEAKER_TEXT, SPEAKER_LOCATION, size=0.28)
+        _ensure_font(DIALOGUE_TEXT, DIALOGUE_TEXT_LOCATION, size=0.26)
+
+        for i in range(CHOICE_COUNT):
+            z = 2.4 - i * 0.7
+            loc = (0.0, -0.5, z)
+            cname = f"{CHOICE_PREFIX}{i}"
+            ch = scene.objects.get(cname)
+            if ch is None:
+                ch = _data_plane(cname, size=6.0, color=(0.12, 0.18, 0.32, 1.0),
+                                 rot=PLANE_ROTATION)
+                _single_material(ch, mat_choice)
+                scene.collection.objects.link(ch)
+                collections["VN_UI"].objects.link(ch)
+            _apply_2d_layout(ch, loc, (3.2, 0.28, 1.0))
+            _single_material(ch, mat_choice)
+            _static_ghost(ch)
+            tname = cname + "_text"
+            _ensure_font(tname, (loc[0] - 2.8, loc[1] - 0.05, loc[2] + 0.08), size=0.24)
+
+        for ob in list(scene.objects):
+            try:
+                if ob.type == "LIGHT":
+                    ob.hide_viewport = True
+                    ob.hide_render = True
+            except Exception:
+                pass
+        try:
+            world = scene.world
+            if world is not None and getattr(world, "use_nodes", False):
+                bg_n = world.node_tree.nodes.get("Background")
+                if bg_n:
+                    bg_n.inputs[0].default_value = (0.0, 0.0, 0.0, 1.0)
+                    bg_n.inputs[1].default_value = 0.0
+        except Exception:
+            pass
 
         # sprite planes per position (SpriteRenderer looks these up by name)
         for pos in SPRITE_POSITIONS:
@@ -1045,12 +1157,18 @@ except Exception:
             loc = POSITIONS.get(pos, (0.0, -0.15, 0.0))
             sp = scene.objects.get(name)
             if sp is None:
-                sp = _data_plane(name, size=2.2, color=(0.3, 0.28, 0.4, 1.0),
+                sp = _data_plane(name, size=4.0, color=(0.62, 0.78, 0.55, 1.0),
                                  rot=PLANE_ROTATION)
                 _single_material(sp, mat_sprite)
                 scene.collection.objects.link(sp)
                 collections["VN_Characters"].objects.link(sp)
-            _apply_2d_layout(sp, loc)
+            _apply_2d_layout(sp, loc, SPRITE_SCALE)
+            _single_material(sp, mat_sprite)
+            _static_ghost(sp)
+            try:
+                sp.hide_render = False
+            except Exception:
+                pass
 
         # VNController empty — reuse the existing object when present (UPBGE's
         # brick collections have no .remove(), so deleting/recreating the object

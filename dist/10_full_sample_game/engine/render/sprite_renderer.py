@@ -29,6 +29,14 @@ class SpriteRenderer:
         self.state = state
         # tag -> {"obj": bge object, "tex": Texture, "t0": start time, "transition": name}
         self.planes: dict[str, dict] = {}
+        if HAS_BGE:
+            try:
+                sc = bge.logic.getCurrentScene()  # type: ignore
+                for ob in sc.objects:
+                    if str(ob.name).startswith(SPRITE_TAG_PREFIX):
+                        ob.visible = False
+            except Exception:
+                pass
 
     def apply_event(self, event: dict):
         t = event.get("type")
@@ -81,13 +89,20 @@ class SpriteRenderer:
             # texture swap
             import bge.texture as vt
             import os
-            # asset like "eileen happy" -> file assets/sprites/eileen/happy.png or eileen_happy.png
-            # search order
+            stem = asset.replace(" ", "_")
+            slash = asset.replace(" ", "/")
+            last = asset.split()[-1] if " " in asset else "neutral"
             candidates = [
-                bge.logic.expandPath(f"//{ASSET_SPRITES}/{asset.replace(' ', '/')}.png"),
-                bge.logic.expandPath(f"//{ASSET_SPRITES}/{asset.replace(' ', '_')}.png"),
-                bge.logic.expandPath(f"//assets/characters/{tag}/{asset.split()[-1] if ' ' in asset else 'neutral'}.png"),
+                bge.logic.expandPath(f"//{ASSET_SPRITES}/{slash}.png"),
+                bge.logic.expandPath(f"//{ASSET_SPRITES}/{stem}.png"),
+                bge.logic.expandPath(f"//{ASSET_SPRITES}/{tag}.png"),
+                bge.logic.expandPath(f"//game/{ASSET_SPRITES}/{slash}.png"),
+                bge.logic.expandPath(f"//game/{ASSET_SPRITES}/{stem}.png"),
+                bge.logic.expandPath(f"//assets/characters/{tag}/{last}.png"),
+                bge.logic.expandPath(f"//assets/sprites/{tag}.png"),
             ]
+            for ext in (".png", ".jpg", ".webp"):
+                candidates.append(bge.logic.expandPath(f"//{ASSET_SPRITES}/{stem}{ext}"))
             tex_path = None
             for p in candidates:
                 if os.path.exists(p):
@@ -110,8 +125,13 @@ class SpriteRenderer:
                 else:
                     plane.color = (1,1,1,1.0)
             else:
-                # no file — keep plane visible with asset name as debug (LLM can generate textures)
+                # no PNG — still show the plane (unlit silhouette). Overlay is gone,
+                # so a missing texture must not equal "no sprite".
                 plane["upvn_asset"] = asset
+                try:
+                    plane.color = (0.75, 0.7, 0.9, 1.0)
+                except Exception:
+                    pass
                 self.planes[tag] = {"obj": plane, "asset": asset, "position": position}
         except Exception as e:
             print(f"[SpriteRenderer] show {tag} {asset} failed: {e}")

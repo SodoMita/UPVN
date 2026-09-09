@@ -1,6 +1,6 @@
 """
 M20 — UPBGE runtime fixes found in the field:
-  * blf.color() five-argument signature (font id + RGBA) in the overlay code
+  * UI is 3D scene objects (no blf overlay)
   * Pillow absence in UPBGE's bundled Python yields a clear message (not a
     raw ModuleNotFoundError traceback), and preview paths degrade gracefully
 """
@@ -23,25 +23,15 @@ def _read(path) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def test_blf_color_calls_have_five_arguments():
-    """UPBGE 0.50 requires blf.color(fontid, r, g, b, a). Field error:
-    'blf.color() takes exactly 5 arguments (4 given)'."""
+def test_frontend_has_no_blf_overlay():
+    """Field: overlay was the only visible dialogue and choice clicks missed
+    3D planes. UI is world objects only."""
     src = _read(FRONTEND_SRC)
-    calls = re.findall(r"blf\.color\(([^)]*)\)", src)
-    assert calls, "no blf.color calls found"
-    for call in calls:
-        args = [a.strip() for a in call.split(",")]
-        assert len(args) == 5, f"blf.color needs 5 args, got {len(args)}: blf.color({call})"
-        # font id must be first
-        assert args[0] == "0"
-
-
-def test_blf_calls_use_font_id_pattern():
-    """position/size/draw also take the font id as the first argument."""
-    src = _read(FRONTEND_SRC)
-    for m in re.finditer(r"blf\.(position|size|draw)\(0,", src):
-        pass  # pattern match is the assertion itself
-    assert len(re.findall(r"blf\.(position|size|draw)\(0,", src)) >= 6
+    assert "import blf" not in src
+    assert "def draw_overlay" not in src
+    assert "sc.post_draw.append" not in src
+    assert "build_world_ui" in src
+    assert "_tick_pointer" in src
 
 
 def test_headless_renderer_importable_without_pil(monkeypatch):
