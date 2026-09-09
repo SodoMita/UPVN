@@ -54,7 +54,7 @@ and suitable for interpreter + golden-trace tests.
 from __future__ import annotations
 import ast
 import re
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional, Tuple, Iterable
 from .lexer import group_logical_lines, LogicalLine, extract_quoted
 from .ast_nodes import ASTNode, SourceLocation
 from ..core.vn_errors import ParseError
@@ -115,8 +115,9 @@ _re_while = re.compile(r"^while\s+(.+)\s*:\s*$")
 _re_break = re.compile(r"^break\s*$")
 _re_continue = re.compile(r"^continue\s*$")
 _re_pass = re.compile(r"^pass\s*$")
-_re_window = re.compile(r"^window\s+(show|hide|auto)\s*$")
-_re_nvl = re.compile(r"^nvl\s+(clear|show|hide)\s*$")
+# both take an optional trailing transition: `window hide None`, `nvl show dissolve`
+_re_window = re.compile(r"^window\s+(show|hide|auto)\s*(.*)$", re.S)
+_re_nvl = re.compile(r"^nvl\s+(clear|show|hide)\s*(.*)$", re.S)
 _re_nvl_mode = re.compile(r"^nvl\s+mode\s+(nvl|adv)\s*$")
 _re_voice = re.compile(r'^voice\s+(?:"([^"]+)"|\'([^\']+)\'|(\S+))\s*$')
 _re_queue_music = re.compile(r'^queue\s+music\s+(?:"([^"]+)"|\'([^\']+)\'|(\S+))(?:\s+fadein\s+([\d.]+))?\s*$')
@@ -125,10 +126,21 @@ _re_jump_expr = re.compile(r"^jump\s+expression\s+(.+)\s*$")
 _re_call_expr = re.compile(r"^call\s+expression\s+(.+)\s*$")
 _re_call_args = re.compile(r"^call\s+(\w+)\s*\(([^)]*)\)\s*$")
 _re_define_generic = re.compile(r"^define\s+([\w.]+)\s*=\s*(.+)\s*$", re.S)
+# `define config.x += [ … ]` — Ren'Py accepts the augmented forms too
+_re_define_aug = re.compile(r"^define\s+([\w.]+)\s*(\+|\||-|\*|/)?=\s*(.+)\s*$", re.S)
 _re_transform = re.compile(r"^transform\s+(\w+)\s*:\s*$")
 _re_screen = re.compile(r"^screen\s+(\w+)\s*(?:\(([^)]*)\))?\s*:\s*$")
 _re_style_block = re.compile(r"^style\s+(\w+)\s*(?:is\s+(\w+))?\s*:\s*$")
 _re_translate = re.compile(r"^translate\s+([\w.]+)\s+(.+?)\s*:\s*$")
+
+# M21: Ren'Py lets a project register its own statement keywords
+# (`renpy.register_statement("example", parse=…, execute=…)` — the official SDK
+# tutorial does exactly that). `testcase`/`testsuite` are Ren'Py's built-in test
+# statements (renpy/parser.py:1230/1239). Both are captured, never executed.
+_re_register_statement = re.compile(r"""register_statement\(\s*["\']([^"\']+)["\']""")
+_re_test_statement = re.compile(r"^(testsuite|testcase)\s+([\w.]+)\s*:\s*$")
+# always-available custom statement keywords in the drop-in tier
+_BUILTIN_CUSTOM_STATEMENTS = frozenset({"testsuite", "testcase"})
 _re_show_screen = re.compile(r"^show\s+screen\s+(\w+)\s*$")
 _re_hide_screen = re.compile(r"^hide\s+screen\s+(\w+)\s*$")
 _re_call_screen = re.compile(r"^call\s+screen\s+(\w+)\s*$")
@@ -330,11 +342,31 @@ def _split_say(text: str):
 
     nointeract = False
     inline: Dict[str, str] = {}
+    say_id: Optional[str] = None
+
+    # `"Lucy" "text"` — the who is an expression, and a bare string literal is a
+    # dynamic character name (renpy/parser.py: say_statement parses the who as
+    # an expression, so quotes are legal there). Check before the suffix loop:
+    # a leading quote is otherwise read as unrecognised trailing junk.
+    if not prefix and suffix[:1] in ('"', "'"):
+        q2 = extract_quoted(suffix)
+        if q2 is not None and not suffix[q2[2]:].strip():
+            return {"who": dialogue, "text": q2[0], "expression": None,
+                    "voice_attr": None, "nointeract": False,
+                    "kwargs": None, "inline": None, "id": None}
+
     if suffix:
         toks = suffix.split()
-        for tok in toks:
+        i = 0
+        while i < len(toks):
+            tok = toks[i]
             if tok == "nointeract":
                 nointeract = True
+            elif tok == "id" and i + 1 < len(toks):
+                # Ren'Py's automatic dialogue IDs (`… "text" id a1b2c3d4`),
+                # inserted by the translation tooling into every shipped game
+                say_id = toks[i + 1]
+                i += 1
             elif tok.startswith("(") and tok.endswith(")"):
                 for kv in _split_args(tok[1:-1]):
                     if "=" in kv:
@@ -342,6 +374,7 @@ def _split_say(text: str):
                         inline[k.strip()] = v.strip()
             else:
                 return None   # trailing junk we do not understand → not a say
+            i += 1
 
     who: Optional[str] = None
     voice_attr: Optional[str] = None
@@ -372,6 +405,7 @@ def _split_say(text: str):
         "nointeract": nointeract,
         "kwargs": kwargs or None,
         "inline": inline or None,
+        "id": say_id,
     }
 
 
@@ -412,7 +446,7 @@ def _split_args(raw: str) -> List[str]:
 
 class Parser:
     def __init__(self, source: str, filename: str = "<string>", full: bool = False,
-                 require_start: bool = True):
+                 require_start: bool = True, custom_statements: Iterable[str] = ()):
         self.filename = filename
         self.full = full  # full = drop-in Ren'Py tier (python blocks, init, while, screens…)
         # multi-file games: only one file holds `label start:`, so per-file
@@ -436,6 +470,22 @@ class Parser:
         self.translations: Dict[str, dict] = {}         # translate lang label -> raw lines
         self.image_blocks: Dict[str, dict] = {}         # (layered)image name -> raw lines
         self.from_clauses: List[dict] = []              # `call/jump … from <id>` (compat)
+        self.custom_statements: Dict[str, List[dict]] = {}   # project-registered keywords
+        self.custom_statement_errors: List[dict] = []        # parse errors inside their bodies
+        # Statements a project may use because it registers them itself. Ren'Py
+        # collects registrations at init time; we collect them statically, both
+        # from this file and from whatever the caller discovered project-wide.
+        self._registered_statements: set = set(_BUILTIN_CUSTOM_STATEMENTS)
+        # name -> block type ("script" = body is parsed as script, None = opaque)
+        self._registered_blocks: Dict[str, Optional[str]] = scan_register_statements(source)
+        if isinstance(custom_statements, dict):
+            self._registered_blocks.update(custom_statements)
+            self._registered_statements.update(custom_statements.keys())
+        else:
+            self._registered_statements.update(custom_statements)
+        self._registered_statements.update(self._registered_blocks.keys())
+        self._registered_names: List[str] = sorted(
+            (n for n in self._registered_statements if n), key=len, reverse=True)
         self._loop_id = 0
         self._loop_stack: List[int] = []                # enclosing while-loop ids (for break/continue)
         # current label being filled
@@ -446,8 +496,9 @@ class Parser:
 
     # ---------------------------- public
     def parse(self) -> dict:
-        if not self.lines:
-            raise ParseError("empty script", self.filename, 1)
+        if not self.lines and self.require_start:
+            raise ParseError("empty script", self.filename, 1,
+                             hint="this file holds no statements (comments only?)")
 
         # Pre-scan must have at least one label
         # We'll parse top-level sequentially
@@ -481,6 +532,8 @@ class Parser:
             "translations": self.translations,
             "image_blocks": self.image_blocks,
             "from_clauses": self.from_clauses,
+            "custom_statements": self.custom_statements,
+            "custom_statement_errors": self.custom_statement_errors,
             "full": self.full,
         }
 
@@ -639,8 +692,12 @@ class Parser:
             if _re_init.match(t):
                 self._parse_init_block(ll)
                 return
-            if _re_define_generic.match(t) and not re.match(r"^define\s+[\w.]+\s*=\s*Character\s*\(", t):
-                name, expr = _re_define_generic.match(t).group(1), _re_define_generic.match(t).group(2).strip()
+            m_def = (_re_define_generic.match(t)
+                     if not t.split("=")[0].rstrip().endswith(("+", "|", "-", "*", "/"))
+                     else None) or _re_define_aug.match(t)
+            if m_def and not re.match(r"^define\s+[\w.]+\s*[+|\-*/]?=\s*Character\s*\(", t):
+                name = m_def.group(1)
+                expr = (m_def.group(3) if m_def.lastindex == 3 else m_def.group(2)).strip()
                 try:
                     val = self._eval_literal(expr, ll)
                 except ParseError:
@@ -719,6 +776,12 @@ class Parser:
             if t.startswith("define ") and "Character" not in t:
                 raise ParseError("only Character defines are allowed in the safe subset", ll.filename, ll.lineno, 1, ll.raw,
                                  hint="parse with mode='full' for arbitrary define (config, images, …)")
+        # a statement the project registered itself (renpy.register_statement)
+        if self.full:
+            name = self._match_custom(t)
+            if name is not None:
+                self._parse_custom_statement(ll, name)
+                return
         raise ParseError(
             f'expected "label", "define", "default", "state", "character", "image", "audio" or "stage" at top level, got: {t!r}',
             ll.filename, ll.lineno, 1, ll.raw,
@@ -897,20 +960,7 @@ class Parser:
         self._consume_end(ll.indent, "init")
         if not block:
             return
-        base = block[0].indent
-        dedented = [LogicalLine(text=ln.text, indent=max(0, ln.indent - base), raw=ln.raw,
-                                lineno=ln.lineno, filename=ln.filename) for ln in block]
-        saved_lines, saved_pos = self.lines, self.pos
-        self.lines = dedented
-        self.pos = 0
-        try:
-            while self.pos < len(self.lines):
-                ln = self.lines[self.pos]
-                if ln.indent != 0:
-                    raise ParseError("unexpected indent inside init block", ln.filename, ln.lineno, ln.indent + 1, ln.raw)
-                self._parse_top_level(ln)
-        finally:
-            self.lines, self.pos = saved_lines, saved_pos
+        self._parse_script_block(block, "init")
 
     def _parse_transform_block(self, ll: LogicalLine, name: str):
         """`transform name:` block — capture ATL lines + simple scalar properties."""
@@ -926,6 +976,95 @@ class Parser:
             self.pos += 1
         self._consume_end(ll.indent, "transform")
         self.transforms[name] = {"props": props, "lines": raw_lines}
+
+    def _collect_atl_block(self, ll: LogicalLine, what: str) -> List[str]:
+        """Consume the ATL block that follows a `show …:` / `scene …:` header."""
+        self.pos += 1
+        lines: List[str] = []
+        while self.pos < len(self.lines) and self.lines[self.pos].indent > ll.indent:
+            lines.append(self.lines[self.pos].text)
+            self.pos += 1
+        self._consume_end(ll.indent, what)
+        return lines
+
+    # ---------------- project-registered statements (M21)
+    def _match_custom(self, t: str, multi_only: bool = False) -> Optional[str]:
+        """Longest registered custom-statement keyword opening this line.
+
+        ``multi_only`` is used on the early (pre-dispatch) path so that a
+        registered two-word statement like `show example` wins over the generic
+        `show` handler, while single-word keywords stay a fallback — a built-in
+        statement always beats a same-named registration.
+        """
+        for name in self._registered_names:
+            if multi_only and " " not in name:
+                continue
+            if t == name or t.startswith(name + " ") or t.startswith(name + ":"):
+                return name
+        return None
+
+    def _parse_custom_statement(self, ll: LogicalLine, name: str,
+                                out: Optional[List[dict]] = None):
+        """Handle a statement the project registered with renpy.register_statement.
+
+        Ren'Py runs a python callback for these, which we never execute. What we
+        do honour is the ``block=`` argument: ``block="script"`` tells Ren'Py to
+        parse the body as script, so labels and jumps declared inside are real
+        (the SDK tutorial declares ``label play_pong:`` inside an ``example``
+        block exactly that way). Any other body stays opaque.
+        """
+        t = ll.text
+        rest = t[len(name):].strip()
+        args = rest.rstrip(":").strip()
+        has_block = rest.endswith(":")
+        self.pos += 1
+        block: List[LogicalLine] = []
+        if has_block:
+            while self.pos < len(self.lines) and self.lines[self.pos].indent > ll.indent:
+                block.append(self.lines[self.pos])
+                self.pos += 1
+            self._consume_end(ll.indent, name)
+        lines = [ln.text for ln in block]
+        self.custom_statements.setdefault(name, []).append(
+            {"args": args, "lines": lines,
+             "filename": ll.filename, "lineno": ll.lineno})
+        if block and self._registered_blocks.get(name) == "script":
+            self._parse_script_block(block, name, tolerant=True)
+        if out is not None:
+            out.append(self._mk("custom_statement",
+                                {"name": name, "args": args, "lines": lines}, ll))
+
+    def _parse_script_block(self, block: List[LogicalLine], what: str,
+                            tolerant: bool = False):
+        """Parse a dedented run of lines as top-level statements.
+
+        Used by `init:` and by custom statements registered with
+        ``block="script"``. ``tolerant`` is for the latter: that body belongs to
+        a statement whose semantics we do not implement, so a construct we
+        cannot read must not abort the whole file — it is recorded in
+        ``custom_statement_errors`` instead. `init:` is our own syntax, so its
+        errors stay hard.
+        """
+        base = block[0].indent
+        dedented = [LogicalLine(text=ln.text, indent=max(0, ln.indent - base), raw=ln.raw,
+                                lineno=ln.lineno, filename=ln.filename) for ln in block]
+        saved_lines, saved_pos = self.lines, self.pos
+        self.lines = dedented
+        self.pos = 0
+        try:
+            while self.pos < len(self.lines):
+                ln = self.lines[self.pos]
+                if ln.indent != 0:
+                    raise ParseError(f"unexpected indent inside {what} block",
+                                     ln.filename, ln.lineno, ln.indent + 1, ln.raw)
+                self._parse_top_level(ln)
+        except ParseError as e:
+            if not tolerant:
+                raise
+            self.custom_statement_errors.append(
+                {"statement": what, "file": e.filename, "line": e.lineno, "error": str(e)})
+        finally:
+            self.lines, self.pos = saved_lines, saved_pos
 
     def _parse_capture_block(self, ll: LogicalLine, target: dict, kind: str, kind_id: str):
         """Capture a screen/style/translate block as raw lines (parse-level, full tier)."""
@@ -1045,6 +1184,12 @@ class Parser:
 
         # ---- full-tier statements (drop-in Ren'Py)
         if self.full:
+            # registered multi-word statements ("show example") must be checked
+            # before the generic show/hide handler
+            name = self._match_custom(t, multi_only=True)
+            if name is not None:
+                self._parse_custom_statement(ll, name, out)
+                return
             # `default` is collected wherever Ren'Py finds it (even inside a
             # label) and only applied when a new game starts
             m = _re_default.match(t)
@@ -1172,12 +1317,16 @@ class Parser:
                 self.pos += 1
                 return
             if _re_window.match(t):
-                out.append(ASTNode("window", {"value": _re_window.match(t).group(1)},
+                mw = _re_window.match(t)
+                out.append(ASTNode("window", {"value": mw.group(1),
+                                              "transition": (mw.group(2).strip() or None)},
                                    SourceLocation(ll.filename, ll.lineno, ll.indent + 1)).to_dict())
                 self.pos += 1
                 return
             if _re_nvl.match(t):
-                out.append(ASTNode("nvl", {"action": _re_nvl.match(t).group(1)},
+                mn = _re_nvl.match(t)
+                out.append(ASTNode("nvl", {"action": mn.group(1),
+                                           "transition": (mn.group(2).strip() or None)},
                                    SourceLocation(ll.filename, ll.lineno, ll.indent + 1)).to_dict())
                 self.pos += 1
                 return
@@ -1278,7 +1427,13 @@ class Parser:
             if not m:
                 continue
             body = m.group(1).strip()
-            if not body:
+            # `show x at pos:` / `scene bg:` may carry an ATL block (renpy/parser.py
+            # show_statement: `if l.match(":"): stmt.atl = parse_atl(…)`), and a
+            # bare `scene` clears the layer (`ast.Scene(loc, None, layer)`).
+            atl_block = self.full and body.endswith(":")
+            if atl_block:
+                body = body[:-1].strip()
+            if not body and not (self.full and kind == "scene"):
                 raise ParseError(f"{kw} needs a target", ll.filename, ll.lineno, 1, ll.raw,
                                  hint=f"example: {kw} bg classroom with dissolve")
             cl = _split_display_clauses(body)
@@ -1292,8 +1447,11 @@ class Parser:
                 for key in ("as_tag", "behind", "layer", "zorder"):
                     if cl.get(key) is not None:
                         data[key] = cl[key]
+            if atl_block:
+                data["atl"] = self._collect_atl_block(ll, kw)
             out.append(self._mk(kind, data, ll))
-            self.pos += 1
+            if not atl_block:
+                self.pos += 1
             return
 
         # ---- with (standalone): `with fade` / `with Dissolve(0.5)` / `with None`
@@ -1512,8 +1670,22 @@ class Parser:
                 data["kwargs"] = say["kwargs"]
             if say["inline"]:
                 data["inline"] = say["inline"]
+            if say.get("id"):
+                data["id"] = say["id"]
             out.append(self._mk("say", data, ll))
             self.pos += 1
+            return
+
+        # ---- style block used as a statement inside a label (full tier)
+        if self.full and _re_style_block.match(t):
+            name = _re_style_block.match(t).group(1)
+            self.pos += 1
+            lines: List[str] = []
+            while self.pos < len(self.lines) and self.lines[self.pos].indent > ll.indent:
+                lines.append(self.lines[self.pos].text)
+                self.pos += 1
+            self._consume_end(ll.indent, "style")
+            self.styles[name] = {"lines": lines}
             return
 
         # ---- fallback
@@ -1521,6 +1693,11 @@ class Parser:
             raise ParseError(f"unexpected 'end' — no open block to close at this indentation",
                              ll.filename, ll.lineno, 1, ll.raw,
                              hint="'end' must be dedented to the same level as the block it closes (label/menu/if/state/character/choice)")
+        if self.full:
+            name = self._match_custom(t)
+            if name is not None:
+                self._parse_custom_statement(ll, name, out)
+                return
         raise ParseError(f"unknown statement: {t!r}", ll.filename, ll.lineno, 1, ll.raw,
                          hint=self._hint_for_unknown(t))
 
@@ -1777,22 +1954,67 @@ class Parser:
 
 
 def parse_string(source: str, filename: str = "<string>", mode: str = "safe",
-                 require_start: bool = True) -> dict:
+                 require_start: bool = True, custom_statements=()) -> dict:
     """Parse a `.rpy` script. mode='safe' (default) or 'full' (drop-in Ren'Py).
 
     ``require_start=False`` is for one file of a multi-file game — the entry
     label may live in another file (checked on the merged script).
+    ``custom_statements`` are keywords the project registers itself; see
+    :func:`discover_custom_statements`.
     """
     return Parser(source, filename, full=(mode == "full"),
-                  require_start=require_start).parse()
+                  require_start=require_start,
+                  custom_statements=custom_statements).parse()
 
 
 def parse_string_full(source: str, filename: str = "<string>",
-                      require_start: bool = True) -> dict:
-    return parse_string(source, filename, mode="full", require_start=require_start)
+                      require_start: bool = True, custom_statements=()) -> dict:
+    return parse_string(source, filename, mode="full", require_start=require_start,
+                        custom_statements=custom_statements)
 
 
-def parse_file(path: str, mode: str = "safe", require_start: bool = True) -> dict:
+def scan_register_statements(source: str) -> Dict[str, Optional[str]]:
+    """Map each ``renpy.register_statement`` name to its ``block=`` type.
+
+    ``block="script"`` means Ren'Py parses the statement's body as script, so
+    labels declared inside it are real labels (the SDK tutorial puts
+    ``label play_pong:`` inside an ``example`` block this way). Anything else —
+    or no ``block=`` at all — means the body is opaque to us.
+    """
+    out: Dict[str, Optional[str]] = {}
+    for m in re.finditer(r"register_statement\s*\(", source):
+        open_at = m.end() - 1
+        # _matching_close_paren indexes into the slice we hand it, so the
+        # offset has to be added back before it can index `source`
+        rel = _matching_close_paren(source[open_at:])
+        if rel is None:
+            continue
+        body = source[open_at + 1 : open_at + rel]
+        nm = re.match(r"""\s*["']([^"']+)["']""", body)
+        if not nm:
+            continue
+        blk = re.search(r"""block\s*=\s*["'](\w+)["']""", body)
+        out[nm.group(1)] = blk.group(1) if blk else None
+    return out
+
+
+def discover_custom_statements(sources) -> Dict[str, Optional[str]]:
+    """Statement keywords a project registers for itself -> their block type.
+
+    Ren'Py collects `renpy.register_statement("NAME", parse=…, execute=…)` at
+    init time, and a registration in one file makes `NAME` usable everywhere in
+    the project — so discovery has to be project-wide, not per file. Pass the
+    result to every :class:`Parser` of that project.
+    """
+    found: Dict[str, Optional[str]] = {n: None for n in _BUILTIN_CUSTOM_STATEMENTS}
+    for src in sources:
+        if src:
+            found.update(scan_register_statements(src))
+    return {n: b for n, b in found.items() if n.strip()}
+
+
+def parse_file(path: str, mode: str = "safe", require_start: bool = True,
+               custom_statements=()) -> dict:
     """Parse a script file. `.urpy` → declarative parser; else `.rpy` parser.
 
     ``require_start`` (default True) demands a ``start`` label in the file;
@@ -1805,4 +2027,5 @@ def parse_file(path: str, mode: str = "safe", require_start: bool = True) -> dic
         from .urpy_parser import parse_urpy_file
         return parse_urpy_file(str(p), require_start=require_start)
     with open(str(p), "r", encoding="utf-8") as f:
-        return parse_string(f.read(), filename=str(p), mode=mode, require_start=require_start)
+        return parse_string(f.read(), filename=str(p), mode=mode, require_start=require_start,
+                            custom_statements=custom_statements)

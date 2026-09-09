@@ -1,5 +1,53 @@
 # Changelog
 
+## 0.6.6 — 2026-09-09 Second corpus: the Ren'Py SDK's own games (M21)
+
+M20 proved the drop-in tier on **one** shipped game. That is not the same as
+proving it on Ren'Py, so this milestone validates against a second, unrelated
+FOSS codebase — the games that ship inside the SDK itself
+([`renpy/renpy`](https://github.com/renpy/renpy), MIT): `tutorial/` (23 scripts,
+screen/style/ATL heavy, and it **registers its own statement keywords**) and
+`the_question/`. Before: **7/23** tutorial files parsed. After: **23/23**,
+75 labels, 1672 statements, every `jump`/`call`/`call screen` resolves.
+
+- **Project-registered statements** (`renpy.register_statement`): a keyword a
+  project registers in one file is legal in every other file, so discovery is
+  project-wide (`discover_custom_statements`) and runs *before* parsing in the
+  checker, `tools/validate.py` and `VNController`. Unknown bodies are captured,
+  never executed. `testcase`/`testsuite` (Ren'Py's own test DSL,
+  `renpy/parser.py:1230/1239`) are recognised out of the box.
+- **`block="script"` is honoured**: that argument tells Ren'Py to parse the
+  statement's body as script, so labels declared inside are real jump targets —
+  the tutorial hides `label play_pong:` inside an `example` block, and it now
+  resolves. A body we cannot read is recorded in `custom_statement_errors`
+  instead of aborting the file; our own `init:` errors stay hard.
+- **Lexer**: a plain `"…"` string may run over several lines — Ren'Py lexes
+  strings with `re.DOTALL` (`renpy/lexer.py`), so `e "one\n   two."` written on
+  two lines is one string. An unterminated one now gets a friendly error naming
+  the delimiter instead of silently eating the rest of the file.
+- **Say statements**: Ren'Py's automatic dialogue IDs (`e "…" id a1b2c3d4`,
+  inserted by the translation tooling into every shipped game) and a quoted who
+  (`"Lucy" "Better watch out."` — the who is an expression).
+- **Display**: `show`/`scene` may carry an ATL block (`show pos:` + indented
+  ATL), and a bare `scene` clears the layer (`ast.Scene(loc, None, layer)`).
+- **Other**: `define x += [ … ]` (augmented form), `style NAME:` as a statement
+  inside a label, `window show|hide|auto [transition]` and
+  `nvl show|hide|clear [transition]`, comment-only files no longer error in a
+  multi-file project.
+- **Runtime**: `custom_statement` nodes pass through the interpreter as no-op
+  events rather than tripping `unknown command`.
+- **CI** (`.github/workflows/ci.yml`, new): `tests`, `examples` (every example
+  validated in its own tier + played headless, the syntax gallery must fail),
+  `renpy-corpus` (LearnToCodeRPG, blob-filtered sparse checkout ~3 MB) and
+  `renpy-sdk` (this corpus). Reports upload as artifacts.
+- **Docs**: README gained a "Drop-in Ren'Py compatibility" section with the
+  corpus commands; `tools/` and `examples/` listings refreshed; 20 regexes and a
+  helper left dead by the M20 rewrite were removed (97 → 77 regexes, none
+  unused).
+- **Tests**: 224 passed, 0 skipped — `tests/test_renpy_compat.py` grew 15 tests
+  pinning every construct above, plus `tests/test_renpy_sdk_corpus.py` (9, skips
+  without `UPVN_RENPY_SDK`).
+
 ## 0.6.5 — 2026-09-09 Drop-in Ren'Py compatibility, verified on a real game (M20)
 
 The full `.rpy` tier went from "demo subset" to **a real Ren'Py project parses and

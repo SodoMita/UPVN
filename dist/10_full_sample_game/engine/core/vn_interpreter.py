@@ -861,6 +861,13 @@ class VNInterpreter:
             self.state.camera["_zoom_t0"] = _t.time()
             return {"type": "camera_zoom", "zoom": zoom, "duration": dur, "easing": ease, "wait": False, "_loc": loc}
 
+        elif cmd == "custom_statement":
+            # A statement the project registered with renpy.register_statement.
+            # Ren'Py runs its python callback; we recorded the block instead,
+            # so the honest runtime behaviour is to pass straight through.
+            return {"type": "custom_statement", "name": node.get("name"),
+                    "args": node.get("args"), "wait": False, "_loc": loc}
+
         else:
             raise ScriptRuntimeError(f"unknown command {cmd!r}", self.state.current_label, self.state.instruction_index)
 

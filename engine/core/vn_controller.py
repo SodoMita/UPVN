@@ -66,6 +66,7 @@ def _merge_scripts(a: dict | None, b: dict | None) -> dict:
         "label_params": {}, "defines": {}, "init_python": [],
         "transforms": {}, "screens": {}, "styles": {}, "translations": {},
         "image_blocks": {}, "from_clauses": [],
+        "custom_statements": {}, "custom_statement_errors": [],
     }
     for d in (a, b):
         if not d:
@@ -85,6 +86,9 @@ def _merge_scripts(a: dict | None, b: dict | None) -> dict:
         out["translations"].update(d.get("translations", {}))
         out["image_blocks"].update(d.get("image_blocks", {}))
         out["from_clauses"].extend(d.get("from_clauses", []))
+        for name, blocks in d.get("custom_statements", {}).items():
+            out["custom_statements"].setdefault(name, []).extend(blocks)
+        out["custom_statement_errors"].extend(d.get("custom_statement_errors", []))
         if d.get("full"):
             out["full"] = True
         if d.get("language") == "urpy":

@@ -166,11 +166,10 @@ See `tools/run_headless.py` for replay.
 
 ---
 
-## Drop-in Ren'Py compatibility (Tier 3, M20)
+## Drop-in Ren'Py compatibility (Tier 3, M20–M21)
 
-The full tier is verified against a **real shipped Ren'Py game**, not just hand-written
-snippets. Reference corpus: [`freeCodeCamp/LearnToCodeRPG`](https://github.com/freeCodeCamp/LearnToCodeRPG)
-(BSD-3-Clause, 61 `.rpy`/`.rpym` files, ~2 MB of script):
+The full tier is verified against **two real Ren'Py codebases**, not just
+hand-written snippets.
 
 ```bash
 git clone --depth 1 https://github.com/freeCodeCamp/LearnToCodeRPG ~/renpy_corpus/LearnToCodeRPG
@@ -186,6 +185,32 @@ python -m tools.check_renpy_project ~/renpy_corpus/LearnToCodeRPG --run
 UPVN_RENPY_CORPUS=~/renpy_corpus/LearnToCodeRPG pytest tests/test_renpy_corpus.py
 ```
 
+Corpus two (M21) is the games that ship inside the SDK itself — a different set of
+authors, a different style, and a project that registers **its own statement
+keywords**. [`renpy/renpy`](https://github.com/renpy/renpy), MIT:
+
+```bash
+git clone --depth 1 --filter=blob:none --no-checkout https://github.com/renpy/renpy ~/renpy_sdk
+cd ~/renpy_sdk && git sparse-checkout init --no-cone \
+  && git sparse-checkout set 'tutorial/game/**/*.rpy' 'tutorial/game/*.rpy' 'the_question/game/**/*.rpy' \
+  && git checkout                       # ~6 MB instead of the full 500 MB
+
+python -m tools.check_renpy_project ~/renpy_sdk/tutorial
+#   files         : 23/23 parsed
+#   labels        : 75 (start: yes)
+#   characters    : 20   screens: 99   transforms: 16
+#   statements    : 1672
+#   RESULT: OK — every file parsed and every jump/call resolves
+
+UPVN_RENPY_SDK=~/renpy_sdk pytest tests/test_renpy_sdk_corpus.py
+```
+
+Validating against two unrelated codebases is what keeps this tier from being
+quietly fitted to one game's habits: the second corpus is what surfaced
+`renpy.register_statement`, `block="script"`, multi-line strings, dialogue IDs and
+`show … :` ATL blocks. Neither corpus is vendored — without the env vars those
+tests skip.
+
 `tools/check_renpy_project.py` parses every script, merges them the way Ren'Py does
 (one namespace per `game/`), and reports duplicate labels, unresolved
 `jump`/`call`/`call screen` targets, the `renpy.*` APIs the project's `python:`
@@ -193,10 +218,15 @@ blocks use, and (with `--run`) plays the story headless. The corpus is not vendo
 without `UPVN_RENPY_CORPUS` those tests skip.
 
 What Tier 3 accepts beyond the safe subset is listed in `COMMAND_SPEC.md`
-("M20 additions") — `from` clauses, `for` loops, `call screen f(args)`, voice
-attributes (`who @ attr "text"`), `nointeract`/`extend`/`centered`, `with <expr>`,
-named menus, `menu` `if`/`else` groups, dotted `define` namespaces, `layeredimage`,
-triple-quoted text and bracket continuations, and any consistent indentation.
+("M20 additions" and "M21 additions") — `from` clauses, `for` loops,
+`call screen f(args)`, voice attributes (`who @ attr "text"`),
+`nointeract`/`extend`/`centered`, `with <expr>`, named menus, `menu` `if`/`else`
+groups, dotted `define` namespaces, `layeredimage`, triple-quoted text and bracket
+continuations, any consistent indentation, project-registered statements
+(`renpy.register_statement`, including `block="script"` bodies), `testcase`/
+`testsuite`, strings that run over several lines, dialogue IDs, a quoted `who`,
+`show`/`scene` ATL blocks, bare `scene`, `define x += [ … ]`, `style n:` inside a
+label, and `window`/`nvl` transitions.
 
 ```bash
 python -m tools.run_headless examples/14_renpy_dropin --mode full --choices 0

@@ -105,3 +105,46 @@ jobs:
         with:
           name: renpy-compat-report
           path: corpus_report.json
+
+  renpy-sdk:
+    name: Second corpus — the Ren'Py SDK's own games (MIT)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install test deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest
+
+      # A different codebase, written by different people in a different style:
+      # this is what stops the drop-in tier from being fitted to one game.
+      - name: Fetch the SDK's games
+        run: |
+          git clone --depth 1 --filter=blob:none --no-checkout \
+            https://github.com/renpy/renpy sdk
+          cd sdk
+          git sparse-checkout init --no-cone
+          git sparse-checkout set 'tutorial/game/**/*.rpy' 'tutorial/game/*.rpy' \
+                                  'the_question/game/**/*.rpy'
+          git checkout
+          find . -name '*.rpy' | wc -l
+
+      - name: Compatibility report (tutorial)
+        run: python -m tools.check_renpy_project sdk/tutorial --json sdk_report.json
+
+      - name: SDK corpus tests
+        env:
+          UPVN_RENPY_SDK: ${{ github.workspace }}/sdk
+        run: python -m pytest tests/test_renpy_sdk_corpus.py -q
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: renpy-sdk-report
+          path: sdk_report.json

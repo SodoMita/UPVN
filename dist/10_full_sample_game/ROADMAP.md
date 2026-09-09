@@ -196,6 +196,18 @@
     - "safe/.urpy tiers unchanged: 4-space rule + strict expressions + blocked escapes"
     - "pytest green: 200 passed, 0 skipped"
   example_project: examples/14_renpy_dropin
+
+- id: M21
+  name: Second corpus — the Ren'Py SDK's own games, and the constructs they need
+  status: done   # 2026-09-09: validated on renpy/renpy (MIT) tutorial/ + the_question/ — 7/23 -> 23/23 files, 75 labels, 1672 statements, every jump/call resolves. Added project-wide renpy.register_statement discovery (+block="script" bodies parsed as script, so labels inside resolve), testcase/testsuite, multi-line plain strings (re.DOTALL parity), say dialogue ids + quoted who, show/scene ATL blocks, bare scene, define +=, style-in-label, window/nvl transitions, comment-only files, custom_statement no-op in the interpreter, CI workflow
+  depends_on: [M20]
+  acceptance:
+    - "every .rpy of renpy/renpy tutorial/ and the_question/ parses in the drop-in tier"
+    - "a keyword registered with renpy.register_statement is legal in every file of the project"
+    - "block=\"script\" bodies contribute real labels; unreadable bodies are recorded, not fatal"
+    - "CI runs both corpora plus every example headless"
+    - "pytest green: 224 passed, 0 skipped"
+  example_project: examples/14_renpy_dropin
 ```
 
 ## Agent protocol (repeat every session)
