@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.6.9 — 2026-09-09 3D-only UI (no overlay)
+
+- **No `blf` / `post_draw` HUD.** Dialogue, speaker, load-fail text and menus
+  live on scene FONT + plane objects (`Speaker_Text`, `Dialogue_Text`,
+  `choice_0..8` + `_text`). `engine/ui/world_ui.py` writes `.text` / visibility
+  every frame. Frontend unregisters leftover overlay callbacks.
+- **Choice clicks work in 3D.** LMB `Camera_UI.getScreenRay` →
+  `PointerTracker` → `VNController.choose(i)`. Number keys 1–9 still work.
+  Choice planes are STATIC ghost so they raycast.
+- **Unlit plates.** Setup Scene rewrites BG/sprite/UI materials to Emission
+  (no Principled), hides scene lights, zeros world Background. Sprites stay
+  visible without PNGs (silhouette + object color).
+- Add-on v0.6.9. Tests `tests/test_m23_world_ui.py`. **Re-run Setup Scene.**
+
 ## 0.6.8 — 2026-09-09 Camera bind + keyboard capture (field: LMB works, keys don't)
 
 - **Camera is now a Front ortho that the game actually uses.** `Camera_UI` was

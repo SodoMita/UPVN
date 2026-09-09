@@ -115,13 +115,103 @@ def _owner_script_prop(cont):
     return owner
 
 
-def _register_overlay():
-    """Append the blf overlay to the current scene's post_draw (once per scene)."""
+def _unregister_overlay():
+    """Drop any leftover blf post_draw callback — UI is 3D objects only."""
     try:
         import bge as _bge
         sc = _bge.logic.getCurrentScene()
-        if draw_overlay not in sc.post_draw:
-            sc.post_draw.append(draw_overlay)
+        pd = getattr(sc, "post_draw", None)
+        if not pd:
+            return
+        for fn in list(pd):
+            name = getattr(fn, "__name__", "")
+            if name in ("draw_overlay", "draw_blf"):
+                try:
+                    pd.remove(fn)
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+
+def _hide_idle_sprites():
+    if not HAS_BGE:
+        return
+    try:
+        import bge as _bge
+        sc = _bge.logic.getCurrentScene()
+        for ob in sc.objects:
+            if str(ob.name).startswith("Sprite_"):
+                ob.visible = False
+    except Exception:
+        pass
+
+
+def _get_obj(name):
+    try:
+        import bge as _bge
+        return _bge.logic.getCurrentScene().objects.get(name)
+    except Exception:
+        return None
+
+
+def _sync_world_ui(ctrl):
+    if not HAS_BGE or ctrl is None:
+        return
+    try:
+        from engine.ui.world_ui import build_world_ui, apply_world_ui
+        payload = build_world_ui(
+            getattr(ctrl, "current_event", None),
+            ui_mgr=getattr(ctrl, "ui_mgr", None),
+            diag=getattr(ctrl, "_load_diag", None),
+        )
+        apply_world_ui(_get_obj, payload)
+    except Exception:
+        pass
+
+
+def _object_under_cursor():
+    if not HAS_BGE:
+        return None
+    try:
+        import bge as _bge
+        sc = _bge.logic.getCurrentScene()
+        cam = sc.active_camera
+        x, y = _bge.logic.mouse.position
+        hit = cam.getScreenRay(x, y, 80.0)
+        if hit is None:
+            return None
+        return getattr(hit, "name", None)
+    except Exception:
+        return None
+
+
+def _tick_pointer(ctrl):
+    """LMB over choice_N 3D plane → VNController.choose(i)."""
+    if not HAS_BGE or ctrl is None:
+        return
+    ev = getattr(ctrl, "current_event", None) or {}
+    if ev.get("type") != "menu":
+        return
+    try:
+        import bge as _bge
+        from engine.core.vn_controller import _bge_just
+        from engine.ui.pointer import HotspotMap, PointerTracker
+        from engine.ui.world_ui import normalize_hit_name
+        logic = _bge.logic
+        choices = ev.get("choices") or []
+        key = tuple(c.get("id", i) for i, c in enumerate(choices))
+        if getattr(logic, "_upvn_ptr_key", None) != key:
+            logic._upvn_ptr = PointerTracker(HotspotMap.from_choices(choices))
+            logic._upvn_ptr_key = key
+        tr = logic._upvn_ptr
+        name = normalize_hit_name(_object_under_cursor())
+        clicked = _bge_just("mouse", _bge.events.LEFTMOUSE)
+        for pe in tr.update(name, clicked=clicked):
+            idx = tr.choose(pe)
+            if idx is not None:
+                ctrl.choose(idx)
+                return
     except Exception:
         pass
 
@@ -168,7 +258,8 @@ def main(cont=None):
                 ctrl = VNController(script_path=path)
                 ctrl.load()
                 logic._upvn_ctrl = ctrl
-                _register_overlay()
+                _unregister_overlay()
+                _hide_idle_sprites()
                 print(f"[UPVN] Loaded script {path} (from {'VNController.script_path' if owner is not None else 'candidate'})")
             except Exception as e:
                 print(f"[UPVN] failed to load {path}: {e}")
@@ -192,7 +283,8 @@ def main(cont=None):
             ctrl.load()
             ctrl._load_diag = diag
             logic._upvn_ctrl = ctrl
-            _register_overlay()
+            _unregister_overlay()
+            _hide_idle_sprites()
 
     # per-frame tick with dt
     global _last_time
@@ -221,6 +313,11 @@ def main(cont=None):
         if ctrl.scene_mgr and hasattr(ctrl.scene_mgr, "transition_alpha"):
             # no-op, just for logging
             pass
+    except Exception:
+        pass
+    try:
+        _sync_world_ui(ctrl)
+        _tick_pointer(ctrl)
     except Exception:
         pass
     # M18 debug/QA keys: F1 state dump, F12 in-game screenshot
@@ -263,79 +360,4 @@ def _debug_keys(logic, ctrl):
             print(f"[UPVN] F12 screenshot failed: {e}")
 
 
-def draw_overlay():
-    if not HAS_BGE:
-        return
-    try:
-        import bge  # type: ignore
-        import blf  # type: ignore
-        import bge.render as br
-        logic = bge.logic
-        ctrl = getattr(logic, "_upvn_ctrl", None)
-        if not ctrl or not ctrl.current_event:
-            return
-        ev = ctrl.current_event
-        # dark bar at bottom for UI (fallback if no 3D plane)
-        width = br.getWindowWidth()
-        height = br.getWindowHeight()
-        # load-failure diagnostic: prominent, on-screen (players never read
-        # the console). Red lines in the upper half.
-        diag = getattr(ctrl, "_load_diag", None)
-        if diag:
-            y = height - 90
-            blf.size(0, 22)
-            for i, line in enumerate(diag):
-                blf.color(0, 1.0, 0.32, 0.32, 1.0)
-                blf.position(0, 60, y - i * 30, 0)
-                blf.draw(0, line)
-            return
-        # This is a minimal blf overlay; the real UI is planes (Dialogue_Box) which already shows text.
-        # We only draw if DialogueBox visible and typewriter not done
-        ui = getattr(ctrl, "ui_mgr", None)
-        if ui and ui.visible:
-            text = ui.revealed_text()
-            who = ui.current_who or ""
-            # draw speaker
-            blf.position(0, 50, 50, 0)
-            blf.size(0, 18)
-            blf.color(0, 0.72, 0.76, 1, 1.0)
-            blf.draw(0, who)
-            # draw dialogue
-            blf.position(0, 50, 30, 0)
-            blf.size(0, 20)
-            blf.color(0, 0.92, 0.93, 1, 1.0)
-            # wrap manually for blf (simple)
-            blf.draw(0, text[:80])
-        # menu: draw choices as blf clickable areas
-        if ev.get("type") == "menu":
-            y = height // 2
-            for i, ch in enumerate(ev.get("choices", [])):
-                blf.position(0, width // 2 - 100, y - i * 40, 0)
-                blf.size(0, 20)
-                blf.color(0, 0.85, 0.95, 1, 1.0)
-                blf.draw(0, f"{i + 1}. {ch['text']}")
-            # footer hint (M18: number keys select)
-            blf.position(0, width // 2 - 100, y - len(ev.get("choices", [])) * 40 - 30, 0)
-            blf.size(0, 14)
-            blf.color(0, 0.6, 0.6, 0.6, 1.0)
-            blf.draw(0, "Press 1-9 to choose")
-        # modal screens (save/load/history/quick menu): text fallback until the
-        # 3D plane UI is wired — lets S/L/H/Q be usable without extra objects
-        sm = getattr(ctrl, "screen_mgr", None)
-        if sm is not None and sm.is_modal_active():
-            scr = sm.active_modal
-            title = str(getattr(scr, "title", None) or getattr(scr, "name", "screen"))
-            y = height - 60
-            blf.position(0, width // 2 - 150, y, 0)
-            blf.size(0, 24)
-            blf.color(0, 0.95, 0.85, 0.4, 1.0)
-            blf.draw(0, title)
-            page = getattr(scr, "page", None)
-            if page is not None:
-                blf.position(0, width // 2 - 150, y - 30, 0)
-                blf.size(0, 16)
-                blf.color(0, 0.8, 0.8, 0.8, 1.0)
-                blf.draw(0, f"page {int(page) + 1} — ←/→ to page, ESC to close")
-    except Exception as e:
-        # blf errors are non-fatal
-        print(f"[frontend draw_overlay] {e}")
+# blf overlay removed — UI is 3D FONT / choice planes (engine/ui/world_ui.py)

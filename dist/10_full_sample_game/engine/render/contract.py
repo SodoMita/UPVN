@@ -16,10 +16,9 @@ Architecture note (why this file exists):
       * the "Check Scene Wiring" operator compares the open scene against
         check_contract() and reports missing/present items by name.
 
-Dialogue note: dialogue text is NOT driven through scene Text objects — the
-game engine cannot edit Text data at runtime. Text is drawn by the blf overlay
-in bge_frontend/frontend.py::draw_overlay(). The Dialogue_Box plane is only a
-decorative panel behind that overlay.
+Dialogue note: NO screen-space overlay. Speaker_Text / Dialogue_Text / choice_N
+are FONT + plane objects in the scene; engine/ui/world_ui.py writes `.text`
+every frame. The Dialogue_Box plane is the panel behind that 3D text.
 """
 from __future__ import annotations
 
@@ -51,8 +50,16 @@ SPRITE_POSITIONS = ("far_left", "left", "center", "right", "far_right")
 SPRITE_FALLBACK_TAG = "Sprite"          # generic plane
 SPRITE_TAG_PREFIX = "Sprite_"           # f"Sprite_{tag}" per-actor plane
 
-# decorative dialogue panel (blf overlay draws the actual text)
+# 3D UI (no overlay): panel + FONT objects + clickable choice planes
 DIALOGUE_PLANE = "Dialogue_Box"
+SPEAKER_TEXT = "Speaker_Text"
+DIALOGUE_TEXT = "Dialogue_Text"
+CHOICE_PREFIX = "choice_"
+CHOICE_COUNT = 9
+UI_MATERIAL = "MAUI"
+SPEAKER_LOCATION = (-3.6, -0.55, -2.55)
+DIALOGUE_TEXT_LOCATION = (-3.6, -0.55, -3.15)
+SPRITE_SCALE = (1.5, 2.4, 1.0)  # local XY after rot X=90 → world X / Z height
 
 # UPBGE world positions (X = screen X, Y = depth toward camera, Z = screen Y).
 # Camera_UI at (0,-10,0) looking +Y, ortho_scale=10.
@@ -98,6 +105,11 @@ def required_objects() -> list[dict]:
                       "name": f"Sprite_{pos}",
                       "purpose": f"sprite plane at '{pos}' (texture swapped on 'show')",
                       "used_by": "engine/render/sprite_renderer.py::SpriteRenderer._bge_show"})
+    for i in range(CHOICE_COUNT):
+        items.append({"kind": "object",
+                      "name": f"{CHOICE_PREFIX}{i}",
+                      "purpose": f"clickable 3D menu button {i}",
+                      "used_by": "engine/ui/world_ui.py + engine/ui/pointer.py"})
     for mat, purpose in (
         (BG_MATERIAL, "material slot of BG_Plane receiving the background texture"),
         (SPRITE_MATERIAL, "material slot of every Sprite_* plane receiving the sprite texture"),
