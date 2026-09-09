@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.6.8 — 2026-09-09 Screens draw in the golden trace (M23)
+
+M22 produced a widget tree but nothing painted it, so a `show screen` was
+correct in JSON and invisible in a frame. The headless renderer now walks
+`VNState.active_screens` (sorted by `zorder`, so a modal `confirm` lands above a
+HUD) and paints each tree: `vbox`/`hbox` flow layout, `frame`/`window` plates,
+`text`/`label`, `textbutton` boxes (bright edge when the button has an action),
+`add`/`imagebutton` labelled plates, `bar`/`vbar`, and a full-frame dim for
+`modal` screens. Positions honour the `xalign`/`yalign`/`spacing`/`xsize` hints
+M22 leaves in `props`.
+
+Two deliberate limits, consistent with M22: Ren'Py's real layout engine is **not**
+reimplemented (this is a golden-trace renderer, screenshots stay for human review),
+and a screen that cannot be laid out never fails the frame — `draw_active_screens`
+is wrapped so a bad widget degrades to nothing rather than dropping the shot.
+
+Also fixed a real evaluation gap M22 left: a screen *parameter* was not visible
+inside a compound condition. `screen hud(score=0)` with `if score > 5:` never
+rendered the button, because `score > 5` was evaluated against the store alone.
+`VNInterpreter._eval_screen_expr` now takes an overlay scope, so `score > 5`
+resolves. Pinned by `tests/test_screen_render.py`.
+
+
 ## 0.6.7 — 2026-09-09 Screens actually render (M22)
 
 The drop-in tier *parsed* `screen:` blocks and then threw the information away:
