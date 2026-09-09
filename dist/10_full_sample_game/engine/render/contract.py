@@ -23,10 +23,25 @@ decorative panel behind that overlay.
 """
 from __future__ import annotations
 
+import math
+
 # --------------------------------------------------------------------------- identifiers
 # background plane + its material (SceneManager._swap_bge_texture)
 BG_PLANE = "BG_Plane"
 BG_MATERIAL = "MABackground"
+
+# 2D game camera. Planes live in XZ (stand up); camera sits on -Y looking +Y
+# (Blender Front). XY ground planes + this camera = edge-on / unused view.
+CAMERA_UI = "Camera_UI"
+CAMERA_3D = "Camera_3D"
+CAMERA_UI_LOCATION = (0.0, -10.0, 0.0)
+CAMERA_UI_ROTATION = (math.pi / 2.0, 0.0, 0.0)
+CAMERA_UI_ORTHO_SCALE = 10.0
+CAMERA_3D_LOCATION = (0.0, -6.0, 2.5)
+CAMERA_3D_ROTATION = (1.15, 0.0, 0.0)
+PLANE_ROTATION = (math.pi / 2.0, 0.0, 0.0)
+DIALOGUE_LOCATION = (0.0, -0.4, -3.2)
+DIALOGUE_SCALE = (4.0, 1.2, 1.0)
 
 # sprite planes per position + their material (SpriteRenderer._bge_show)
 SPRITE_MATERIAL = "MASprite"
@@ -39,14 +54,14 @@ SPRITE_TAG_PREFIX = "Sprite_"           # f"Sprite_{tag}" per-actor plane
 # decorative dialogue panel (blf overlay draws the actual text)
 DIALOGUE_PLANE = "Dialogue_Box"
 
-# UPBGE world positions for the ortho camera (ortho_scale=10)
-# kept here so the add-on can place planes exactly where the renderer moves them
+# UPBGE world positions (X = screen X, Y = depth toward camera, Z = screen Y).
+# Camera_UI at (0,-10,0) looking +Y, ortho_scale=10.
 POSITIONS = {
-    "far_left": (-5.0, 0, 1.2),
-    "left": (-3.0, 0, 1.2),
-    "center": (0, 0, 1.2),
-    "right": (3.0, 0, 1.2),
-    "far_right": (5.0, 0, 1.2),
+    "far_left": (-5.0, -0.15, 0.0),
+    "left": (-3.0, -0.15, 0.0),
+    "center": (0.0, -0.15, 0.0),
+    "right": (3.0, -0.15, 0.0),
+    "far_right": (5.0, -0.15, 0.0),
 }
 
 # collections that make scene order explicit in the editor
@@ -94,6 +109,12 @@ def required_objects() -> list[dict]:
         items.append({"kind": "collection", "name": name,
                       "purpose": "scene organisation (backgrounds / characters / UI / effects / 3D stage)",
                       "used_by": "tools/make_template.py, blend/upvn_editor_addon.py::build_vn_scene"})
+    items.append({"kind": "object", "name": CAMERA_UI,
+                  "purpose": "ortho game camera (Front: XZ planes, looking +Y); runtime binds scene.active_camera",
+                  "used_by": "bge_frontend/frontend.py::_bind_camera, blend/upvn_editor_addon.py::build_vn_scene"})
+    items.append({"kind": "object", "name": CAMERA_3D,
+                  "purpose": "perspective camera for hybrid 3D stages / camera_preset",
+                  "used_by": "engine/render/stage_manager.py (optional)"})
     items.append({"kind": "object", "name": CONTROLLER,
                   "purpose": "game object with script_path/upvn_root properties and the Always->Python brick",
                   "used_by": "bge_frontend/frontend.py::main (reads script_path), launcher text"})

@@ -126,6 +126,26 @@ def _register_overlay():
         pass
 
 
+def _bind_camera():
+    """Force scene.active_camera = Camera_UI once (editor camera is not the game camera)."""
+    if not HAS_BGE:
+        return
+    try:
+        import bge as _bge
+        logic = _bge.logic
+        if getattr(logic, "_upvn_cam_bound", False):
+            return
+        sc = logic.getCurrentScene()
+        cam = sc.objects.get("Camera_UI")
+        if cam is None:
+            return
+        sc.active_camera = cam
+        logic._upvn_cam_bound = True
+        print("[UPVN] active_camera bound to Camera_UI")
+    except Exception:
+        pass
+
+
 def main(cont=None):
     """Entry for UPBGE Python controller. Called every frame."""
     if not HAS_BGE:
@@ -134,6 +154,7 @@ def main(cont=None):
     import bge as _bge
     logic = _bge.logic
     ensure_engine_syspath()
+    _bind_camera()
 
     if not hasattr(logic, "_upvn_ctrl"):
         from engine.core.vn_controller import VNController
@@ -216,20 +237,19 @@ def _debug_keys(logic, ctrl):
     """F1 prints current story state; F12 saves an in-game screenshot PNG."""
     if not HAS_BGE:
         return
-    import bge as _bge
-    keys = _bge.logic.keyboard.events
-    just = _bge.logic.KX_INPUT_JUST_ACTIVATED
     try:
+        from engine.core.vn_controller import _bge_just
+        import bge as _bge
         f1 = getattr(_bge.events, "F1KEY")
         f12 = getattr(_bge.events, "F12KEY")
     except Exception:
         return
-    if keys.get(f1) == just:
+    if _bge_just("keyboard", f1):
         st = ctrl.state
         ev = ctrl.current_event or {}
         print(f"[UPVN] F1 state: label={st.current_label} idx={st.instruction_index} "
               f"event={ev.get('type')} vars={ {k: v for k, v in list(st.variables.items())[:12]} }")
-    if keys.get(f12) == just:
+    if _bge_just("keyboard", f12):
         _shot_seq[0] += 1
         import os as _os
         base = _os.path.dirname(_bge.logic.expandPath("//"))
