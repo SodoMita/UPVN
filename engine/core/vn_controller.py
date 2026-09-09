@@ -60,12 +60,60 @@ def _digit_choice_index(states: dict, count: int) -> int | None:
     return None
 
 
+def _classify_input_entry(entry, just_code: int = 1, active_code: int = 2):
+    """Map one SCA_InputEvent (or a legacy int) to 'just' | 'active' | None.
+
+    UPBGE 0.50: JUST_ACTIVATED lives in entry.queue (list), ACTIVE in
+    entry.status (list). Convenience bools .activated/.active exist on
+    SCA_InputEvent. Never reads device.events (deprecated). Pure; unit-testable.
+    """
+    if entry is None:
+        return None
+    if isinstance(entry, int):
+        if entry == just_code:
+            return "just"
+        if entry == active_code:
+            return "active"
+        return None
+    try:
+        queue = getattr(entry, "queue", None)
+        if queue is not None and just_code in queue:
+            return "just"
+    except Exception:
+        pass
+    try:
+        if getattr(entry, "activated", False):
+            return "just"
+    except Exception:
+        pass
+    try:
+        status = getattr(entry, "status", None)
+        if status is not None:
+            if status == just_code or (isinstance(status, (list, tuple)) and just_code in status):
+                return "just"
+    except Exception:
+        pass
+    try:
+        if getattr(entry, "active", False):
+            return "active"
+    except Exception:
+        pass
+    try:
+        status = getattr(entry, "status", None)
+        if status is not None:
+            if status == active_code or (isinstance(status, (list, tuple)) and active_code in status):
+                return "active"
+    except Exception:
+        pass
+    return None
+
+
 def _bge_input_state(device_name: str, key: int):
     """Input state for one key on a bge device: 'just' | 'active' | None.
 
-    UPBGE 0.50 deprecates device.events in favour of device.inputs (per-key
-    KX_InputDevice with .activated/.active). Prefer the new API, fall back to
-    the legacy one. Headless (no bge) returns None. Never raises.
+    Uses device.inputs[key] only (UPBGE 0.50). Never touches device.events
+    (deprecated; conversion is lossy — LMB can work while keys do not).
+    Headless (no bge) returns None. Never raises.
     """
     if not HAS_BGE:
         return None
@@ -76,38 +124,18 @@ def _bge_input_state(device_name: str, key: int):
             return None
     except Exception:
         return None
-    # new API: device.inputs[key] -> KX_InputDevice(.activated, .active)
-    try:
-        entry = dev.inputs[key]
-        if entry is not None:
-            try:
-                if entry.activated:
-                    return "just"
-            except Exception:
-                pass
-            try:
-                if entry.active:
-                    return "active"
-            except Exception:
-                pass
-            return None
-    except Exception:
-        pass
-    # legacy API: device.events[key] -> KX_INPUT_* integer
-    try:
-        val = dev.events[key]
-    except Exception:
-        return None
     try:
         just_c = _bge_imp.logic.KX_INPUT_JUST_ACTIVATED
         active_c = _bge_imp.logic.KX_INPUT_ACTIVE
     except Exception:
         just_c, active_c = 1, 2
-    if val == just_c:
-        return "just"
-    if val == active_c:
-        return "active"
-    return None
+    try:
+        inputs = getattr(dev, "inputs", None)
+        if inputs is None:
+            return None
+        return _classify_input_entry(inputs[key], just_c, active_c)
+    except Exception:
+        return None
 
 
 def _bge_just(device_name: str, key: int) -> bool:

@@ -38,7 +38,7 @@ Expected: all 4 examples + *The Question* parse and trace cleanly. No YAML.
 ## Quickstart (in UPBGE — minimal coding, no .rpy typing)
 
 1. Extract `~/upbge-0.50-linux-x64.tar.xz`
-2. **Install the add-on (v0.6.7+, one file — engine is bundled):**
+2. **Install the add-on (v0.6.8+, one file — engine is bundled):**
    Edit → Preferences → Add-ons → **Install from Disk…** (older UI: Install…) → select
    `dist/upvn_editor_addon_v0.6.7.zip` (or the raw `blend/upvn_editor_addon.py` when
    working from the repo) → enable **"UPVN — Visual Novel Editor"**.
@@ -65,7 +65,7 @@ Expected: all 4 examples + *The Question* parse and trace cleanly. No YAML.
 6. The frontend reads **`script_path` from the `VNController` object** — exactly what the
    panel's `project_path` writes — so the game you build is the game that plays
    (legacy `//game/script.rpy`, `//script.rpy`, `//examples/…` are fallbacks).
-7. Press `P` to play. **Controls (v0.6.7):** click / Space / Enter advance; **`1`–`9` pick a menu choice** (in-engine input, no extra wiring); `H` history, `Q` quick menu, `Ctrl+S` save, `Ctrl+L` load (arbitrary slots 1..∞, `←`/`→` page, `Esc` close), `S` skip, `A` auto, mouse wheel rollback, **`F1` console state dump, `F12` in-game screenshot** to `//screenshots/upvn_ingame_*.png` (QA/debug helpers).
+7. Press `P` to play. **Controls (v0.6.8):** click / Space / Enter advance; **`1`–`9` pick a menu choice** (in-engine input, no extra wiring); `H` history, `Q` quick menu, `Ctrl+S` save, `Ctrl+L` load (arbitrary slots 1..∞, `←`/`→` page, `Esc` close), `S` skip, `A` auto, mouse wheel rollback, **`F1` console state dump, `F12` in-game screenshot** to `//screenshots/upvn_ingame_*.png` (QA/debug helpers).
 
 ## Troubleshooting (was: "Engine not available")
 
