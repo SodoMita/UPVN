@@ -41,9 +41,14 @@ import time
 
 _last_time: float = 0.0
 
+# relative candidates, tried from the .blend directory and up to 2 parent
+# levels — covers repo layout (<repo>/blend + <repo>/game), packaged layout
+# (<pkg>/blend + <pkg>/game) and 'save the blend next to your game' layouts
 ENGINE_CANDIDATES = ["//game/script.rpy", "//script.rpy",
+                     "//examples/10_full_sample_game/script.rpy",
                      "//examples/00_minimal_dialogue/script.rpy",
-                     "//examples/10_full_sample_game/script.rpy"]
+                     "//../game/script.rpy",
+                     "//../../game/script.rpy"]
 
 
 def ensure_engine_syspath():
@@ -148,14 +153,23 @@ def main(cont=None):
                 print(f"[UPVN] failed to load {path}: {e}")
                 logic._last_upvn_error = f"{path}: {e}"
         if not hasattr(logic, "_upvn_ctrl"):
-            # 2) fallback: embedded minimal script (kept so a bare .blend still
-            #    shows *something*, but now loudly)
-            tried_list = ", ".join(getattr(logic, "_upvn_tried", ["<none>"]))
-            print("[UPVN] WARNING: no game script found — tried: " + tried_list +
-                  ". Set script_path on the VNController object (UPVN panel → Setup Scene).")
-            script = parse_string('label start:\n    "Hello from UPVN inside UPBGE — no script found yet."\n    return\n')
+            # 2) fallback: embedded minimal script that explains itself on the
+            #    screen (a console-only warning is invisible to players)
+            diag = ["UPVN: game script not found.",
+                    "The scene searched these paths:"]
+            tried_list = getattr(logic, "_upvn_tried", [])
+            for t in tried_list[:6]:
+                diag.append("  - " + os.path.basename(os.path.dirname(t)) + "/" + os.path.basename(t))
+            diag.append("")
+            diag.append("Fix in the UPVN panel (View3D > N):")
+            diag.append("1. Create Project  2. Setup Scene  3. press P")
+            print("[UPVN] WARNING: no game script found — tried: " +
+                  ", ".join(tried_list or ["<none>"]) +
+                  ". Set project_path in the UPVN panel and press Setup Scene.")
+            script = parse_string('label start:\n    "UPVN — press P after Create Project + Setup Scene in the UPVN panel."\n    return\n')
             ctrl = VNController(script_dict=script)
             ctrl.load()
+            ctrl._load_diag = diag
             logic._upvn_ctrl = ctrl
             _register_overlay()
 
@@ -244,6 +258,17 @@ def draw_overlay():
         # dark bar at bottom for UI (fallback if no 3D plane)
         width = br.getWindowWidth()
         height = br.getWindowHeight()
+        # load-failure diagnostic: prominent, on-screen (players never read
+        # the console). Red lines in the upper half.
+        diag = getattr(ctrl, "_load_diag", None)
+        if diag:
+            y = height - 90
+            blf.size(0, 22)
+            for i, line in enumerate(diag):
+                blf.color(0, 1.0, 0.32, 0.32, 1.0)
+                blf.position(0, 60, y - i * 30, 0)
+                blf.draw(0, line)
+            return
         # This is a minimal blf overlay; the real UI is planes (Dialogue_Box) which already shows text.
         # We only draw if DialogueBox visible and typewriter not done
         ui = getattr(ctrl, "ui_mgr", None)
