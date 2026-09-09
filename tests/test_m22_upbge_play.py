@@ -79,6 +79,7 @@ def test_frontend_binds_camera_ui():
 def test_camera_contract_front_view():
     assert contract.CAMERA_UI == "Camera_UI"
     assert contract.CAMERA_UI_LOCATION == (0.0, -10.0, 0.0)
+    assert contract.CAMERA_UI_ORTHO_SCALE == 15.0
     assert abs(contract.CAMERA_UI_ROTATION[0] - math.pi / 2) < 1e-9
     assert abs(contract.PLANE_ROTATION[0] - math.pi / 2) < 1e-9
     # sprites sit in front of BG (negative Y toward camera)
@@ -93,5 +94,5 @@ def test_addon_setup_resets_camera_and_adds_allkeys():
     assert 'upvn_camera_custom' in src
     assert 'need_keys' in src and 'AllKeys' in src
     assert 'use_all_keys' in src
-    assert '"version": (0, 6, 10)' in src
+    assert '"version": (0, 6, 11)' in src
     assert "loc=(0, -10, 5)" not in src

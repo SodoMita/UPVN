@@ -1,6 +1,6 @@
 """
 UPVN Blender Editor Tools — create visual novel inside Blender with minimal coding
-v0.6.10 (2026-09-09): Setup Scene mutates the OPEN scene (not a new VN_Main); choice_* guaranteed
+v0.6.11 (2026-09-09): mouse visible, ortho 15, zoom-stable UI, placeholder art, no LibLoad crash
 
 Why v0.6 exists
     Installing the old add-on copied this single .py into Blender's add-ons folder,
@@ -21,7 +21,7 @@ Why v0.6 exists
 
 Install (two supported ways)
   A. Dist zip (recommended):
-        dist/upvn_editor_addon_v0.6.10.zip  → Edit → Preferences → Add-ons →
+        dist/upvn_editor_addon_v0.6.11.zip  → Edit → Preferences → Add-ons →
            Install from Disk… (or Install…) → select the .zip → enable "UPVN".
      Engine, frontend and template travel inside the zip; nothing else needed.
   B. Repo checkout:
@@ -45,7 +45,7 @@ Headless fallback: when bpy unavailable (CI), the module still imports and expos
 bl_info = {
     "name": "UPVN — Visual Novel Editor",
     "author": "UPVN",
-    "version": (0, 6, 10),
+    "version": (0, 6, 11),
     "blender": (4, 2, 0),
     "location": "View3D > Sidebar > UPVN, Text Editor > Sidebar > UPVN",
     "description": "Create Ren'Py-like visual novel inside UPBGE with minimal coding — self-contained engine, one-click scene setup, characters, scenes, dialogue, menus, arbitrary saves, preview",
@@ -879,9 +879,15 @@ except Exception:
             pass
         out = nt.nodes.new("ShaderNodeOutputMaterial")
         em = nt.nodes.new("ShaderNodeEmission")
-        em.inputs["Color"].default_value = color
+        tex = nt.nodes.new("ShaderNodeTexImage")
+        tex.location = (-280, 0)
         try:
+            em.inputs["Color"].default_value = color
             em.inputs["Strength"].default_value = 1.0
+        except Exception:
+            pass
+        try:
+            nt.links.new(tex.outputs["Color"], em.inputs["Color"])
         except Exception:
             pass
         nt.links.new(em.outputs[0], out.inputs[0])
@@ -910,8 +916,16 @@ except Exception:
     def _static_ghost(obj):
         try:
             g = obj.game
-            g.physics_type = "STATIC"
-            g.use_ghost = True
+            try:
+                g.physics_type = "SENSOR"
+            except Exception:
+                g.physics_type = "STATIC"
+                g.use_ghost = True
+            try:
+                g.use_collision_bounds = True
+                g.collision_bounds_type = "BOX"
+            except Exception:
+                pass
         except Exception:
             pass
 
@@ -1020,7 +1034,7 @@ except Exception:
             CAMERA_UI, CAMERA_3D = "Camera_UI", "Camera_3D"
             CAMERA_UI_LOCATION = (0.0, -10.0, 0.0)
             CAMERA_UI_ROTATION = (1.5707963267948966, 0.0, 0.0)
-            CAMERA_UI_ORTHO_SCALE = 10.0
+            CAMERA_UI_ORTHO_SCALE = 15.0
             CAMERA_3D_LOCATION = (0.0, -6.0, 2.5)
             CAMERA_3D_ROTATION = (1.15, 0.0, 0.0)
             PLANE_ROTATION = (1.5707963267948966, 0.0, 0.0)

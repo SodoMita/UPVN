@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from engine.ui.world_ui import (  # noqa: E402
-    apply_world_ui, build_world_ui, normalize_hit_name, wrap_text,
+    apply_world_ui, build_world_ui, layout_screen_ui, normalize_hit_name, wrap_text,
 )
 from engine.ui.pointer import PointerTracker, HotspotMap  # noqa: E402
 
@@ -91,15 +91,37 @@ def test_pointer_click_index():
     assert tr.choose(ev[0]) == 1
 
 
+def test_layout_ui_ndc_stable_across_zoom():
+    class O:
+        def __init__(self):
+            self.worldPosition = (0, 0, 0)
+            self.worldScale = (1, 1, 1)
+            self.size = 0.3
+            self.visible = True
+            self.text = ""
+    scene = {n: O() for n in ("Speaker_Text", "Dialogue_Text", "Dialogue_Box",
+                              "choice_0", "choice_0_text")}
+    payload = build_world_ui({"type": "menu", "caption": "Go?",
+                              "choices": [{"id": 0, "text": "Yes"}]})
+    layout_screen_ui(scene.get, payload, ortho=15.0)
+    z15 = scene["Dialogue_Box"].worldPosition[2]
+    layout_screen_ui(scene.get, payload, ortho=10.0)
+    z10 = scene["Dialogue_Box"].worldPosition[2]
+    ndc15 = z15 / (15.0 / 2)
+    ndc10 = z10 / (10.0 / 2)
+    assert abs(ndc15 - ndc10) < 1e-6
+
+
 def test_frontend_and_addon_are_3d_unlit():
     fe = (ROOT / "bge_frontend" / "frontend.py").read_text(encoding="utf-8")
     ad = (ROOT / "blend" / "upvn_editor_addon.py").read_text(encoding="utf-8")
     assert "import blf" not in fe
     assert "def draw_overlay" not in fe
     assert "_tick_pointer" in fe and "getScreenRay" in fe
+    assert "showMouse" in fe
     assert "_rewrite_unlit" in ad
     assert "ShaderNodeEmission" in ad
     assert "Speaker_Text" in ad and "choice_" in ad
-    assert '"version": (0, 6, 10)' in ad
+    assert '"version": (0, 6, 11)' in ad
     assert "scene_name=None" in ad
     assert "_get_or_create" in ad
