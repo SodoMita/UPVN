@@ -69,7 +69,10 @@ class SceneManager:
                 return
             # Use bge.texture to swap image
             import bge.texture as vt
-            mat_id = vt.materialID(plane, BG_MATERIAL)
+            try:
+                mat_id = vt.materialID(plane, BG_MATERIAL)
+            except Exception:
+                mat_id = -1
             if mat_id < 0:
                 mat_id = 0  # first material slot fallback
             tex_path = bge.logic.expandPath(f"//{ASSET_BACKGROUNDS}/{asset}.png")

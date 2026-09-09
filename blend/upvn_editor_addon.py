@@ -1,6 +1,6 @@
 """
 UPVN Blender Editor Tools — create visual novel inside Blender with minimal coding
-v0.6.9 (2026-09-09): 3D UI only (no blf overlay), unlit sprites/BG, clickable choice_* planes
+v0.6.10 (2026-09-09): Setup Scene mutates the OPEN scene (not a new VN_Main); choice_* guaranteed
 
 Why v0.6 exists
     Installing the old add-on copied this single .py into Blender's add-ons folder,
@@ -21,7 +21,7 @@ Why v0.6 exists
 
 Install (two supported ways)
   A. Dist zip (recommended):
-        dist/upvn_editor_addon_v0.6.9.zip  → Edit → Preferences → Add-ons →
+        dist/upvn_editor_addon_v0.6.10.zip  → Edit → Preferences → Add-ons →
            Install from Disk… (or Install…) → select the .zip → enable "UPVN".
      Engine, frontend and template travel inside the zip; nothing else needed.
   B. Repo checkout:
@@ -45,7 +45,7 @@ Headless fallback: when bpy unavailable (CI), the module still imports and expos
 bl_info = {
     "name": "UPVN — Visual Novel Editor",
     "author": "UPVN",
-    "version": (0, 6, 9),
+    "version": (0, 6, 10),
     "blender": (4, 2, 0),
     "location": "View3D > Sidebar > UPVN, Text Editor > Sidebar > UPVN",
     "description": "Create Ren'Py-like visual novel inside UPBGE with minimal coding — self-contained engine, one-click scene setup, characters, scenes, dialogue, menus, arbitrary saves, preview",
@@ -915,6 +915,45 @@ except Exception:
         except Exception:
             pass
 
+    def _link_ob(scene, ob, col=None):
+        try:
+            if ob.name not in scene.collection.objects:
+                scene.collection.objects.link(ob)
+        except Exception:
+            pass
+        if col is not None:
+            try:
+                if ob.name not in col.objects:
+                    col.objects.link(ob)
+            except Exception:
+                pass
+
+    def _get_or_create(scene, name, factory):
+        """Reuse exact name from this scene or bpy.data (never name.001)."""
+        ob = scene.objects.get(name)
+        if ob is not None:
+            return ob
+        existing = bpy.data.objects.get(name)
+        if existing is not None:
+            _link_ob(scene, existing)
+            return existing
+        ob = factory()
+        if ob.name != name:
+            taken = bpy.data.objects.get(name)
+            if taken is not None and taken is not ob:
+                try:
+                    bpy.data.objects.remove(ob, do_unlink=True)
+                except Exception:
+                    pass
+                _link_ob(scene, taken)
+                return taken
+            try:
+                ob.name = name
+            except Exception:
+                pass
+        _link_ob(scene, ob)
+        return ob
+
     def _data_camera(name, ortho=True, size=10.0, loc=(0.0, -10.0, 0.0), rot=(1.5707963267948966, 0.0, 0.0)):
         cam_data = bpy.data.cameras.new(name)
         if ortho:
@@ -925,27 +964,32 @@ except Exception:
         obj.rotation_euler = rot
         return obj
 
-    def build_vn_scene(bpy_module=None, *, scene_name="VN_Main",
+    def build_vn_scene(bpy_module=None, *, scene_name=None,
                        script_path="//game/script.rpy",
                        controller_module="upvn_launcher",
                        install_launcher=True):
         """Create/refresh a complete playable UPVN scene (data API, idempotent).
 
-        - scene VN_Main (or scene_name) with ortho camera + 3D camera
-        - collections VN_Backgrounds/VN_Characters/VN_UI/VN_Effects/VN_3DStage
-        - BG_Plane + Dialogue_Box placeholders
-        - object VNController (empty) with script_path / upvn_root properties
-        - logic bricks on VNController: Always(pulse) -> Python(launcher)
+        Default scene_name=None uses the OPEN scene (context.scene). Creating a
+        separate VN_Main left the template Scene without choice_* (field: 18/27).
 
-        Safe to press repeatedly: existing objects/bricks are replaced.
-        Returns the controller object. Runs headless (no bpy.ops).
+        Safe to press repeatedly. Returns the controller object.
         """
         _b = bpy_module or bpy
         has_game = _has_game_support()
 
-        scene = _b.data.scenes.get(scene_name)
+        scene = None
+        if scene_name:
+            scene = _b.data.scenes.get(scene_name)
+            if scene is None:
+                scene = _b.data.scenes.new(scene_name)
         if scene is None:
-            scene = _b.data.scenes.new(scene_name)
+            try:
+                scene = _b.context.scene
+            except Exception:
+                scene = None
+        if scene is None:
+            scene = _b.data.scenes[0]
         if getattr(_b.context, "window", None) is not None:
             try:
                 _b.context.window.scene = scene
@@ -1121,18 +1165,19 @@ except Exception:
             z = 2.4 - i * 0.7
             loc = (0.0, -0.5, z)
             cname = f"{CHOICE_PREFIX}{i}"
-            ch = scene.objects.get(cname)
-            if ch is None:
-                ch = _data_plane(cname, size=6.0, color=(0.12, 0.18, 0.32, 1.0),
-                                 rot=PLANE_ROTATION)
+            try:
+                def _mk(cname=cname):
+                    return _data_plane(cname, size=6.0, color=(0.12, 0.18, 0.32, 1.0),
+                                       rot=PLANE_ROTATION)
+                ch = _get_or_create(scene, cname, _mk)
+                _link_ob(scene, ch, collections["VN_UI"])
+                _apply_2d_layout(ch, loc, (3.2, 0.28, 1.0))
                 _single_material(ch, mat_choice)
-                scene.collection.objects.link(ch)
-                collections["VN_UI"].objects.link(ch)
-            _apply_2d_layout(ch, loc, (3.2, 0.28, 1.0))
-            _single_material(ch, mat_choice)
-            _static_ghost(ch)
-            tname = cname + "_text"
-            _ensure_font(tname, (loc[0] - 2.8, loc[1] - 0.05, loc[2] + 0.08), size=0.24)
+                _static_ghost(ch)
+                tname = cname + "_text"
+                _ensure_font(tname, (loc[0] - 2.8, loc[1] - 0.05, loc[2] + 0.08), size=0.24)
+            except Exception as exc:
+                print(f"[UPVN] choice {cname} create failed: {exc}")
 
         for ob in list(scene.objects):
             try:
@@ -1343,12 +1388,23 @@ except Exception:
         def execute(self, context):
             p = context.scene.upvn_props
             try:
-                ctrl = build_vn_scene(script_path=p.project_path)
+                ctrl = build_vn_scene(script_path=p.project_path,
+                                      scene_name=context.scene.name)
             except Exception as e:
                 import traceback
                 traceback.print_exc()
                 self.report({"ERROR"}, f"Setup failed: {e}")
                 return {"CANCELLED"}
+            present = {ob.name for ob in context.scene.objects}
+            missing = [f"choice_{i}" for i in range(9) if f"choice_{i}" not in present]
+            for n in ("Speaker_Text", "Dialogue_Text", "BG_Plane", "Dialogue_Box",
+                      "Camera_UI", "VNController"):
+                if n not in present:
+                    missing.append(n)
+            if missing:
+                print("[UPVN] Setup Scene still missing on", context.scene.name, ":", missing)
+                self.report({"WARNING"},
+                            f"Scene '{context.scene.name}' still missing: {', '.join(missing[:8])}")
             bricks = ctrl.get("upvn_bricks", "no")
             if bricks == "yes":
                 self.report({"INFO"},
@@ -1391,6 +1447,7 @@ except Exception:
                 obj_names = {ob.name for ob in scene.objects}
             except Exception:
                 obj_names = {ob.name for ob in bpy.data.objects}
+            print(f"[UPVN] Check Wiring scene={scene.name} objects={len(obj_names)}")
             mats = {m.name for m in bpy.data.materials}
             cols = {c.name for c in bpy.data.collections}
             txts = {t.name for t in bpy.data.texts}

@@ -4,7 +4,7 @@ Package the UPVN editor add-on into ONE self-contained, installable .zip.
 Usage:
     python tools/package_addon.py [out_dir]        # default: repo dist/
 
-Output: <out_dir>/upvn_editor_addon_v0.6.9.zip
+Output: <out_dir>/upvn_editor_addon_v0.6.10.zip
 
 Why this exists (v0.6):
     The old workflow asked you to install a lone .py — Blender copied it into
