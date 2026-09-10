@@ -113,4 +113,4 @@ def test_addon_build_vn_scene_no_brick_collection_remove():
     # reuse path + per-piece brick addition must be present
     assert 'ctrl = scene.objects.get("VNController")' in src
     assert 'need_sensor' in src and 'need_controller' in src
-    assert '"upvn_bricks"] = "existing"' in src
+    assert '_set_runtime_prop(_b, ctrl, "upvn_bricks", "existing")' in src

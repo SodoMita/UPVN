@@ -44,18 +44,24 @@ except ImportError:
     bge = None  # type: ignore
 
 
-def _digit_choice_index(states: dict, count: int) -> int | None:
+def _digit_choice_index(states, count: int) -> int | None:
     """Map per-digit states to a menu choice index. Pure helper (unit-testable).
 
-    states: {digit key code: 'just' | 'active' | None} — produced by
-    _bge_input_state for each of the first 9 digits. Digit key codes are ASCII
-    (ONEKEY == ord('1') == 49). Returns the index (0-based) of the lowest digit
-    that is 'just' and within count; None otherwise.
+    states: sequence ('just' | 'active' | None) in DIGIT ORDER — states[i] is
+    the input state of digit key i+1, produced by _bge_input_state for
+    bge.events.ONEKEY..NINEKEY. Those key codes are NOT ASCII in UPBGE 0.50
+    (ONEKEY == 14, see BUG-006), so the sequence must never be keyed/reindexed
+    by ord('1')+i: an earlier fix corrected the producer but left this helper
+    comparing ASCII ordinals, which kept digit selection dead in the player
+    (BUG-010). Returns the 0-based index of the lowest digit that is 'just'
+    and within count; None otherwise.
     """
-    if not states:
+    if not states or isinstance(states, dict):
+        # a dict means someone regressed to code-keyed states (BUG-010);
+        # fail closed instead of silently mis-selecting a choice.
         return None
-    for i in range(min(9, count)):
-        if states.get(ord("1") + i) == "just":
+    for i in range(min(9, count, len(states))):
+        if states[i] == "just":
             return i
     return None
 
@@ -277,6 +283,12 @@ class VNController:
     def _advance(self, send_value=None):
         if self._gen is None:
             return
+        # M25 BUG-007b: a menu may only be resolved with an explicit choice.
+        # Sending None used to raise inside the interpreter and kill the
+        # story generator (ScriptRuntimeError at the yield point).
+        if send_value is None and self._current_event is not None \
+                and self._current_event.get("type") == "menu":
+            return
         try:
             if self._current_event is None:
                 # first call
@@ -406,6 +418,11 @@ class VNController:
             delay = 0.05 if self.state.skip else self.state.auto_delay
             # skip only if already seen
             should_skip = True
+            # M25 BUG-007: skip/auto must never auto-resolve a menu — silently
+            # picking a choice for the player corrupted routes in the field
+            # (and a None choice used to kill the story generator).
+            if self._current_event.get("type") == "menu":
+                should_skip = False
             if self.state.skip and self._current_event.get("type") == "say":
                 try:
                     from .vn_interpreter import strip_tags
@@ -450,14 +467,25 @@ class VNController:
                     import bge as _bge_imp
                     ev = _bge_imp.events
                     count = len(self._current_event.get("choices", []))
-                    digit_states = {}
+                    digit_states = []
+                    # M25 BUG-006: UPBGE 0.50 key codes are NOT ASCII
+                    # (ONEKEY == 14, SPACE == 8). Polling ord('1')+i silently
+                    # never matched, so 1-9 choice selection was dead in the
+                    # player while headless tests stayed green.
+                    # M25 BUG-010: keep the states in DIGIT ORDER (list), the
+                    # helper must never see raw key codes or ASCII ordinals.
+                    digit_names = ("ONEKEY", "TWOKEY", "THREEKEY", "FOURKEY",
+                                   "FIVEKEY", "SIXKEY", "SEVENKEY", "EIGHTKEY",
+                                   "NINEKEY")
                     for i in range(min(9, count)):
-                        key = ord("1") + i
+                        key = getattr(ev, digit_names[i], None)
+                        if key is None:
+                            key = ord("1") + i
                         st = _bge_input_state("keyboard", key)
-                        pad = getattr(ev, f"PAD{i + 1}", None) or getattr(ev, f"PAD{i + 1}KEY", None)
-                        if pad is not None and _bge_input_state("keyboard", pad) == "just":
-                            st = "just"
-                        digit_states[key] = st
+                        # NOTE: the old PAD{i+1} fallback was dropped in M25 —
+                        # in 0.50 those constants alias unrelated keys and made
+                        # e.g. Ctrl+L resolve a menu by accident.
+                        digit_states.append(st)
                     idx = _digit_choice_index(digit_states, count)
                     if idx is not None:
                         self.choose(idx)
@@ -469,8 +497,11 @@ class VNController:
                 try:
                     import bge as _bge_imp
                     ev = _bge_imp.events
-                    if _bge_just("keyboard", ev.SKEY):  # S for skip
-                        self.toggle_skip()
+                    # M25 BUG-008: Ctrl+S is quick-save; it must not ALSO
+                    # toggle skip (the bare-S action used to fire on the same
+                    # tick, silently enabling skip mode during a save).
+                    if _bge_just("keyboard", ev.SKEY) and not _bge_active("keyboard", ev.LEFTCTRLKEY):
+                        self.toggle_skip()  # S for skip
                     if _bge_just("keyboard", ev.AKEY):  # A for auto
                         self.toggle_auto()
                     if _bge_just("keyboard", ev.HKEY):  # H for history
@@ -480,11 +511,11 @@ class VNController:
                         if self.screen_mgr:
                             self.screen_mgr.handle_key("q")
                     if _bge_just("keyboard", ev.SKEY) and _bge_active("keyboard", ev.LEFTCTRLKEY):  # Ctrl+S quick save
-                        if self.screen_mgr:
-                            self.screen_mgr.show("save")
+                        # M25 BUG-011: direct save, no modal (modals are
+                        # invisible + blocking in the standalone player).
+                        self.quick_save()
                     if _bge_just("keyboard", ev.LKEY) and _bge_active("keyboard", ev.LEFTCTRLKEY):  # Ctrl+L quick load
-                        if self.screen_mgr:
-                            self.screen_mgr.show("load")
+                        self.quick_load()
                 except Exception:
                     pass
         # rollback: mouse wheel up, forward wheel down (M08)
@@ -585,6 +616,73 @@ class VNController:
         # run() deepcopy is only in __init__, not in run(), so run() will use current self.labels as is (good)
         self._current_event = None
         self._advance()
+
+    def _save_manager(self):
+        """Return (creating if needed) the SaveManager for this controller."""
+        sm = getattr(getattr(self, "screen_mgr", None), "save_manager", None)
+        if sm is None:
+            try:
+                from ..save.save_manager import SaveManager
+                sm = SaveManager(self.state)
+                if self.screen_mgr is not None:
+                    self.screen_mgr.save_manager = sm
+            except Exception:
+                sm = None
+        return sm
+
+    def quick_save(self, slot: str = "quick") -> bool:
+        """M25 BUG-011: direct quick-save with NO modal screen.
+
+        In the standalone player modal screens have no rendering and no input
+        wiring, so opening one only blocks the story (and the historical way
+        out — Esc — quits blenderplayer at engine level). Ctrl+S therefore
+        writes the slot straight to disk and stays in gameplay.
+        """
+        sm = self._save_manager()
+        if sm is None:
+            return False
+        try:
+            sm.save(slot)
+            return True
+        except Exception:
+            return False
+
+    def quick_load(self, slot: str = "quick") -> bool:
+        """M25 BUG-011: direct quick-load with NO modal screen.
+
+        Maps the on-disk save format back onto a VNState snapshot (the two
+        shapes differ: saves nest actors under scene and trim history), then
+        restarts the story generator at the restored point — same technique
+        rollback() uses. Visual managers re-sync on the following events.
+        """
+        sm = self._save_manager()
+        if sm is None:
+            return False
+        try:
+            data = sm.load(slot)
+        except Exception:
+            return False
+        try:
+            scene = data.get("scene", {}) or {}
+            snap = {
+                "current_label": data["current_label"],
+                "instruction_index": data["instruction_index"],
+                "variables": data.get("variables", {}),
+                "history": data.get("history", []),
+                "scene": {"background": scene.get("background")},
+                "audio": data.get("audio", {}) or {},
+            }
+            self.state.restore(snap)
+            from .vn_state import ShownActor
+            self.state.shown_actors = {
+                tag: ShownActor(**a) for tag, a in (scene.get("actors") or {}).items()
+            }
+            self._gen = self.interp.run()
+            self._current_event = None
+            self._advance()
+            return True
+        except Exception:
+            return False
 
     def roll_forward(self, steps: int = 1):
         """Redo after rollback (M08)."""

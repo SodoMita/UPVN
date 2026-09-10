@@ -1,0 +1,119 @@
+# BUGS — M25 Usability Stabilization Freeze
+
+Living inventory for the freeze. Rule: **no new features until install/setup/play
+is boring and reliable.** Every entry records symptom, cause, fix, and how it is
+kept fixed (test / walkthrough step). Severities: P0 = cannot start or cannot
+play; P1 = play breaks silently; P2 = cosmetic / QA pain.
+
+| ID | Sev | Title | Status |
+|----|-----|-------|--------|
+| BUG-001 | P0 | Shipped template blend stale vs addon contract | fixed (regen2) |
+| BUG-002 | P1 | Silent `except: pass` hid every field failure | fixed (M24/M25 audits) |
+| BUG-003 | P1 | Off-frame UI layout (ortho half-width used for vertical Z) | fixed |
+| BUG-004 | P1 | `set_font_text` was a no-op (KX_FontObject has no runtime `.text`) | fixed |
+| BUG-005 | P1 | Black choice plates (empty TexImage→Emission link) | fixed |
+| BUG-006 | P0 | Player segfault at startup (audio device `'None'` userpref) | fixed |
+| BUG-007 | P1 | Skip/auto silently auto-resolved menus; `None` choice killed generator | fixed |
+| BUG-008 | P2 | Ctrl+S also toggled skip mode on the same tick | fixed |
+| BUG-009 | P0 | Game properties written as ID custom props are invisible at runtime (UPBGE 0.50) | fixed |
+| BUG-010 | P0 | Digit choice select compared ASCII ordinals against bge key codes | fixed |
+| BUG-011 | P1 | Modal screens (save/load) invisible + blocking in player; Esc quits at engine level | fixed (direct quick-save/load) |
+
+## BUG-001 — stale template
+The shipped `blend/UPVN_Template.blend` predated the addon's object contract
+(missing choice plates / wrong props), so "press P" played a broken scene.
+Fix: template regenerated from the addon (regen2), contract-checked
+(29/29 objects, `script_path` game property, 0 bad texture links).
+Kept fixed: `tests/test_m20_upbge_runtime.py` contract assertions.
+
+## BUG-002 — silent excepts
+Dozens of `except: pass` blocks turned every later bug into "black screen, no
+clue". Replaced with loud-once prints / `_last_upvn_error` surfaced by the F1
+diag. Kept fixed: code review + F1 diag shows `last error`.
+
+## BUG-003 — off-frame layout
+`layout_screen_ui` divided the ortho frustum's half-**width** by aspect for
+vertical placement… incorrectly: dialogue/box Z used `half` instead of
+`half/aspect`, pushing UI off-frame on non-4:3 windows.
+Fix: `aspect_wh()` + `half_v` in `engine/ui/world_ui.py`.
+Kept fixed: `tests/test_m25_stabilization.py` layout tests.
+
+## BUG-004 — font no-op
+`KX_FontObject` exposes no runtime `.text`; writes went nowhere.
+Fix: `set_font_text` writes `obj.blenderObject.data.body`.
+Kept fixed: unit tests with fake font objects.
+
+## BUG-005 — black plates
+Choice plates built an Image Texture node with no image and linked it into
+Emission Color → black. Fix: solid emission color, texture link only when an
+image exists. Kept fixed: addon unit tests + walkthrough shots 03/04.
+
+## BUG-006 — startup segfault
+Userpref `audio_device='None'` (string) made the audio layer segfault the
+player before the first frame. Fix: sandbox prep sets the device to a valid
+value/None-object + prefs autoexec; docs/SANDBOX_UPBGE.md records the recipe.
+Kept fixed: `docs/SANDBOX_UPBGE.md` prep step; player log banner check.
+
+## BUG-007 — skip/auto ate menus
+Skip (S) and auto (A) advanced through `menu` events, silently picking choice
+`None`, which then raised inside the story generator (ScriptRuntimeError) and
+bricked the session. Fix: `menu` never auto-resolves; `_advance(None)` guard.
+Kept fixed: `tests/test_m25_stabilization.py::test_skip_does_not_resolve_menu`.
+
+## BUG-008 — Ctrl+S doubled as skip
+The bare-S skip toggle fired on the same tick as Ctrl+S quick-save, enabling
+skip mode during a save. Fix: skip requires `not active(LEFTCTRLKEY)`.
+Kept fixed: unit test on the ctrl guard.
+
+## BUG-009 — runtime-invisible game properties (UPBGE 0.50)
+**Symptom:** player showed "UPVN: game script not found" although the blend
+carried `script_path='//../examples/20_smoke_game/script.rpy'`; the frontend
+silently fell back to the bundled sample game.
+**Cause:** UPBGE 0.50's `KX_GameObject` only exposes entries of
+`object.game.properties` ("Game Properties"). Plain ID custom properties
+(`obj["script_path"]`, what the addon wrote) are invisible at runtime
+(probed live: `'script_path' in owner == False`, `owner['script_path']`
+KeyError, while `bpy` offline showed the custom prop).
+**Fix:** addon `_set_runtime_prop()` writes BOTH representations
+(custom prop for the editor UI, game property for the player); template
+regenerated with real game properties. Old blends: re-run Setup Scene.
+Kept fixed: walkthrough step 01 must show the smoke game's first line
+("Eileen / Line one."), not the diag screen.
+
+## BUG-010 — digit select compared ASCII to bge key codes
+**Symptom:** pressing 1–9 at a menu did nothing in the player while headless
+tests stayed green.
+**Cause:** two-layer mismatch. UPBGE 0.50 key codes are evdev-like
+(`ONEKEY==14`, `SPACE==8`), not ASCII. The M25 producer fix switched polling
+to `bge.events.ONEKEY..NINEKEY`, but `_digit_choice_index` still compared
+`states.get(ord("1")+i)` — ASCII 49.. never equals 14.., so selection stayed
+dead (found via live Wayland walkthrough, screenshot evidence).
+**Fix:** states are now a **digit-ordered sequence**; the helper rejects dicts
+(fail closed) and never sees raw codes. Kept fixed:
+`tests/test_m25_stabilization.py` BUG-010 tests + walkthrough step 04
+("You chose left." after pressing 1).
+
+## BUG-011 — modal screens are an invisible trap in the player
+**Symptom:** Ctrl+S / Ctrl+L opened save/load modals that render nothing in
+the standalone player (screens only implement `draw_headless`), blocked story
+advance, and the historical dismiss key (Esc) **quits blenderplayer at engine
+level** — modal or not (legacy BGE player behaviour; no Python hook).
+**Cause:** screen system was built for headless traces; player wiring assumed
+an interactive UI that does not exist yet.
+**Fix (freeze-safe):** in BGE mode Ctrl+S/Ctrl+L now perform a **direct**
+quick-save / quick-load (`VNController.quick_save/quick_load`, slot `quick`,
+no modal); save format mapped onto a state snapshot for restore. Headless
+screen APIs unchanged. Kept fixed:
+`tests/test_m25_stabilization.py::test_quick_save_load_roundtrip_no_modal`,
+walkthrough steps 06–09 (save file on disk + state returns to save point).
+**Known limitation (post-freeze):** slot browsing UI in the player.
+
+## Environment / QA notes (not engine bugs)
+- **Synthetic input flake:** XTest → XWayland → client drops single keys and
+  chords intermittently; chords with zero hold delay release Ctrl between
+  50–75 ms logic ticks. Walkthrough uses `--delay 80` + retry-until-state
+  (`press_until`) against the frontend heartbeat file (`UPVN_HEARTBEAT`).
+- **Player stdout is block-buffered** and lost on `kill -9`; never assert on
+  player logs — use the heartbeat file or screenshots (grim / import).
+- **Xvfb instability** (zombie servers, black captures <16 s) motivated the
+  headless-Wayland stack; see docs/SANDBOX_UPBGE.md.

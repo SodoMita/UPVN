@@ -1,4 +1,23 @@
-# Current Status — 2026-09-09 (M24 play feel · M23 Ren'Py screens)
+# Current Status — 2026-09-10 (M25 Usability Stabilization Freeze DONE)
+
+## Last completed
+- **M25 Usability Stabilization Freeze (2026-09-10)**: feature freeze + P0-P2
+  stabilization. BUGS.md opened (BUG-001..011). Field fixes verified IN-GAME on
+  a headless Wayland stack (sway 1.10 + XWayland + llvmpipe): BUG-009 game
+  properties invisible at runtime (addon now writes `object.game.properties`,
+  template regenerated); BUG-010 digit choice select compared ASCII ordinals to
+  evdev-like bge key codes (states now digit-ordered, helper fails closed on
+  dicts); BUG-011 save/load modals were invisible story-blockers and Esc quits
+  blenderplayer at engine level (Ctrl+S/Ctrl+L now direct quick-save/load,
+  `saves/save_quick.json` round-trip proven in-game). `tools/smoke_walkthrough.sh`
+  rebuilt: backend-agnostic (wayland/xvfb), self-verifying via the new
+  `UPVN_HEARTBEAT` per-tick state file, retry-until-state for flaky synthetic
+  input. docs/SANDBOX_UPBGE.md (headless-wayland recipe + Xvfb comparison),
+  docs/MANUAL_QA.md (human checklist), evidence PNGs in
+  examples/20_smoke_game/evidence/. Tests 276 passed / 16 skipped.
+  **Freeze rule active: no new Ren'Py syntax/features until install/setup/play
+  is boring and reliable.**
+
 
 ## Last completed
 - M24 play feel (2026-09-09): mouse visible; ortho 15; UI NDC-laid so zoom leaves text; placeholder PNG sprites/BGs; LibLoad skipped if missing (crash fix); choice rayCast + SENSOR physics + keys/numpad. v0.6.11. Restart UPBGE, Setup Scene, P.
