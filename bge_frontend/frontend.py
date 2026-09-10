@@ -97,7 +97,10 @@ def resolve_script_path(logic, owner=None, extra_candidates=None):
             p = c
         tried.append(p)
         try:
-            if os.path.isfile(p):
+            # M26: directories are valid script sources — VNController.load()
+            # merges every *.rpy/*.urpy inside (multi-file Ren'Py projects,
+            # which is what tools/renpy_convert.py points at: '//../game').
+            if os.path.isfile(p) or os.path.isdir(p):
                 return os.path.abspath(p), tried
         except Exception:
             pass
