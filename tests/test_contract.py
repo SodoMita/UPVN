@@ -37,6 +37,11 @@ def test_contract_required_objects_complete():
     assert contract.DIALOGUE_PLANE in names
     assert contract.SPEAKER_TEXT in names
     assert contract.DIALOGUE_TEXT in names
+    # M26d: backlog + rewind are part of the contract, so "Check Wiring" tells
+    # an old .blend it needs Setup Scene again for H / the rewind marker.
+    assert contract.HISTORY_PLANE in names
+    assert contract.HISTORY_TEXT in names
+    assert contract.REWIND_TEXT in names
     for i in range(contract.CHOICE_COUNT):
         assert f"{contract.CHOICE_PREFIX}{i}" in names
     assert contract.CONTROLLER in names
@@ -57,9 +62,12 @@ def test_contract_required_objects_complete():
 def test_contract_check_full_scene_ok():
     obj_names = {contract.BG_PLANE, contract.DIALOGUE_PLANE, contract.CONTROLLER,
                  contract.CAMERA_UI, contract.CAMERA_3D,
-                 contract.SPEAKER_TEXT, contract.DIALOGUE_TEXT}
+                 contract.SPEAKER_TEXT, contract.DIALOGUE_TEXT,
+                 contract.HISTORY_PLANE, contract.HISTORY_TEXT,
+                 contract.REWIND_TEXT}
     obj_names |= {f"Sprite_{p}" for p in contract.SPRITE_POSITIONS}
     obj_names |= {f"{contract.CHOICE_PREFIX}{i}" for i in range(contract.CHOICE_COUNT)}
+    obj_names |= {f"{contract.CHOICE_PREFIX}{i}_text" for i in range(contract.CHOICE_COUNT)}
     mats = {contract.BG_MATERIAL, contract.SPRITE_MATERIAL}
     res = contract.check_contract(obj_names, mats, set(contract.COLLECTIONS),
                                   {contract.LAUNCHER_TEXT})

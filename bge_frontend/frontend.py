@@ -197,10 +197,29 @@ def _sync_world_ui(ctrl, hovered=None):
     try:
         from engine.ui.world_ui import build_world_ui, apply_world_ui
         from engine.render.contract import CAMERA_UI_ORTHO_SCALE
+        # backlog + rewind state come from the screen manager / controller so the
+        # player draws the same history the headless traces already had (M26d).
+        _sm = getattr(ctrl, "screen_mgr", None)
+        history_open = False
+        history_entries = None
+        if _sm is not None:
+            try:
+                history_open = bool(_sm.is_overlay_visible("history"))
+            except Exception:
+                history_open = False
+            try:
+                history_entries = _sm.get_history_entries(strip=True)
+            except Exception:
+                history_entries = None
+        if history_entries is None:
+            history_entries = getattr(getattr(ctrl, "state", None), "history", [])
         payload = build_world_ui(
             getattr(ctrl, "current_event", None),
             ui_mgr=getattr(ctrl, "ui_mgr", None),
             diag=getattr(ctrl, "_load_diag", None),
+            history_entries=history_entries,
+            history_open=history_open,
+            rewind_depth=getattr(ctrl, "rewind_depth", lambda: 0)(),
         )
         # hovered comes in as a parameter (set by _tick_pointer) — this
         # function has no `logic` in scope
