@@ -45,7 +45,7 @@ Headless fallback: when bpy unavailable (CI), the module still imports and expos
 bl_info = {
     "name": "UPVN — Visual Novel Editor",
     "author": "UPVN",
-    "version": (0, 6, 15),
+    "version": (0, 6, 17),
     "blender": (4, 2, 0),
     "location": "View3D > Sidebar > UPVN, Text Editor > Sidebar > UPVN",
     "description": "Create Ren'Py-like visual novel inside UPBGE with minimal coding — self-contained engine, one-click scene setup, characters, scenes, dialogue, menus, arbitrary saves, preview",
@@ -1594,6 +1594,449 @@ except Exception:
                 except Exception:
                     pass
 
+    # ------------------------------------------------------------------
+    # 3D Car generator — minimal low-poly car with 4 wheels + Drive action
+    # ------------------------------------------------------------------
+    def _create_car_3d(bpy_mod=None):
+        """Create a low-poly car rig in VN_3DStage. Returns the Car_Rig empty name.
+
+        Structure:
+          Car_Rig (Empty, at marker_car)
+            ├ Car_Body (cube 2.2×1.0×0.5, red)
+            ├ Car_Cabin (cube 1.0×0.8×0.4, dark red, on top)
+            ├ Wheel_FL/FR/RL/RR (cylinders r=0.25, black, 4 corners)
+            └ marker_car is the spawn target for show3d
+
+        Also creates a looping Action "Car_Drive" (location Y + wheel Spin)
+        so `anim Car_Rig Car_Drive loop` works in UPBGE. Materials use
+        Principled BSDF (not emission) so the car is lit. Called by
+        UPVN_OT_SetupCarScene and by headless tests.
+        """
+        _b = bpy_mod or bpy
+        try:
+            from engine.render.contract import CAMERA_UI, CAMERA_3D
+        except Exception:
+            CAMERA_UI = "Camera_UI"
+        # ensure VN_3DStage exists
+        scene = None
+        try:
+            scene = _b.context.scene
+        except Exception:
+            scene = _b.data.scenes[0]
+        col = _b.data.collections.get("VN_3DStage")
+        if col is None:
+            col = _b.data.collections.new("VN_3DStage")
+            try:
+                scene.collection.children.link(col)
+            except Exception:
+                pass
+        # clean previous car if any (idempotent)
+        for old_name in ("Car_Rig", "Car_Body", "Car_Cabin", "Wheel_FL", "Wheel_FR", "Wheel_RL", "Wheel_RR", "Car_Body_Mesh", "Car_Cabin_Mesh"):
+            ob = _b.data.objects.get(old_name)
+            if ob is not None:
+                # keep if it's the rig we will reuse? remove to recreate cleanly
+                try:
+                    # unlink from all collections
+                    for c in list(ob.users_collection):
+                        try:
+                            c.objects.unlink(ob)
+                        except Exception:
+                            pass
+                    _b.data.objects.remove(ob, do_unlink=True)
+                except Exception:
+                    pass
+        for old_mesh in ("Car_Body_Mesh", "Car_Cabin_Mesh", "Wheel_Mesh"):
+            m = _b.data.meshes.get(old_mesh)
+            if m is not None:
+                try:
+                    _b.data.meshes.remove(m, do_unlink=True)
+                except Exception:
+                    pass
+
+        def _mat_principled(name, color, roughness=0.6, metallic=0.1):
+            m = _b.data.materials.get(name)
+            if m is None:
+                m = _b.data.materials.new(name)
+            m.use_nodes = True
+            try:
+                nt = m.node_tree
+                # clear to ensure Principled
+                # keep output + principled only
+                bsdf = nt.nodes.get("Principled BSDF")
+                if bsdf is None:
+                    # fallback: find any bsdf
+                    for n in nt.nodes:
+                        if n.type == 'BSDF_PRINCIPLED':
+                            bsdf = n
+                            break
+                if bsdf is None:
+                    bsdf = nt.nodes.new("ShaderNodeBsdfPrincipled")
+                bsdf.inputs["Base Color"].default_value = color
+                try:
+                    bsdf.inputs["Roughness"].default_value = roughness
+                except Exception:
+                    pass
+                try:
+                    bsdf.inputs["Metallic"].default_value = metallic
+                except Exception:
+                    pass
+                # ensure output linked
+                out = nt.nodes.get("Material Output")
+                if out and bsdf:
+                    # check if already linked
+                    linked = any(l.from_node == bsdf and l.to_node == out for l in nt.links)
+                    if not linked:
+                        try:
+                            nt.links.new(bsdf.outputs[0], out.inputs[0])
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+            # UPBGE game settings: opaque, no backface cull
+            try:
+                mat = m
+                for attr, val in (("blend_method", "OPAQUE"), ("use_backface_culling", False)):
+                    try:
+                        setattr(mat, attr, val)
+                    except Exception:
+                        pass
+                try:
+                    mat.surface_render_method = 'DITHERED'
+                except Exception:
+                    pass
+                gs = getattr(mat, "game_settings", None)
+                if gs is not None:
+                    try:
+                        gs.alpha_blend = 'OPAQUE'
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+            return m
+
+        mat_body = _mat_principled("MatCarBody", (0.85, 0.15, 0.12, 1.0), roughness=0.7, metallic=0.05)
+        mat_cabin = _mat_principled("MatCarCabin", (0.12, 0.14, 0.38, 1.0), roughness=0.5, metallic=0.1)
+        mat_wheel = _mat_principled("MatCarWheel", (0.05, 0.05, 0.06, 1.0), roughness=0.9, metallic=0.0)
+        mat_window = _mat_principled("MatCarWindow", (0.6, 0.75, 0.85, 1.0), roughness=0.2, metallic=0.0)
+
+        # helper to create cube mesh
+        def _cube_mesh(name, sx, sy, sz):
+            mesh = _b.data.meshes.new(name)
+            # 8 verts of cube -1..1 scaled by half extents
+            hx, hy, hz = sx, sy, sz
+            verts = [(-hx,-hy,-hz),(hx,-hy,-hz),(hx,hy,-hz),(-hx,hy,-hz),
+                     (-hx,-hy,hz),(hx,-hy,hz),(hx,hy,hz),(-hx,hy,hz)]
+            faces = [(0,1,2,3),(4,5,6,7),(0,1,5,4),(1,2,6,5),(2,3,7,6),(3,0,4,7)]
+            mesh.from_pydata(verts, [], faces)
+            mesh.update()
+            return mesh
+
+        def _cyl_mesh(name, radius, depth, segs=16):
+            import math
+            mesh = _b.data.meshes.new(name)
+            verts = []
+            for i in range(segs):
+                a = 2*math.pi*i/segs
+                x = math.cos(a)*radius
+                y = math.sin(a)*radius
+                verts.append((x, y, -depth/2))
+            base = len(verts)
+            for i in range(segs):
+                a = 2*math.pi*i/segs
+                x = math.cos(a)*radius
+                y = math.sin(a)*radius
+                verts.append((x, y, depth/2))
+            faces = []
+            for i in range(segs):
+                n = (i+1)%segs
+                faces.append((i, n, base+n, base+i))
+            faces.append(tuple(range(segs)))
+            faces.append(tuple(range(base, base+segs)))
+            mesh.from_pydata(verts, [], faces)
+            mesh.update()
+            return mesh
+
+        # Car_Rig empty
+        rig = _b.data.objects.new("Car_Rig", None)
+        rig.empty_display_type = 'CUBE'
+        rig.empty_display_size = 0.3
+        rig.location = (0, 0.5, 0.35)
+        try:
+            col.objects.link(rig)
+        except Exception:
+            try:
+                scene.collection.objects.link(rig)
+            except Exception:
+                pass
+
+        # Body
+        body_mesh = _cube_mesh("Car_Body_Mesh", 1.1, 0.5, 0.25)
+        body = _b.data.objects.new("Car_Body", body_mesh)
+        body.data.materials.append(mat_body)
+        body.parent = rig
+        body.location = (0, 0, 0.25)
+        try:
+            col.objects.link(body)
+        except Exception:
+            pass
+
+        # Cabin
+        cabin_mesh = _cube_mesh("Car_Cabin_Mesh", 0.5, 0.4, 0.2)
+        cabin = _b.data.objects.new("Car_Cabin", cabin_mesh)
+        cabin.data.materials.append(mat_cabin)
+        cabin.parent = rig
+        cabin.location = (-0.15, 0, 0.6)
+        try:
+            col.objects.link(cabin)
+        except Exception:
+            pass
+
+        # Wheels — 4 cylinders, axis along X (so they roll around Y)
+        wheel_positions = [ (0.7, 0.5, 0.0), (0.7, -0.5, 0.0), (-0.7, 0.5, 0.0), (-0.7, -0.5, 0.0) ]
+        wheel_names = ["Wheel_FL", "Wheel_FR", "Wheel_RL", "Wheel_RR"]
+        wheels = []
+        for wname, (wx, wy, wz) in zip(wheel_names, wheel_positions):
+            wmesh = _cyl_mesh("Wheel_Mesh", 0.22, 0.18, segs=16)
+            # rotate cylinder so axis is X (original axis Z)
+            # we created cylinder with axis Z, need to rotate 90 deg Y
+            w = _b.data.objects.new(wname, wmesh)
+            w.data.materials.append(mat_wheel)
+            w.parent = rig
+            w.location = (wx, wy, 0.0)
+            w.rotation_euler = (0, 1.57079632679, 0)  # 90 deg Y
+            try:
+                col.objects.link(w)
+            except Exception:
+                pass
+            wheels.append(w)
+
+        # Windows — thin planes on cabin
+        try:
+            # front window
+            mesh = _b.data.meshes.new("Car_Window_Front_Mesh")
+            mesh.from_pydata([(-0.4,-0.01,0),(0.4,-0.01,0),(0.4,0.01,0.3),(-0.4,0.01,0.3)], [], [(0,1,2,3)])
+            mesh.update()
+            win = _b.data.objects.new("Car_Window_Front", mesh)
+            win.data.materials.append(mat_window)
+            win.parent = rig
+            win.location = (0.25, 0, 0.65)
+            win.rotation_euler = (0, 0, 0)
+            col.objects.link(win)
+        except Exception:
+            pass
+
+        # Physics for BGE — car rig as NO_COLLISION or STATIC, wheels as no collision
+        for ob in [rig, body, cabin] + wheels:
+            try:
+                g = ob.game
+                g.physics_type = 'NO_COLLISION'
+            except Exception:
+                pass
+
+        # Ensure marker_car exists (or reuse marker_center)
+        marker = _b.data.objects.get("marker_car")
+        if marker is None:
+            marker = _b.data.objects.get("marker_center")
+        if marker is None:
+            try:
+                marker = _b.data.objects.new("marker_car", None)
+                marker.empty_display_type = 'ARROWS'
+                marker.empty_display_size = 0.5
+                marker.location = (0, 0.5, 0)
+                col.objects.link(marker)
+                marker.name = "marker_car"
+            except Exception:
+                pass
+        else:
+            # duplicate marker_car from marker_center if needed
+            if marker.name != "marker_car":
+                try:
+                    m2 = _b.data.objects.new("marker_car", None)
+                    m2.empty_display_type = 'ARROWS'
+                    m2.empty_display_size = 0.5
+                    m2.location = tuple(marker.location)
+                    col.objects.link(m2)
+                except Exception:
+                    pass
+
+        # Create Action "Car_Drive" — moves rig Y and Z (bounce)
+        # Supports both legacy (Blender 4.3) and layered (Blender 5.0 / UPBGE 0.50) actions
+        def _anim_ensure_fc(action, obj, data_path, index):
+            """Return FCurve for (action, obj, data_path, index), creating via legacy or layered API."""
+            # Try legacy first (Blender <4.4)
+            try:
+                if hasattr(action, "fcurves"):
+                    # check existing first to avoid "already exists" error spam
+                    try:
+                        existing = action.fcurves.find(data_path=data_path, index=index)
+                        if existing is not None:
+                            return existing
+                    except Exception:
+                        pass
+                    try:
+                        fc = action.fcurves.new(data_path=data_path, index=index)
+                        return fc
+                    except Exception as e:
+                        # duplicate race? try find again
+                        try:
+                            fc = action.fcurves.find(data_path=data_path, index=index)
+                            if fc is not None:
+                                return fc
+                        except Exception:
+                            pass
+                        raise
+            except Exception:
+                pass
+            # Layered: ensure obj has action assigned, then use fcurve_ensure_for_datablock
+            try:
+                if obj.animation_data is None:
+                    obj.animation_data_create()
+                # assign action if not already
+                try:
+                    obj.animation_data.action = action
+                except Exception:
+                    pass
+                # fcurve_ensure_for_datablock exists in 5.0 — needs keyword index
+                if hasattr(action, "fcurve_ensure_for_datablock"):
+                    try:
+                        fc = action.fcurve_ensure_for_datablock(obj, data_path, index=index)
+                        return fc
+                    except TypeError:
+                        # fallback positional
+                        fc = action.fcurve_ensure_for_datablock(obj, data_path, index)
+                        return fc
+            except Exception as e:
+                print(f"[Car] ensure fc fallback failed {data_path}[{index}] {e}")
+            # Manual layered fallback: create layer/strip/channelbag
+            try:
+                # slot
+                slot = None
+                # try to find existing slot for this obj
+                try:
+                    for s in action.slots:
+                        if s.identifier == "OB" + obj.name or s.name_display == obj.name:
+                            slot = s
+                            break
+                except Exception:
+                    pass
+                if slot is None:
+                    try:
+                        slot = action.slots.new(id_type='OBJECT', name=obj.name)
+                    except Exception as e:
+                        print(f"[Car] slot create failed {e}")
+                        slot = action.slots[0] if len(action.slots) else None
+                # layer
+                layer = action.layers[0] if len(action.layers) else action.layers.new("Layer")
+                strip = layer.strips[0] if len(layer.strips) else layer.strips.new(type='KEYFRAME')
+                # channelbag
+                cb = None
+                for _cb in strip.channelbags:
+                    try:
+                        if _cb.slot == slot or _cb.slot_handle == getattr(slot, "handle", None):
+                            cb = _cb
+                            break
+                    except Exception:
+                        pass
+                if cb is None:
+                    cb = strip.channelbags.new(slot)
+                fc = cb.fcurves.new(data_path=data_path, index=index)
+                # ensure object slot assigned
+                try:
+                    obj.animation_data.action_slot = slot
+                except Exception:
+                    pass
+                return fc
+            except Exception as e:
+                print(f"[Car] manual layered fcurve create failed {e}")
+                import traceback; traceback.print_exc()
+                return None
+
+        try:
+            # remove old actions if exists
+            for aname in ("Car_Drive", "Car_WheelSpin"):
+                old_a = _b.data.actions.get(aname)
+                if old_a:
+                    try:
+                        _b.data.actions.remove(old_a, do_unlink=True)
+                    except Exception:
+                        pass
+            action = _b.data.actions.new(name="Car_Drive")
+            # ensure rig has animation data before creating fcurves
+            if rig.animation_data is None:
+                rig.animation_data_create()
+            try:
+                rig.animation_data.action = action
+            except Exception:
+                pass
+            # Rig location Y: 0.5 -> 1.5 -> 0.5 over 60 frames
+            for data_path, index, values in [
+                ("location", 1, [(0, 0.5), (30, 1.5), (60, 0.5)]),  # Y
+                ("location", 2, [(0, 0.35), (30, 0.38), (60, 0.35)]),  # Z bounce
+            ]:
+                fc = _anim_ensure_fc(action, rig, data_path, index)
+                if fc is not None:
+                    # clear any existing points (for ensure case)
+                    try:
+                        fc.keyframe_points.clear()
+                    except Exception:
+                        pass
+                    for frame, val in values:
+                        kp = fc.keyframe_points.insert(frame=frame, value=val)
+                        kp.interpolation = 'BEZIER'
+                    try:
+                        fc.update()
+                    except Exception:
+                        pass
+            # Ensure rig slot set for layered
+            try:
+                if hasattr(rig.animation_data, "action_slot") and rig.animation_data.action_slot is None:
+                    # find slot for rig
+                    for s in action.slots:
+                        if "Car_Rig" in s.identifier or "Car" in s.identifier:
+                            rig.animation_data.action_slot = s
+                            break
+            except Exception:
+                pass
+            # Wheel spin — create one shared action for all wheels (layered will create per-wheel slots)
+            w_action = _b.data.actions.new(name="Car_WheelSpin")
+            import math
+            for w in wheels:
+                if w.animation_data is None:
+                    w.animation_data_create()
+                try:
+                    w.animation_data.action = w_action
+                except Exception:
+                    pass
+                fc_w = _anim_ensure_fc(w_action, w, "rotation_euler", 0)
+                if fc_w is not None:
+                    try:
+                        fc_w.keyframe_points.clear()
+                    except Exception:
+                        pass
+                    for f in [0, 15, 30, 45, 60]:
+                        val = (f/15.0) * 2*math.pi
+                        kp = fc_w.keyframe_points.insert(frame=float(f), value=val)
+                        kp.interpolation = 'LINEAR'
+                    try:
+                        fc_w.update()
+                    except Exception:
+                        pass
+            # For layered, each wheel now has its own slot/bag/fcurve with same keys
+        except Exception as e:
+            print(f"[Car] action create failed: {e}")
+            import traceback
+            traceback.print_exc()
+
+        # Hide car rig initially (show3d will clone it at marker)
+        try:
+            rig.hide_viewport = False
+            rig.hide_render = False
+        except Exception:
+            pass
+
+        return rig.name
+
+
     class UPVN_OT_SetupScene(bpy.types.Operator):
         bl_idname = "upvn.setup_scene"
         bl_label = "Setup Scene (one click)"
@@ -1642,6 +2085,144 @@ except Exception:
                             "Scene objects refreshed. Press P to play (or run Setup Scene "
                             "inside the UPBGE UI for the full brick wiring).")
             print("[UPVN] Setup Scene done. script_path=", p.project_path, "| bricks:", bricks)
+            return {"FINISHED"}
+
+    class UPVN_OT_SetupCarScene(bpy.types.Operator):
+        bl_idname = "upvn.setup_car_scene"
+        bl_label = "Setup 3D Car Scene"
+        bl_description = "Generate a low-poly 3D car (Car_Rig + 4 wheels) in VN_3DStage with Drive animation, plus a marker and sample script. Press P to see it with show3d."
+
+        def execute(self, context):
+            # ensure base VN scene exists
+            try:
+                p = context.scene.upvn_props
+                ctrl = build_vn_scene(script_path=p.project_path, scene_name=context.scene.name)
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                self.report({"ERROR"}, f"Setup base failed: {e}")
+                return {"CANCELLED"}
+            # generate car
+            try:
+                rig_name = _create_car_3d(bpy)
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                self.report({"ERROR"}, f"Car create failed: {e}")
+                return {"CANCELLED"}
+            # ensure marker_car exists and is in VN_3DStage
+            try:
+                scene = context.scene
+                col = bpy.data.collections.get("VN_3DStage")
+                marker = bpy.data.objects.get("marker_car") or bpy.data.objects.get("marker_center")
+                if marker is None:
+                    marker = bpy.data.objects.new("marker_car", None)
+                    marker.empty_display_type = 'ARROWS'
+                    marker.empty_display_size = 0.5
+                    marker.location = (0, 0.5, 0.35)
+                    if col:
+                        col.objects.link(marker)
+                    else:
+                        scene.collection.objects.link(marker)
+            except Exception as e:
+                print(f"[Car] marker ensure failed {e}")
+            # write sample script snippet for car demo (append to current project)
+            try:
+                path = bpy.path.abspath(p.project_path)
+                # write sample script snippet for car demo (append to current project file directly)
+                try:
+                    import os as _os
+                    _path_obj = pathlib.Path(path)
+                    _path_obj.parent.mkdir(parents=True, exist_ok=True)
+                    existing = _path_obj.read_text(encoding="utf-8") if _path_obj.exists() else ""
+                    # if file empty or missing start, create minimal starter first
+                    if not existing.strip() or "label start:" not in existing:
+                        # create starter with defines and start label via builder
+                        try:
+                            _builder_tmp = _builder_from_file(str(_path_obj))
+                            # ensure start has at least one line
+                            if not _builder_tmp.labels.get("start"):
+                                _builder_tmp.labels["start"] = ['    scene bg classroom', '    "Hello from UPVN."', '    return']
+                            _builder_tmp.write()
+                            existing = _path_obj.read_text(encoding="utf-8")
+                        except Exception as _be:
+                            print(f"[Car] starter create failed {_be}")
+                            # fallback minimal
+                            if not existing.strip():
+                                existing = 'label start:\n    scene bg classroom\n    "Hello from UPVN."\n    return\n'
+                                _path_obj.write_text(existing, encoding="utf-8")
+                    if "show3d Car_Rig" not in existing:
+                        # build new labels block with correct top-level labels
+                        new_block = "\nlabel car_demo:\n"
+                        new_block += "    scene bg classroom with fade\n"
+                        new_block += "    show3d Car_Rig at marker_car\n"
+                        new_block += "    anim Car_Rig Car_Drive\n"
+                        new_block += '    "A low-poly car appears! It can drive and its wheels spin."\n'
+                        new_block += "    menu:\n"
+                        new_block += '        "Drive the car":\n'
+                        new_block += "            jump car_drive\n"
+                        new_block += '        "Leave it":\n'
+                        new_block += "            jump car_end\n"
+                        new_block += "\nlabel car_drive:\n"
+                        new_block += "    anim Car_Rig Car_Drive\n"
+                        new_block += '    "Vroom! The car drives forward."\n'
+                        new_block += "    jump car_end\n"
+                        new_block += "\nlabel car_end:\n"
+                        new_block += '    "The car demo ends. You can also try show Eileen at center with the car behind."\n'
+                        new_block += "    return\n"
+                        # append to file; also ensure start label has hint if not present
+                        if "jump car_demo" not in existing and "label start:" in existing:
+                            # insert hint comment before next label or end
+                            lines = existing.splitlines()
+                            # find start label index and next label
+                            s_idx = None
+                            for i, l in enumerate(lines):
+                                if re.match(r'^\s*label\s+start\s*:', l):
+                                    s_idx = i
+                                    break
+                            if s_idx is not None:
+                                nxt = None
+                                for j in range(s_idx+1, len(lines)):
+                                    if re.match(r'^\s*label\s+\w+\s*:', lines[j]):
+                                        nxt = j
+                                        break
+                                insert_at = nxt if nxt is not None else len(lines)
+                                # check if hint already exists in block
+                                block_text = "\n".join(lines[s_idx+1:insert_at]) if insert_at else ""
+                                if "jump car_demo" not in block_text:
+                                    lines.insert(insert_at, "    # Try the car: jump car_demo")
+                                    existing = "\n".join(lines) + "\n"
+                        # append new_block to existing (ensure ending newline)
+                        if not existing.endswith("\n"):
+                            existing += "\n"
+                        existing += new_block
+                        _path_obj.write_text(existing, encoding="utf-8")
+                        self.report({"INFO"}, "Car demo script added: label car_demo (jump car_demo to test)")
+                    else:
+                        self.report({"INFO"}, "Car already in script (label car_demo)")
+                except Exception as _e:
+                    print(f"[Car] script direct write failed {_e}, falling back to builder")
+                    try:
+                        builder = _builder_from_file(path)
+                        builder.ensure_label("car_demo")
+                        if "show3d Car_Rig" not in builder._existing_text if builder._existing_text else "":
+                            builder.labels["car_demo"] = [
+                                "    scene bg classroom with fade",
+                                "    show3d Car_Rig at marker_car",
+                                "    anim Car_Rig Car_Drive",
+                                '    "A low-poly car appears! It can drive and its wheels spin."',
+                                "    return",
+                            ]
+                            builder.write()
+                    except Exception as e2:
+                        print(f"[Car] builder fallback failed {e2}")
+                        raise _e
+            except Exception as e:
+                print(f"[Car] script write failed {e}")
+                self.report({"WARNING"}, f"Car created but script write failed {e}")
+
+            self.report({"INFO"}, f"3D Car scene ready: {rig_name} at marker_car — press P, then jump car_demo or show3d Car_Rig at marker_car")
+            print(f"[UPVN] Setup 3D Car Scene done: {rig_name}")
             return {"FINISHED"}
 
     class UPVN_OT_CheckWiring(bpy.types.Operator):
@@ -2173,7 +2754,11 @@ except Exception:
                 row = box.row(align=True)
                 row.operator("upvn.setup_scene", icon='WINDOW')
                 row.operator("upvn.check_wiring", icon='VIEWZOOM')
+                # 3D Car demo — single button that generates a car rig with Drive action
+                row2 = box.row(align=True)
+                row2.operator("upvn.setup_car_scene", icon='AUTO', text="Setup 3D Car Scene")
                 box.label(text="Setup Scene creates every object the engine expects by name", icon='INFO')
+                box.label(text="Setup 3D Car Scene adds a low-poly Car_Rig + marker_car + anim", icon='INFO')
                 box.label(text="Check Wiring compares the scene with engine/render/contract.py", icon='INFO')
                 box.label(text="Then press P in the 3D Viewport", icon='INFO')
                 layout.separator()
@@ -2231,7 +2816,7 @@ except Exception:
                UPVN_OT_InstallPillow,
                UPVN_OT_CreateProject, UPVN_OT_AddCharacter, UPVN_OT_AddScene,
                UPVN_OT_AddDialogue, UPVN_OT_AddShow, UPVN_OT_AddMenu, UPVN_OT_AddStage,
-               UPVN_OT_SetupScene, UPVN_OT_CheckWiring, UPVN_OT_Validate,
+               UPVN_OT_SetupScene, UPVN_OT_SetupCarScene, UPVN_OT_CheckWiring, UPVN_OT_Validate,
                UPVN_OT_Preview, UPVN_OT_SaveSlotDemo, UPVN_OT_QuickPreviewArbitrary,
                UPVN_PT_MainPanel, UPVN_PT_TextPanel)
 

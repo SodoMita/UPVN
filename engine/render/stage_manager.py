@@ -168,6 +168,23 @@ class StageManager:
                 import bge.logic as logic
                 scene = logic.getCurrentScene()
                 marker_obj = scene.objects.get(marker) if marker else None
+                # Special: object already in scene (e.g. Car_Rig directly in VN_3DStage)
+                # In that case just move it to marker instead of addObject
+                existing = scene.objects.get(asset)
+                if existing is not None and marker_obj is not None:
+                    try:
+                        existing.worldPosition = marker_obj.worldPosition.copy()
+                        # also copy orientation if needed? keep rig upright
+                    except Exception:
+                        pass
+                    # ensure visibility
+                    try:
+                        existing.visible = True
+                    except Exception:
+                        pass
+                    self.state.stage_objects[asset] = {"marker": marker, "anim": "idle", "bge_obj": existing.name}
+                    print(f"[StageManager] spawn (move existing) {asset} at {marker} -> {existing.name}")
+                    return
                 # asset could be an object name in stage collection, e.g. Char_Eileen_placeholder or eileen
                 # try to find template object
                 template = None
@@ -187,6 +204,9 @@ class StageManager:
                     # spawn at origin if no marker
                     obj = scene.addObject(template, scene.objects.get("Floor_classroom") or marker_obj, 0)
                     print(f"[StageManager] spawn {asset} (no marker) -> {obj.name}")
+                else:
+                    # fallback: asset itself might be a child like Wheel_FL, try direct
+                    print(f"[StageManager] spawn template not found {asset}@{marker}, candidates checked")
             except Exception as e:
                 print(f"[StageManager] spawn failed {asset}@{marker}: {e}")
         else:
@@ -199,12 +219,50 @@ class StageManager:
                 import bge.logic as logic
                 scene = logic.getCurrentScene()
                 info = self.state.stage_objects.get(target)
+                # resolve object — prefer stage_objects bge_obj, fallback to direct scene object (e.g. Car_Rig already visible)
+                obj = None
                 if info and "bge_obj" in info:
                     obj = scene.objects.get(info["bge_obj"])
-                    if obj:
-                        # playAction(animName, start, end, layer, priority, blendin, play_mode, layerWeight, ipoFlags, speed)
-                        obj.playAction(anim, 0, 60, 0, 0, 5, logic.KX_ACTION_MODE_LOOP if anim == "idle" else logic.KX_ACTION_MODE_PLAY)
+                if obj is None:
+                    obj = scene.objects.get(target)
+                if obj:
+                    # choose loop for idle and car actions
+                    loop_anims = {"idle", "Car_Drive", "Car_WheelSpin"}
+                    mode = logic.KX_ACTION_MODE_LOOP if anim in loop_anims else logic.KX_ACTION_MODE_PLAY
+                    try:
+                        obj.playAction(anim, 0, 60, 0, 0, 5, mode)
+                    except Exception as e:
+                        print(f"[StageManager] playAction {target} {anim} failed {e}, trying fallback range")
+                        # try 0-60 fallback regardless
+                        try:
+                            obj.playAction(anim, 0, 60, 0, 0, 5, mode)
+                        except Exception:
+                            pass
+                    if info is not None:
                         info["anim"] = anim
+                    else:
+                        # track directly-spawned car
+                        self.state.stage_objects[target] = {"marker": None, "anim": anim, "bge_obj": obj.name}
+                    print(f"[StageManager] play_anim {target} {anim} mode={'LOOP' if mode==logic.KX_ACTION_MODE_LOOP else 'PLAY'} -> {obj.name}")
+                    # car special: when driving rig, also spin wheels
+                    if target == "Car_Rig" and anim == "Car_Drive":
+                        for wname in ("Wheel_FL","Wheel_FR","Wheel_RL","Wheel_RR"):
+                            wobj = scene.objects.get(wname)
+                            # wheels may be children of Car_Rig with instance suffix after addObject, try to find by prefix
+                            if wobj is None:
+                                # find any object starting with wheel name
+                                for o in scene.objects:
+                                    if o.name.startswith(wname):
+                                        wobj = o
+                                        break
+                            if wobj is not None:
+                                try:
+                                    wobj.playAction("Car_WheelSpin", 0, 60, 0, 0, 5, logic.KX_ACTION_MODE_LOOP)
+                                    print(f"[StageManager] auto wheel {wname} spin")
+                                except Exception as e:
+                                    print(f"[StageManager] wheel spin {wname} failed {e}")
+                else:
+                    print(f"[StageManager] play_anim object not found {target} -> {info}")
             except Exception as e:
                 print(f"[StageManager] play_anim failed {target} {anim}: {e}")
         else:
