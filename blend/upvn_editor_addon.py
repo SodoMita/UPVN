@@ -925,12 +925,18 @@ except Exception:
         return obj
 
     def _static_ghost(obj):
+        """Static, ray-hittable physics for VN plates.
+
+        M26: physics_type "SENSOR" objects are NOT detected by
+        KX_GameObject.rayCast in UPBGE 0.50 (measured in-field: every choice
+        click missed). STATIC + BOX collision bounds makes choice plates,
+        sprites and planes hittable for the pointer ray while staying
+        immovable."""
         try:
             g = obj.game
             try:
-                g.physics_type = "SENSOR"
-            except Exception:
                 g.physics_type = "STATIC"
+            except Exception:
                 g.use_ghost = True
             try:
                 g.use_collision_bounds = True
