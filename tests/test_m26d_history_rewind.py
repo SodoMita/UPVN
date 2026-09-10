@@ -3,10 +3,12 @@ headless traces: the world-UI payload, the player's font-object writes, the
 rewind keys/indicator, and the template objects the whole thing hangs off.
 """
 from pathlib import Path
+import sys
 
 import pytest
 
 from engine.ui import world_ui
+from engine.core import vn_controller as vn_controller_mod
 from engine.core.vn_controller import VNController
 from engine.script.parser import parse_string
 from engine.render import contract
@@ -205,3 +207,83 @@ def test_template_ships_the_backlog_objects():
     line = [l for l in (out.stdout + out.stderr).splitlines() if l.startswith("HAVE")]
     assert line, out.stdout + out.stderr
     assert all(n in line[0] for n in names), line[0]
+
+
+# ------------------------------------------------------- input plumbing (fake bge)
+import types as _types
+
+
+class _FakeDevice:
+    def __init__(self, just=(), active=()):
+        self.inputs = {}
+        for k in just:
+            self.inputs[k] = 1      # KX_INPUT_JUST_ACTIVATED
+        for k in active:
+            self.inputs[k] = 2      # KX_INPUT_ACTIVE
+
+
+def _install_fake_bge(monkeypatch, just_keys=(), active_keys=(), mouse_just=()):
+    fake = _types.ModuleType("bge")
+    logic = _types.SimpleNamespace(
+        KX_INPUT_JUST_ACTIVATED=1, KX_INPUT_ACTIVE=2, KX_INPUT_RELEASED=0,
+        keyboard=_FakeDevice(tuple(just_keys) + tuple(active_keys), active_keys),
+        mouse=_FakeDevice(mouse_just),
+        getCurrentController=lambda: None, getCurrentScene=lambda: None,
+        expandPath=lambda p: p,
+    )
+    events = _types.SimpleNamespace(
+        HKEY=19, QKEY=20, SKEY=22, AKEY=10, LKEY=16, LEFTCTRLKEY=29,
+        SPACEKEY=8, ENTERKEY=1, ESCKEY=16, LEFTMOUSE=105,
+        ONEKEY=14, TWOKEY=15, THREEKEY=16, FOURKEY=17, FIVEKEY=18,
+        SIXKEY=19, SEVENKEY=20, EIGHTKEY=21, NINEKEY=22,
+        WHEELUPMOUSE=107, WHEELDOWNMOUSE=108,
+        PAGEUPKEY=201, PAGEDOWNKEY=209, BACKSPACEKEY=14,
+    )
+    fake.logic = logic
+    fake.events = events
+    monkeypatch.setitem(sys.modules, "bge", fake)
+    monkeypatch.setattr(vn_controller_mod, "HAS_BGE", True)
+    return logic
+
+
+def test_history_key_is_not_swallowed_by_the_typewriter(monkeypatch, ctrl):
+    """M26d: H used to be polled *after* the typewriter early-return, so a press
+    during a reveal was lost — at player framerates that read as 'history does
+    nothing'. Keys are now polled first, on every tick."""
+    _install_fake_bge(monkeypatch, just_keys=[19])  # 19 == events.HKEY
+    ctrl.load() if ctrl.interp is None else None
+    assert ctrl.current_event["type"] == "say"
+    # force a mid-reveal typewriter (not done yet -> the old code returned here)
+    ctrl.ui_mgr._typewriter_progress = 0.0
+    ctrl.update(dt=0.016)
+    assert ctrl._history_open() is True, "H must open the backlog even mid-reveal"
+
+
+def test_rewind_key_rolls_back_exactly_one_line(monkeypatch, ctrl):
+    """One press = one line: the keys must be polled once per tick, not twice."""
+    ctrl._advance()
+    ctrl._advance()
+    before = ctrl.state.instruction_index
+    assert before == 2                      # "three"
+    _install_fake_bge(monkeypatch, just_keys=[201])   # PAGEUPKEY
+    ctrl.update(dt=0.016)
+    assert ctrl.state.instruction_index == before - 1, \
+        "PageUp must move exactly one interaction back"
+    assert ctrl.current_event["text"] == "two"
+    assert ctrl.rewind_depth() == 1
+    # a second press rewinds one more, never two
+    ctrl.update(dt=0.016)
+    assert ctrl.state.instruction_index == before - 2
+    assert ctrl.current_event["text"] == "one"
+    assert ctrl.rewind_depth() == 2
+
+
+def test_global_keys_polled_once_before_the_typewriter_branch():
+    src = (ROOT / "engine" / "core" / "vn_controller.py").read_text(encoding="utf-8")
+    body = src.split("def update(self, dt")[1].split("def _is_advance_pressed")[0]
+    calls = [l for l in body.splitlines()
+             if "_handle_global_keys()" in l and not l.strip().startswith("#")]
+    assert len(calls) == 1, f"double poll = double rewind: {calls}"
+    assert body.index("_handle_global_keys()") < body.index("update_typewriter(dt)")
+    # and the old inline polling is gone (no second home for the same edges)
+    assert body.count('ev.HKEY') == 0

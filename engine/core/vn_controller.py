@@ -346,6 +346,53 @@ class VNController:
         except Exception:
             pass
 
+    def _handle_global_keys(self) -> bool:
+        """Poll the always-on keys. Returns False when the tick was consumed.
+
+        M26d BUG: H / Q / S / A / Ctrl+S / Ctrl+L and the wheel used to be read
+        *below* the typewriter branch, which `return`s on every tick a `say` is
+        still revealing. At the player's 13-19 fps that swallowed a press
+        outright — `just` is a per-tick edge, so the key was gone by the time
+        the line finished typing. In the field this read as "history does
+        nothing". Hoisted to the top of update() and called first, so a press
+        is never lost to an in-progress animation.
+        """
+        if not HAS_BGE:
+            return True
+        try:
+            import bge as _bge_imp
+            ev = _bge_imp.events
+        except Exception:
+            return True
+        try:
+            # M25 BUG-008: Ctrl+S is quick-save; it must not ALSO toggle skip.
+            if _bge_just("keyboard", ev.SKEY) and not _bge_active("keyboard", ev.LEFTCTRLKEY):
+                self.toggle_skip()  # S for skip
+            if _bge_just("keyboard", ev.AKEY):  # A for auto
+                self.toggle_auto()
+            if _bge_just("keyboard", ev.HKEY):  # H for history
+                self.toggle_history()
+            if _bge_just("keyboard", ev.QKEY):  # Q for quick menu
+                if self.screen_mgr:
+                    self.screen_mgr.handle_key("q")
+            if _bge_just("keyboard", ev.SKEY) and _bge_active("keyboard", ev.LEFTCTRLKEY):  # Ctrl+S quick save
+                # M25 BUG-011: direct save, no modal (modals are
+                # invisible + blocking in the standalone player).
+                self.quick_save()
+            if _bge_just("keyboard", ev.LKEY) and _bge_active("keyboard", ev.LEFTCTRLKEY):  # Ctrl+L quick load
+                self.quick_load()
+            # rollback: wheel up / PageUp / Backspace; forward: wheel down /
+            # PageDown (M08, keys added M26d)
+            if self._is_rollback_pressed():
+                self.rollback()
+                return False
+            if self._is_rollforward_pressed():
+                self.roll_forward()
+                return False
+        except Exception:
+            pass
+        return True
+
     # ---------------------------- per-frame update (called from UPBGE)
     def update(self, dt: float = 0.016):
         # M26d: the backlog owns the screen while it is open. This is checked
@@ -357,6 +404,9 @@ class VNController:
         if self._history_open():
             if self._is_advance_pressed() or self._is_history_key_pressed():
                 self._close_history()
+            return
+        # M26d: global keys are polled before anything can early-return.
+        if not self._handle_global_keys():
             return
         # dt from frontend; also works if called without dt via Always sensor
         if not HAS_BGE:
@@ -513,36 +563,10 @@ class VNController:
                         return
                 except Exception:
                     pass
-            # skip/auto toggles via keys + screens H/Q (M09)
-            if HAS_BGE:
-                try:
-                    import bge as _bge_imp
-                    ev = _bge_imp.events
-                    # M25 BUG-008: Ctrl+S is quick-save; it must not ALSO
-                    # toggle skip (the bare-S action used to fire on the same
-                    # tick, silently enabling skip mode during a save).
-                    if _bge_just("keyboard", ev.SKEY) and not _bge_active("keyboard", ev.LEFTCTRLKEY):
-                        self.toggle_skip()  # S for skip
-                    if _bge_just("keyboard", ev.AKEY):  # A for auto
-                        self.toggle_auto()
-                    if _bge_just("keyboard", ev.HKEY):  # H for history
-                        self.toggle_history()
-                    if _bge_just("keyboard", ev.QKEY):  # Q for quick menu
-                        if self.screen_mgr:
-                            self.screen_mgr.handle_key("q")
-                    if _bge_just("keyboard", ev.SKEY) and _bge_active("keyboard", ev.LEFTCTRLKEY):  # Ctrl+S quick save
-                        # M25 BUG-011: direct save, no modal (modals are
-                        # invisible + blocking in the standalone player).
-                        self.quick_save()
-                    if _bge_just("keyboard", ev.LKEY) and _bge_active("keyboard", ev.LEFTCTRLKEY):  # Ctrl+L quick load
-                        self.quick_load()
-                except Exception:
-                    pass
-        # rollback: mouse wheel up, forward wheel down (M08)
-        if HAS_BGE and self._is_rollback_pressed():
-            self.rollback()
-        if HAS_BGE and self._is_rollforward_pressed():
-            self.roll_forward()
+        # NOTE (M26d): the always-on keys (H/Q/S/A/Ctrl+S/Ctrl+L/wheel) are NOT
+        # read here any more — they moved to _handle_global_keys(), called at the
+        # top of update(). Polling them in both places would consume the same
+        # `just` edge twice and roll back two lines per wheel notch.
 
         # for pause type, auto-advance after duration even without click (when no BGE input)
         if self._waiting and self._current_event and self._current_event.get("type") == "pause":
