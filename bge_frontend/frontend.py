@@ -191,7 +191,7 @@ def _show_mouse():
         pass
 
 
-def _sync_world_ui(ctrl):
+def _sync_world_ui(ctrl, hovered=None):
     if not HAS_BGE or ctrl is None:
         return
     try:
@@ -202,6 +202,8 @@ def _sync_world_ui(ctrl):
             ui_mgr=getattr(ctrl, "ui_mgr", None),
             diag=getattr(ctrl, "_load_diag", None),
         )
+        # M26c: hovered hotspot (set by _tick_pointer, consumed by layout)
+        hovered = getattr(logic, "_upvn_hover", None)
         ortho = CAMERA_UI_ORTHO_SCALE
         try:
             import bge as _bge
@@ -209,7 +211,7 @@ def _sync_world_ui(ctrl):
             ortho = float(getattr(cam, "ortho_scale", ortho) or ortho)
         except Exception:
             pass
-        apply_world_ui(_get_obj, payload, ortho=ortho)
+        apply_world_ui(_get_obj, payload, ortho=ortho, hovered=hovered)
     except Exception as e:
         # M25 BUG-002: this used to be a bare `except: pass`, which silently
         # swallowed every UI failure every tick (the player also discards
@@ -305,6 +307,12 @@ def _tick_pointer(ctrl):
     if not HAS_BGE or ctrl is None:
         return
     ev = getattr(ctrl, "current_event", None) or {}
+    try:
+        import bge as _bge
+        if ev.get("type") != "menu":
+            _bge.logic._upvn_hover = None
+    except Exception:
+        pass
     if ev.get("type") != "menu":
         return
     try:
@@ -324,6 +332,8 @@ def _tick_pointer(ctrl):
             logic._upvn_ptr_key = key
         tr = logic._upvn_ptr
         name = normalize_hit_name(_object_under_cursor())
+        logic._upvn_hover = name if name and str(name).startswith("choice_") \
+            else None
         clicked = _bge_just("mouse", _bge.events.LEFTMOUSE)
         # M26 field diagnostics (visible via UPVN_DEBUG_TEE): log whenever the
         # ray's hover target or the click flag changes — a dropped synthetic
@@ -490,7 +500,9 @@ def main(cont=None):
     except Exception:
         pass
     try:
-        _sync_world_ui(ctrl)
+        import bge as _bge
+        _sync_world_ui(ctrl,
+                       hovered=getattr(_bge.logic, "_upvn_hover", None))
         _tick_pointer(ctrl)
     except Exception:
         pass
