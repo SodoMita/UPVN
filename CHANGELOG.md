@@ -1,5 +1,49 @@
 # Changelog
 
+## 0.6.14 — 2026-09-10 (cont.) M26d: 3D-stage tier verified live; LibLoad segfault contained
+
+Driven with a stage probe script over a baked stage (probe script + merged
+blend): `show3d` ×2 → `[StageManager] spawn ... (repositioned template)`;
+`anim eileen wave` → `playAction` success-logged (failure-only logging hid
+working animations before); `camera preset` → safely skipped; the choice menu
+RENDERED OVER THE 3D SCENE and hover/click closed the loop: plate measured
+560 → 604 px wide on hover (= HOVER_SCALE 1.08, ±22 px symmetric growth,
+previously-hovered plate returns to base) and clicking the hovered plate
+selected it — story advanced to `end`, player alive. Live findings, all
+fixed or contained:
+
+- **LibLoad segfaults this build, period.** Bisected: Scene/Collection/
+  Library types, load_actions on/off, minimal cube scene, and even re-loading
+  a COPY of the running template — kernel `sig=11` every time, before any
+  Python `except`. LibLoad is now opt-in (`UPVN_ENABLE_LIBLOAD=1`); the
+  supported tier for 0.50.0 is BAKED stages — new `tools/
+  bake_stage_into_template.py` (geometry only: every stage CAMERA excluded —
+  a second camera coincided with the viewport rendering from it instead of
+  Camera_UI; character templates parked at (30,−3,−30) outside the UI
+  frustum; markers/presets/actions linked).
+- **spawn() reposition fallback**: `addObject()` rejects active objects
+  ("must be in an inactive layer") and collection-excluded objects do not
+  exist in the runtime AT ALL (neither `objects` nor `objectsInactive`) —
+  spawn now clones an inactive master when present, else repositions the
+  active template onto the marker (idempotent for VN staging).
+- **camera_preset guard order**: the Camera_UI guard ran AFTER resolving
+  `Camera_3D`, so the preset MOVED the dormant template camera — live result
+  was the viewport rendering perspective stage view with all ortho UI gone.
+  Guard now runs first (test-pinned).
+- **_bind_camera re-asserts every tick** (was once+sticky): a stage camera in
+  the scene coincided with losing the viewport even with `active_camera`
+  still reading Camera_UI; the per-tick write is a no-op when correct.
+- **package_game.py ships the whole project tree** (assets/, stages/,
+  audio/) — it copied only *.rpy, so packaged builds lost every runtime-
+  resolved asset; StageManager stage candidates gained `//../game/stages/`
+  and `//game/stages/` (mirrors the audio resolver for packaged layouts).
+- Sample 3D stage shipped: `examples/10_full_sample_game/stages/
+  classroom_3d.blend` (floor/desks geometry, markers, preset empty, parked
+  character templates, `wave` action; axis-aligned floor — the first build's
+  rotX90 slab stood up as a 12-unit wall that filled the whole frame).
+- Evidence: `examples/10_full_sample_game/evidence/m26d_hover_scale_live.png`
+  (baseline / hover-A / hover-B frames; widths measured in-frame).
+
 ## 0.6.14 — 2026-09-10 (cont.) M26c: play-by-script made real — audio, camera zoom, crash fix
 
 Full-sample game played END-TO-END in the player (start → branch menu → library

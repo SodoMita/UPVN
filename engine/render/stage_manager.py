@@ -108,10 +108,32 @@ class StageManager:
             try:
                 import bge.logic as logic
                 # try multiple stage locations (project stages/ or blend template)
-                for cand in [f"//stages/{stage_name}.blend", f"//blend/stages/{stage_name}.blend", f"//assets/stages/{stage_name}.blend"]:
+                # M26d: game/ prefixes mirror the audio resolver — packaged
+                # builds live at build/blend/<game>.blend with the project at
+                # build/game/, so //stages/ alone never finds shipped stages
+                for cand in [f"//stages/{stage_name}.blend",
+                             f"//../game/stages/{stage_name}.blend",
+                             f"//game/stages/{stage_name}.blend",
+                             f"//blend/stages/{stage_name}.blend",
+                             f"//assets/stages/{stage_name}.blend"]:
                     path = logic.expandPath(cand)
                     import os
                     if os.path.exists(path):
+                        # M26d live-measured: UPBGE 0.50.0 blenderplayer
+                        # SEGFAULTS on ANY LibLoad (bisected: Scene/
+                        # Collection/Library types, load_actions on/off, and
+                        # even re-loading a copy of the RUNNING template —
+                        # kernel log sig=11 every time). A C-level crash
+                        # cannot be caught, so LibLoad is opt-in: baked stage
+                        # objects (the VN_3DStage mode below) are the
+                        # supported tier in this build.
+                        import os as _os
+                        if _os.environ.get("UPVN_ENABLE_LIBLOAD", "0") != "1":
+                            print(f"[StageManager] stage {stage_name}: file at "
+                                  f"{path} found, but LibLoad is DISABLED in this "
+                                  "UPBGE build (segfaults; bake the stage into "
+                                  "the blend or set UPVN_ENABLE_LIBLOAD=1)")
+                            return
                         logic.LibLoad(path, "Scene", load_actions=True)  # type: ignore
                         print(f"[StageManager] LibLoad stage {stage_name} from {path}")
                         break
@@ -180,18 +202,38 @@ class StageManager:
                 # asset could be an object name in stage collection, e.g. Char_Eileen_placeholder or eileen
                 # try to find template object
                 template = None
+                template_active = False
                 for cand in [asset, f"Char_{asset}_placeholder", f"Char_{asset.capitalize()}_placeholder", asset.capitalize()]:
                     if cand in scene.objectsInactive:
                         template = cand
                         break
                     if cand in scene.objects:
                         template = cand
+                        template_active = True
                         break
-                if template and marker_obj:
+                if template and marker_obj and not template_active:
                     obj = scene.addObject(template, marker_obj, 0)
                     # store for later anim
                     self.state.stage_objects[asset] = {"marker": marker, "anim": "idle", "bge_obj": obj.name}
                     print(f"[StageManager] spawn {asset} at {marker} -> {obj.name}")
+                elif template and marker_obj and template_active:
+                    # M26d live-measured (UPBGE 0.50): addObject() rejects
+                    # active objects ("object must be in an inactive layer")
+                    # and collection-excluded objects do not exist in the
+                    # runtime at all (neither objects nor objectsInactive).
+                    # With no clonable inactive master, REPOSITION the active
+                    # template onto the marker — one master per asset is
+                    # equivalent for VN staging (show3d again just re-moves
+                    # it; idempotent).
+                    obj = scene.objects.get(template)
+                    obj.worldPosition = marker_obj.worldPosition.copy()
+                    obj.worldOrientation = marker_obj.worldOrientation.copy()
+                    try:
+                        obj.setVisible(True, True)
+                    except Exception:
+                        pass
+                    self.state.stage_objects[asset] = {"marker": marker, "anim": "idle", "bge_obj": obj.name}
+                    print(f"[StageManager] spawn {asset} at {marker} -> {obj.name} (repositioned template)")
                 elif template:
                     # spawn at origin if no marker
                     obj = scene.addObject(template, scene.objects.get("Floor_classroom") or marker_obj, 0)
@@ -214,6 +256,7 @@ class StageManager:
                         # playAction(animName, start, end, layer, priority, blendin, play_mode, layerWeight, ipoFlags, speed)
                         obj.playAction(anim, 0, 60, 0, 0, 5, logic.KX_ACTION_MODE_LOOP if anim == "idle" else logic.KX_ACTION_MODE_PLAY)
                         info["anim"] = anim
+                        print(f"[StageManager] play_anim {target} {anim} -> {obj.name}")
             except Exception as e:
                 print(f"[StageManager] play_anim failed {target} {anim}: {e}")
         else:
@@ -225,6 +268,16 @@ class StageManager:
             try:
                 import bge.logic as logic
                 scene = logic.getCurrentScene()
+                # M26d: guard BEFORE resolving Camera_3D — resolving first
+                # meant the preset moved Camera_3D and this build's viewport
+                # rendered from it (live: ortho UI replaced by perspective
+                # stage view, dialogue planes gone). The GUI tier renders
+                # everything through Camera_UI; presets need the overlay-UI
+                # tier and are skipped for now.
+                cam = scene.active_camera
+                if cam is not None and getattr(cam, "name", "") == "Camera_UI":
+                    print("[StageManager] camera_preset skipped — would move Camera_UI")
+                    return
                 cam = scene.objects.get("Camera_3D") or scene.active_camera
                 if cam is not None and getattr(cam, "name", "") == "Camera_UI":
                     print("[StageManager] camera_preset skipped — would move Camera_UI")

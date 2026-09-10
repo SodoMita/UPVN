@@ -369,8 +369,18 @@ def package_project(project: Path, out: Path, do_zip: bool = True):
     game_dest = build / "game"
     game_dest.mkdir(parents=True, exist_ok=True)
     if project.is_dir():
-        for f in project.rglob("*.rpy"):
+        # M26d: ship the WHOLE project tree, not just *.rpy — assets/,
+        # stages/, audio/ are runtime-resolved relative to the game blend
+        # (stages via //../game/stages/, images+audio via the bank/resolver
+        # prefixes). Skipping junk keeps builds clean.
+        for f in project.rglob("*"):
+            if not f.is_file():
+                continue
             rel = f.relative_to(project)
+            parts = set(rel.parts)
+            if parts & {"__pycache__", ".pytest_cache"} or f.suffix in {
+                    ".pyc", ".pyo", ".blend1", ".blend2"}:
+                continue
             dest = game_dest / rel
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(f, dest)
