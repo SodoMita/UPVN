@@ -86,15 +86,54 @@ class SceneManager:
             # fallback reader.
             ctrl = scene.objects.get("VNController")
             mode = image_mode_from(ctrl if ctrl is not None else plane)
+            def _palette_bg():
+                # any bank plane left visible from a previous 'scene'?
+                try:
+                    for ob in scene.objects:
+                        if str(ob.name).startswith("BGIMG_"):
+                            ob.visible = False
+                except Exception:
+                    pass
+                plane.visible = True
+                return apply_object_color(plane, stage_color(asset))
+
             if mode == "color":
-                painted = apply_object_color(plane, stage_color(asset))
+                painted = _palette_bg()
                 _dbg(f"stage '{asset}' → palette color "
                      f"(image_mode=color, painted={painted})")
                 if transition in ("fade", "dissolve"):
                     plane["upvn_transition"] = transition
                     plane["upvn_transition_t0"] = time.time()
                 return
-            # image_mode == "auto": best-effort PNG/JPG/WebP, palette fallback
+            # image_mode == "auto": converted projects carry a baked image
+            # bank (BGIMG_<stem> planes, textures assigned by
+            # tools/wire_converted_blend.py — bge.texture cannot bind node
+            # materials in UPBGE 0.50). Show the matching plane, hide the
+            # rest; palette fallback when no bank plane exists.
+            stems = [asset, asset.replace(" ", "_"),
+                     asset.replace(" ", "/").replace("/", "_"),
+                     asset.split()[-1] if " " in asset else asset]
+            bank = None
+            for stem in stems:
+                cand = scene.objects.get("BGIMG_" + stem.lower())
+                if cand is not None:
+                    bank = cand
+                    break
+            if bank is not None:
+                try:
+                    for ob in scene.objects:
+                        if str(ob.name).startswith("BGIMG_"):
+                            ob.visible = (ob is bank)
+                        # keep the palette plane behind the bank
+                    plane.visible = False
+                    bank.visible = True
+                    _dbg(f"stage '{asset}' → bank plane {bank.name}")
+                    if transition in ("fade", "dissolve"):
+                        bank["upvn_transition"] = transition
+                        bank["upvn_transition_t0"] = time.time()
+                    return
+                except Exception as e:
+                    _dbg(f"stage '{asset}' bank show failed ({e}) → palette")
             import bge.texture as vt
             try:
                 mat_id = vt.materialID(plane, BG_MATERIAL)
@@ -128,12 +167,12 @@ class SceneManager:
                     _dbg(f"stage '{asset}' → image {tex_path}")
                 except Exception as e:
                     _dbg(f"stage '{asset}' image bind failed ({e}) → palette")
-                    apply_object_color(plane, stage_color(asset))
+                    apply_object_color(plane, _palette_bg() or stage_color(asset))
                 if transition in ("fade", "dissolve"):
                     plane["upvn_transition"] = transition
                     plane["upvn_transition_t0"] = time.time()
             else:
-                painted = apply_object_color(plane, stage_color(asset))
+                painted = _palette_bg()
                 _dbg(f"stage '{asset}' → no image found, palette color "
                      f"(painted={painted})")
                 if transition in ("fade", "dissolve"):
