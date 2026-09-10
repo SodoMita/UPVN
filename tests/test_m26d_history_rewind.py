@@ -104,13 +104,70 @@ def test_apply_world_ui_writes_history_and_hides_when_closed():
     assert scene.get(contract.HISTORY_TEXT).blenderObject.data.body == "A\nB"
     assert scene.get(contract.HISTORY_PLANE).visible is True
     assert scene.get(contract.REWIND_TEXT).visible is True
-    # closed: body cleared, panel hidden (a stale backlog is worse than none)
+    # closed: hidden, but the body is left alone — a KX FONT only rebuilds its
+    # glyph mesh while visible, so blanking it on close is what made the panel
+    # reopen empty (see apply_world_ui's ordering note).
     world_ui.apply_world_ui(scene.get, {"speaker": "", "dialogue": "",
                                         "dialogue_visible": False, "choices": [],
                                         "history_visible": False, "history": "",
                                         "rewind_visible": False, "rewind": ""})
     assert scene.get(contract.HISTORY_PLANE).visible is False
-    assert scene.get(contract.HISTORY_TEXT).blenderObject.data.body == ""
+    assert scene.get(contract.HISTORY_TEXT).visible is False
+    assert scene.get(contract.REWIND_TEXT).visible is False
+    assert scene.get(contract.HISTORY_TEXT).blenderObject.data.body == "A\nB"
+
+
+def test_history_is_unhidden_before_the_text_is_written():
+    """The player proved this ordering is load-bearing: body-then-visible left
+    an empty glyph mesh behind a correctly drawn panel."""
+    order = []
+
+    def spy(name):
+        ob = FakeObj(name)
+        ob.visible = False
+
+        def _setv(v):
+            order.append(("visible", name, v))
+        object.__setattr__(ob, "visible", False)
+
+        class _P:
+            def __set__(_s, _o, _v):
+                order.append(("visible", name, _v))
+
+            def __get__(_s, _o, _t=None):
+                return False
+        type(ob).visible = _P()
+        body = ob.blenderObject.data
+
+        class _D(type(body)):
+            def __setattr__(_s, _a, _v):
+                order.append(("body", name, _v))
+                super().__setattr__(_a, _v)
+        ob.blenderObject.data = _D()
+        return ob
+
+    store = {}
+
+    def get_obj(name):
+        if name not in store:
+            store[name] = spy(name)
+        return store[name]
+
+    world_ui.apply_world_ui(get_obj, {"speaker": "", "dialogue": "",
+                                      "dialogue_visible": False, "choices": [],
+                                      "history_visible": True, "history": "A",
+                                      "rewind_visible": False, "rewind": ""})
+    # scoped to the backlog objects: the dialogue text is written earlier by
+    # design, that is not the ordering this test guards
+    def first(kind, name):
+        hits = [i for i, e in enumerate(order)
+                if e[0] == kind and (name is None or e[1] == name)
+                and (kind != "visible" or e[2] is True)]
+        return min(hits) if hits else None
+
+    v, t = first("visible", "History_Text"), first("body", "History_Text")
+    assert v is not None and t is not None, order
+    assert v < t, f"History_Text must be unhidden before its body is written: {order}"
 
 
 def test_set_font_size_writes_transform_not_a_stray_attribute():

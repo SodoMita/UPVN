@@ -322,15 +322,23 @@ def apply_world_ui(get_obj: Callable[[str], Any], payload: dict, ortho: float | 
     _set_visible(box, vis or any(c.get("visible") for c in payload.get("choices", [])))
     # backlog overlay (M26d): without these two writes H opened a screen the
     # player never drew — headless traces had history, the GUI never did.
+    # Order matters twice over: a KX FONT rebuilds its glyph mesh when `body`
+    # changes, and writing while the object is still hidden left an empty mesh
+    # that never refreshed on reveal (measured in the player: dark panel, no
+    # text). So unhide first, then write. And the body is never blanked while
+    # hidden — an invisible stale body costs nothing, while a per-toggle clear
+    # forces a rebuild on the exact tick it must not miss.
     hist_on = bool(payload.get("history_visible"))
     hbox = get_obj(HISTORY_BOX)
     htext = get_obj(HISTORY_TEXT)
-    set_font_text(htext, payload.get("history") or "" if hist_on else "")
     _set_visible(hbox, hist_on)
     _set_visible(htext, hist_on)
+    if hist_on:
+        set_font_text(htext, payload.get("history") or "")
     rtext = get_obj(REWIND_TEXT)
-    set_font_text(rtext, payload.get("rewind") or "")
     _set_visible(rtext, bool(payload.get("rewind_visible")))
+    if payload.get("rewind_visible"):
+        set_font_text(rtext, payload.get("rewind") or "")
     for ch in payload.get("choices", []):
         plane = get_obj(ch["name"])
         text_obj = get_obj(ch["name"] + "_text")
