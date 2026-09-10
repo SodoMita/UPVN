@@ -39,6 +39,7 @@ class AudioManager:
         self.state = state
         self.handles = {}  # channel -> handle
         self._device = None
+        self._device_tried = False
         self._warned = set()
 
     # ------------------------------------------------------------ internals
@@ -48,9 +49,33 @@ class AudioManager:
             _dbg(msg)
 
     def _get_device(self):
-        if self._device is None:
-            self._device = aud.device()
+        """Lazy aud.Device. Live-measured on UPBGE 0.50: `aud.device()` does
+        not exist in this build and `aud.Device()` RAISES when no audio
+        backend is reachable (headless sandbox: "Could not connect to
+        PulseAudio"). Cache the failure too — one clear warning, then stay
+        silent instead of raising on every play call."""
+        if not self._device_tried:
+            self._device_tried = True
+            try:
+                import aud
+                self._device = aud.Device()
+            except Exception as e:
+                self._device = None
+                self._warn_once(
+                    "nodevice",
+                    f"no audio device available ({e}) — running silent",
+                )
         return self._device
+
+    @staticmethod
+    def _open_sound(path):
+        """UPBGE 0.50 has aud.Sound.file; older builds exposed
+        aud.Factory(path). Support both."""
+        import aud
+        sound_cls = getattr(aud, "Sound", None)
+        if sound_cls is not None and hasattr(sound_cls, "file"):
+            return sound_cls.file(path)
+        return aud.Factory(path)
 
     def _resolve(self, asset: str) -> str | None:
         """Find an audio file for `asset` (name with or without extension),
@@ -85,9 +110,12 @@ class AudioManager:
             self._warn_once(f"missing:{asset}",
                             f"audio '{asset}' not found — continuing silent")
             return False
+        device = self._get_device()
+        if device is None:
+            return False  # device warn already shown once
         try:
-            factory = aud.Factory(path)
-            handle = self._get_device().play(factory)
+            sound = self._open_sound(path)
+            handle = device.play(sound)
             handle.loop_count = loop
             if fadein:
                 try:

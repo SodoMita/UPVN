@@ -156,3 +156,30 @@ Four jobs, all verified: `tests` (pytest), `examples` (every example validated i
 - Audit 0.5.2: safe_eval AST whitelist (no Attribute/Subscript/ListComp), SaveManager _sanitize_slot/_slot_path + is_relative_to, load schema validation, tests skip when the_question missing, zip hygiene no pyc, MIT LICENSE, requirements dev black
 - Declarative language (M15): `state:` → defaults+types (VNState.declared_types), `character e:` block, `image/audio/stage` → VNState.assets (+resolve_asset), `set` canonical assign (typed-checked), `choice` keyword + optional `end`; expr_eval.py AST whitelist (no eval escapes); pointer.py hotspot hover/click for editor UI; menu choices carry stable `id`s
 - Three tiers (M16): `.urpy` (urpy_parser, required `end`, no Python), `.rpy` safe (default; full-tier constructs → ParseError 'mode=full' hint), `.rpy` full (Parser(full=True), parse_string_full, VNController(mode='full'), tools --mode). Full tier adds label_params/defines/init_python/transforms/screens/styles/translations + `"full": true` to IR; interpreter runs python:/init via exec with renpy/store compat (renpy_compat.py) and syncs JSON-safe vars back; while-loop body is spliced per-iteration with loop-id tail markers for break/continue; label params bound/restored on call/return. Expression sandbox: container subscripts allowed, attribute access only on injected renpy/store (dunders blocked)
+
+## M26c — play-by-script: audio real, camera zoom real, segfault fixed (2026-09-10)
+
+Full-sample game (`examples/10_full_sample_game`, template + flipped
+`script_path`) played start→end in the player with a per-event heartbeat
+(label/idx/event/choices/ortho). Evidence in this session's logs; repro:
+`UPVN_HEARTBEAT=/tmp/upvn_hb.json UPVN_DEBUG_TEE=/tmp/upvn_debug.log
+blenderplayer -w 800 450 blend/UPVN_Template.blend` (+VNController.script_path
+flipped to the sample script), xdotool clicks/keys to advance.
+
+- **Fixed segfault** (was killing the player at `load_stage classroom_3d`):
+  SceneManager LibLoad without exists-check → sig=11. StageManager owns stage
+  loading now; SceneManager logs-and-continues. AST regression tests.
+- **Audio**: play music/sound/voice are real aud playback (Sound.file API —
+  this build has no aud.device()/Factory), prefix×ext resolver, warn-once
+  missing-file, loop=-1 music, fade ramp in update(dt), single "no audio
+  device — running silent" warning when no backend exists (sandbox), per-
+  channel stop. Sample wavs committed in blend/ (theme.wav, knock.ogg.wav).
+- **Camera zoom** applies to ortho with the authored easing; heartbeat
+  measured 15→12.5→10→15 exactly. Contract constant = base (single writer;
+  two live traps with measured-base schemes documented in code).
+- `anim`/`show3d`/`camera preset`: state-only 3D tier, safe continue without
+  a stage project (LibLoad logs when stages/ files absent).
+- Hover (M26c, previous commit): HOVER_SCALE 1.08, single scale writer in
+  layout_screen_ui, zoom-proof; 5 headless tests.
+
+Status: 307 passed / 16 skipped. `feat/desktop-gui`.

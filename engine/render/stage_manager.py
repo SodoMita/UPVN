@@ -45,8 +45,12 @@ class StageManager:
             self.camera_zoom(event["zoom"], event.get("duration",1.0), event.get("easing","ease"))
 
     def camera_zoom(self, zoom: float, duration: float = 1.0, easing: str = "ease"):
-        # state already updated by interpreter; for BGE lerp camera
-        if HAS_BGE:
+        # M26c: the interpreter already records the zoom tween in state.camera
+        # (_zoom_from/_to/_dur/_ease/_t0) and the frontend's
+        # _apply_camera_state is the SINGLE writer of ortho_scale (two
+        # writers here + frontend fought during tweens). Keep this a no-op.
+        return
+        if False and HAS_BGE:
             try:
                 import bge
                 scene = bge.logic.getCurrentScene()
@@ -120,6 +124,11 @@ class StageManager:
     def update(self, dt: float):
         if not HAS_BGE:
             return
+        # M26c: legacy zoom lerp removed — frontend._apply_camera_state is
+        # the single ortho_scale writer (reads the same state.camera tween
+        # keys the interpreter sets). Writing here too fought the frontend
+        # with a duplicated easing implementation.
+        return
         # BGE per-frame zoom lerp
         import time as _t
         now = _t.time()

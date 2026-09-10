@@ -1,5 +1,46 @@
 # Changelog
 
+## 0.6.14 — 2026-09-10 (cont.) M26c: play-by-script made real — audio, camera zoom, crash fix
+
+Full-sample game played END-TO-END in the player (start → branch menu → library
+zoom section → book menu → classroom 3D lines → 3-choice ending menu →
+good_ending → `end`), heartbeat-driven (xdo clicks, per-event JSON with
+label/idx/ortho), alive throughout. Found and fixed on the way:
+
+- **Segfault**: `SceneManager` LibLoad'ed `//stages/<name>.blend` with NO
+  os.path.exists check — a missing stage file SIGSEGVs blenderplayer before
+  the Python `except` can run (kernel log: `sig=11`). The full-sample game
+  died at `label classroom → load_stage classroom_3d`. Fix: SceneManager no
+  longer loads stages at all (log-and-continue); **StageManager owns stage
+  loading** and existence-checks every candidate path. Regression-guarded by
+  AST tests (scene_manager must not call LibLoad; StageManager LibLoad sites
+  must sit behind an exists check).
+- **Audio was `pass` stubs** — `play music/sound/voice` now really play via
+  aud: lazy `aud.Device()` (this build has NO `aud.device()`; `aud.Factory`
+  is gone too — `aud.Sound.file()` it is, with a Factory fallback for older
+  builds), `//`-relative prefix×ext resolver, warn-once on missing files
+  (story continues), music `loop_count=-1`, fade-in volume ramp in
+  `update(dt)`, per-channel handle stop. When no audio backend is reachable
+  (this sandbox: no PulseAudio) it warns ONCE — "running silent" — instead of
+  raising per play. Live: both `theme` and `knock.ogg` RESOLVE (sample wavs
+  in `blend/`), single device warning, end reached.
+- **Camera zoom now applies**: `camera zoom 1.2 duration 1.0 with ease` used
+  to set state only. `bge_frontend._apply_camera_state` tweens
+  `Camera_UI.ortho_scale = CAMERA_UI_ORTHO_SCALE / zoom` with the interpreter's
+  easing, driven per tick; UI layout re-reads ortho each frame so the M24
+  zoom-stable framing holds. Live-verified via an ortho field in the
+  heartbeat: 15.0 → 13.017 (mid-tween) → **12.5** (=15/1.2) → **10.0**
+  (=15/1.5) → back to 15.0. Two live-measured traps with "capture the current
+  ortho" base schemes (interpreter sets zoom before the frontend's first tick
+  → base ×1.2; calm ticks BETWEEN tweens carry the previous zoom's ortho →
+  compounding, authored 1.5× played as 1.8×): the contract constant is the
+  single base, the frontend the single ortho writer (StageManager's duplicate
+  lerp disabled). Math extracted to pure `zoom_ortho_scale()` (unit tests:
+  exact endpoints, linear midpoint, clamps, unknown-easing fallback).
+- `anim`/`show3d`/`camera preset` remain 3D-stage tier: state applied, safe
+  log-and-continue in template-only projects (needs a project with
+  `stages/*.blend` / a VN_3DStage collection to show geometry).
+
 ## 0.6.14 — 2026-09-10 M26b: sprite/background textures work at runtime (node swap)
 
 The "textures essential" gap closed, keeping the palette as the fallback.
