@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.6.15 — 2026-09-11 Fix picking (always right), hover, transparent textures
+
+- **Click always right → fixed**: `bge_frontend/frontend.py` `_object_under_cursor` now does an ortho-correct 2D AABB hit-test (mouse 0..1 → world X/Z via `ortho`/`aspect_wh`) against the actual `choice_N` world bbox (worldScale half-extent), because `getScreenVect+rayCast` from `cam.worldPosition` misses the ortho offset. Falls back to ray for perspective. No more wrong choice.
+
+- **Hover scale**: `_tick_pointer` now caches `_upvn_base_scale` and scales the hovered `choice_N` plane 1.08× plus brightens `obj.color` to (1.12,1.12,1.18,1) while others stay 1.0 — visible feedback without touching layout.
+
+- **Textures fully transparent → fixed**: `blend/upvn_editor_addon.py` `_rewrite_unlit` now always links `TexImage (UPVN_White 1x1 placeholder)` * `ObjectInfo Color` --Multiply--> `Emission` (instead of unlinked TexImage). `SceneManager`/`SpriteRenderer` set `obj.color` palette or (1,1,1,1) for real texture, so both llvmpipe and lavapipe show correct. `mat.game_settings.alpha_blend='OPAQUE'` + `surface_render_method='DITHERED'` prevents HASHED+alpha 0 transparency. `vt.Texture` now calls `refresh(True)` after `source=` so static PNG appears.
+
+- **Template trash → minimal**: `tools/make_template.py` no longer adds classroom floor/desks/board/cylinders/markers; `build_vn_scene` now cleans stray `Cube`/`Light` objects. Template will contain only contract objects (BG, Dialogue, 5 Sprites, 9 choices, 2 cameras, controller + collections).
+
 ## 0.6.14 — 2026-09-10 Textures essential + script-only, click fix
 
 - **Textures are essential again** (reverts palette-only 0.6.13): `blend/upvn_editor_addon.py`

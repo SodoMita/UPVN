@@ -45,7 +45,7 @@ Headless fallback: when bpy unavailable (CI), the module still imports and expos
 bl_info = {
     "name": "UPVN — Visual Novel Editor",
     "author": "UPVN",
-    "version": (0, 6, 14),
+    "version": (0, 6, 15),
     "blender": (4, 2, 0),
     "location": "View3D > Sidebar > UPVN, Text Editor > Sidebar > UPVN",
     "description": "Create Ren'Py-like visual novel inside UPBGE with minimal coding — self-contained engine, one-click scene setup, characters, scenes, dialogue, menus, arbitrary saves, preview",
@@ -875,14 +875,22 @@ except Exception:
         """Emission-only — VN planes must not pick up scene lights.
 
         Textures are essential: material carries an Image Texture node so
-        bge.texture (VideoTexture) can bind at runtime. The node is left
-        unlinked when no image is assigned — that avoids the black-plate
-        bug (BUG-005) where an unassigned TexImage linked to Emission
-        forces black. At runtime SceneManager/SpriteRenderer will either
-        bind a real PNG via vt.Texture or fall back to object.color
-        palette (contract.py) when no file exists — works on both
-        llvmpipe (GL) and lavapipe (Vulkan) because palette is solid
-        emission, no decoding needed.
+        bge.texture (VideoTexture) can bind at runtime. We always link
+        TexImage -> Emission but ensure the TexImage has a 1x1 white
+        placeholder (UPVN_White) when no real image is assigned — that
+        avoids the black-plate bug (BUG-005) where an unassigned TexImage
+        linked to Emission forces black, while still keeping the slot
+        linkable for vt.Texture.
+
+        For per-object palette tints (BG/Sprite fallback) we use Object
+        Info Color * Texture -> Emission, so `obj.color` (set by
+        SceneManager/SpriteRenderer to the palette) tints the white
+        placeholder or the real texture. UI materials (MAUI/MAChoice) get
+        the same node network but their objects are initialized with the
+        UI color as `obj.color`, so viewport and UPBGE both show the
+        correct base without needing a separate RGB node. In UPBGE the
+        `game_settings.alpha_blend` is forced OPAQUE so the texture never
+        appears "fully transparent" due to HASHED + alpha 0.
         """
         mat.use_nodes = True
         nt = mat.node_tree
@@ -893,26 +901,102 @@ except Exception:
         out = nt.nodes.new("ShaderNodeOutputMaterial")
         em = nt.nodes.new("ShaderNodeEmission")
         tex = nt.nodes.new("ShaderNodeTexImage")
-        tex.location = (-280, 0)
+        tex.location = (-340, 80)
+        obj_info = nt.nodes.new("ShaderNodeObjectInfo")
+        obj_info.location = (-340, -80)
+        mix = nt.nodes.new("ShaderNodeMix")
         try:
-            em.inputs["Color"].default_value = color
+            mix.data_type = 'RGBA'
+            mix.blend_type = 'MULTIPLY'
+            mix.inputs[0].default_value = 1.0
+        except Exception:
+            pass
+        mix.location = (-180, 0)
+        try:
+            em.inputs["Color"].default_value = (1.0, 1.0, 1.0, 1.0)
             em.inputs["Strength"].default_value = 1.0
         except Exception:
             pass
-        # Only link TexImage -> Emission when an image is already assigned;
-        # otherwise the unassigned node evaluates to black.
-        if getattr(tex, "image", None) is not None:
+        # 1x1 white placeholder
+        try:
+            import bpy
+            white = bpy.data.images.get("UPVN_White")
+            if white is None:
+                white = bpy.data.images.new("UPVN_White", 1, 1, alpha=True)
+                try:
+                    white.generated_color = (1.0, 1.0, 1.0, 1.0)
+                except Exception:
+                    pass
+                try:
+                    white.pixels = [1.0, 1.0, 1.0, 1.0]
+                except Exception:
+                    pass
+            tex.image = white
             try:
-                nt.links.new(tex.outputs["Color"], em.inputs["Color"])
+                tex.interpolation = 'Closest'
             except Exception:
                 pass
+        except Exception:
+            pass
+        # Links: ObjectInfo.Color + TexImage.Color --Multiply--> Emission.Color
+        try:
+            nt.links.new(obj_info.outputs["Color"], mix.inputs["A"])
+        except Exception:
+            try:
+                nt.links.new(obj_info.outputs[0], mix.inputs[1])
+            except Exception:
+                pass
+        try:
+            nt.links.new(tex.outputs["Color"], mix.inputs["B"])
+        except Exception:
+            try:
+                nt.links.new(tex.outputs[0], mix.inputs[2])
+            except Exception:
+                pass
+        try:
+            # Mix RGBA output is at index 2 in 4.0+ (Result), or 0 in older
+            out_socket = None
+            for sock in mix.outputs:
+                if "Result" in sock.name or "Color" in sock.name:
+                    out_socket = sock
+                    break
+            if out_socket is None:
+                out_socket = mix.outputs[0]
+            nt.links.new(out_socket, em.inputs["Color"])
+        except Exception:
+            pass
         nt.links.new(em.outputs[0], out.inputs[0])
-        for attr, val in (("blend_method", "OPAQUE"), ("shadow_method", "NONE"),
-                          ("use_backface_culling", False)):
+        # Blender 4.3 Eevee Next: blend_method OPAQUE/CLIP may be coerced to HASHED
+        # for node materials, but UPBGE's game engine uses game_settings.alpha_blend.
+        # Set both where available so the material is never "fully transparent".
+        for attr, val in (("blend_method", "OPAQUE"), ("use_backface_culling", False)):
             try:
                 setattr(mat, attr, val)
             except Exception:
                 pass
+        # 4.3 surface_render_method — keep DITHERED (opaque) not BLENDED
+        try:
+            mat.surface_render_method = 'DITHERED'
+        except Exception:
+            pass
+        try:
+            # UPBGE game settings (only present in UPBGE builds)
+            gs = getattr(mat, "game_settings", None)
+            if gs is not None:
+                try:
+                    gs.alpha_blend = 'OPAQUE'
+                except Exception:
+                    pass
+                try:
+                    gs.use_backface_culling = False
+                except Exception:
+                    pass
+                try:
+                    gs.use_alpha_blend = False
+                except Exception:
+                    pass
+        except Exception:
+            pass
         return mat
 
     def _data_text(name, body="", size=0.32, loc=(0, -0.55, -3.0), rot=None):
@@ -1038,6 +1122,32 @@ except Exception:
             except Exception:
                 pass
 
+        # clean stray factory objects (Cube/Light/default Camera) — they appear as "random shapes"
+        # when a new blend is created and Setup Scene is pressed; contract only needs VN* objects
+        try:
+            for ob in list(_b.data.objects):
+                n = getattr(ob, "name", "")
+                # default Blender factory objects
+                if n in ("Cube", "Cube.001", "Light", "Light.001", "Camera") or n.startswith(("Cube.", "Light.")):
+                    # keep Camera_UI / Camera_3D, remove the generic "Camera"
+                    if n in ("Camera_UI", "Camera_3D"):
+                        continue
+                    # only remove if it's not already in a VN collection and not the active camera
+                    try:
+                        if ob.type == "LIGHT":
+                            _b.data.objects.remove(ob, do_unlink=True)
+                            continue
+                    except Exception:
+                        pass
+                    try:
+                        # if it's a mesh Cube, remove it (template should not contain it)
+                        if n.startswith("Cube"):
+                            _b.data.objects.remove(ob, do_unlink=True)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
         # collections
         collections = {}
         for name in ["VN_Backgrounds", "VN_Characters", "VN_UI", "VN_Effects", "VN_3DStage"]:
@@ -1161,10 +1271,18 @@ except Exception:
         if bg is None:
             bg = _data_plane(BG_PLANE, size=10.0, rot=PLANE_ROTATION)
             _single_material(bg, mat_bg)
+            try:
+                bg.color = (1.0, 1.0, 1.0, 1.0)
+            except Exception:
+                pass
             scene.collection.objects.link(bg)
             collections["VN_Backgrounds"].objects.link(bg)
         _apply_2d_layout(bg, (0.0, 0.0, 0.0))
         _single_material(bg, mat_bg)
+        try:
+            bg.color = (1.0, 1.0, 1.0, 1.0)
+        except Exception:
+            pass
         dlg = scene.objects.get(DIALOGUE_PLANE)
         if dlg is None:
             dlg = _data_plane(DIALOGUE_PLANE, size=8.0, color=(0.05, 0.05, 0.12, 1.0),
@@ -1173,6 +1291,10 @@ except Exception:
             collections["VN_UI"].objects.link(dlg)
         _apply_2d_layout(dlg, DIALOGUE_LOCATION, DIALOGUE_SCALE)
         _single_material(dlg, mat_ui)
+        try:
+            dlg.color = (0.05, 0.06, 0.14, 1.0)
+        except Exception:
+            pass
         _static_ghost(bg)
         _static_ghost(dlg)
 
@@ -1218,6 +1340,10 @@ except Exception:
                 _link_ob(scene, ch, collections["VN_UI"])
                 _apply_2d_layout(ch, loc, (3.2, 0.28, 1.0))
                 _single_material(ch, mat_choice)
+                try:
+                    ch.color = (0.12, 0.18, 0.32, 1.0)
+                except Exception:
+                    pass
                 _static_ghost(ch)
                 tname = cname + "_text"
                 _ensure_font(tname, (loc[0] - 2.8, loc[1] - 0.05, loc[2] + 0.08), size=0.24)
@@ -1254,6 +1380,10 @@ except Exception:
                 collections["VN_Characters"].objects.link(sp)
             _apply_2d_layout(sp, loc, SPRITE_SCALE)
             _single_material(sp, mat_sprite)
+            try:
+                sp.color = (1.0, 1.0, 1.0, 1.0)
+            except Exception:
+                pass
             _static_ghost(sp)
             try:
                 sp.hide_render = False

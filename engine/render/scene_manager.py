@@ -97,6 +97,13 @@ class SceneManager:
                 img.scale = False
                 tex = vt.Texture(plane, mat_id)
                 tex.source = img
+                try:
+                    tex.refresh(True)
+                except Exception:
+                    try:
+                        tex.refresh(False)
+                    except Exception:
+                        pass
                 plane["upvn_tex"] = tex
                 plane["upvn_bg"] = asset
                 plane.visible = True

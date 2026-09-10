@@ -206,6 +206,15 @@ def _sync_world_ui(ctrl):
 
 
 def _object_under_cursor():
+    """Return name of choice plane under cursor, ortho-correct.
+
+    For ortho Camera_UI (the VN UI camera) we do a 2D AABB hit-test using the
+    same layout math as engine/ui/world_ui.layout_screen_ui, because
+    cam.getScreenRay / getScreenVect+rayCast is perspective-biased and the
+    fallback using cam.worldPosition misses the ortho offset (hence "always
+    right" when the ray origin is not offset). For perspective cameras we keep
+    the ray path.
+    """
     if not HAS_BGE:
         return None
     try:
@@ -213,6 +222,73 @@ def _object_under_cursor():
         sc = _bge.logic.getCurrentScene()
         cam = sc.active_camera
         x, y = _bge.logic.mouse.position
+        # ortho path — 2D hit test against choice planes' actual world bbox
+        try:
+            is_ortho = False
+            try:
+                is_ortho = getattr(cam.data, "type", "") == "ORTHO" or getattr(cam, "ortho_scale", None) is not None
+                # also check if cam name is Camera_UI (always ortho)
+                if getattr(cam, "name", "") == "Camera_UI":
+                    is_ortho = True
+            except Exception:
+                is_ortho = False
+            if is_ortho:
+                # use same aspect/ortho as world_ui.layout_screen_ui
+                try:
+                    from engine.ui.world_ui import aspect_wh
+                    from engine.render.contract import CAMERA_UI_ORTHO_SCALE
+                    aspect = aspect_wh()
+                except Exception:
+                    aspect = 16.0/9.0
+                    CAMERA_UI_ORTHO_SCALE = 15.0
+                try:
+                    ortho = float(getattr(cam, "ortho_scale", CAMERA_UI_ORTHO_SCALE) or CAMERA_UI_ORTHO_SCALE)
+                except Exception:
+                    ortho = 15.0
+                half = max(1.0, ortho/2.0)
+                half_v = max(0.5, half / aspect)
+                # mouse 0..1 -> world X/Z
+                world_x = (x - 0.5) * ortho
+                world_z = (y - 0.5) * ortho / aspect
+                # test each visible choice plane's AABB (world X/Z)
+                # planes are at (0, y_ui, z) with scale (half*0.70, half*0.045)
+                # mesh is 2x2, scale is half-extent, so world half = scale.x / y
+                # y_ui is approx -0.55, but we read actual object position for robustness
+                best = None
+                # iterate in order top->bottom, return first hit (topmost if overlap)
+                for i in range(9):
+                    name = f"choice_{i}"
+                    try:
+                        ob = sc.objects.get(name)
+                    except Exception:
+                        ob = None
+                    if ob is None:
+                        continue
+                    try:
+                        vis = bool(getattr(ob, "visible", True))
+                    except Exception:
+                        vis = True
+                    if not vis:
+                        continue
+                    try:
+                        pos = ob.worldPosition
+                        scl = ob.worldScale
+                        # local X->world X, local Y->world Z (rot 90 deg X)
+                        cx = float(pos[0]); cz = float(pos[2])
+                        hx = float(scl[0]); hz = float(scl[1])
+                        # small slop for font sub-pixel
+                        hx *= 1.02; hz *= 1.2
+                        if (cx - hx) <= world_x <= (cx + hx) and (cz - hz) <= world_z <= (cz + hz):
+                            best = name
+                            break
+                    except Exception:
+                        continue
+                if best is not None:
+                    return best
+                # fall through to ray if no AABB hit (e.g. layout not yet applied)
+        except Exception:
+            pass
+        # ray path for perspective or as fallback
         hit = None
         try:
             hit = cam.getScreenRay(x, y, 80.0)
@@ -222,8 +298,9 @@ def _object_under_cursor():
             try:
                 vect = cam.getScreenVect(x, y)
                 origin = cam.worldPosition
+                # for ortho the origin should be offset by screen, but getScreenRay already handles;
+                # for perspective the vector is direction from camera eye
                 target = origin + vect * 80.0
-                # xray=True so ghost plates still hit; property filter none.
                 try:
                     hit, _p, _n = cam.rayCast(target, origin, 80.0, "", 0, 1, 0)
                 except TypeError:
@@ -238,11 +315,27 @@ def _object_under_cursor():
 
 
 def _tick_pointer(ctrl):
-    """LMB over choice_N 3D plane → VNController.choose(i)."""
+    """LMB over choice_N 3D plane → VNController.choose(i) + hover scale."""
     if not HAS_BGE or ctrl is None:
         return
     ev = getattr(ctrl, "current_event", None) or {}
     if ev.get("type") != "menu":
+        # ensure hover scales are reset when not in menu
+        try:
+            import bge as _bge2
+            sc = _bge2.logic.getCurrentScene()
+            for i in range(9):
+                ob = sc.objects.get(f"choice_{i}")
+                if ob is None:
+                    continue
+                try:
+                    base = getattr(ob, "_upvn_base_scale", None)
+                    if base is not None:
+                        ob.worldScale = base
+                except Exception:
+                    pass
+        except Exception:
+            pass
         return
     try:
         import bge as _bge
@@ -256,8 +349,65 @@ def _tick_pointer(ctrl):
             logic._upvn_ptr = PointerTracker(HotspotMap.from_choices(choices))
             logic._upvn_ptr_key = key
         tr = logic._upvn_ptr
-        name = normalize_hit_name(_object_under_cursor())
+        raw_hit = _object_under_cursor()
+        name = normalize_hit_name(raw_hit)
         clicked = _bge_just("mouse", _bge.events.LEFTMOUSE)
+        # hover scale — must run every frame after layout_screen_ui
+        try:
+            sc = _bge.logic.getCurrentScene()
+            # cache base scales once per menu
+            for i in range(9):
+                ob = sc.objects.get(f"choice_{i}")
+                if ob is None:
+                    continue
+                try:
+                    if not hasattr(ob, "_upvn_base_scale") or getattr(ob, "_upvn_base_scale", None) is None:
+                        # store a copy of current worldScale as base
+                        s = ob.worldScale
+                        ob["_upvn_base_scale"] = (float(s[0]), float(s[1]), float(s[2]))
+                        ob._upvn_base_scale = (float(s[0]), float(s[1]), float(s[2]))
+                    else:
+                        # keep in sync if layout changed and not hovered
+                        if name != f"choice_{i}":
+                            b = ob._upvn_base_scale
+                            cur = ob.worldScale
+                            # if cur is hovered scale, don't overwrite
+                            # but if layout changed base, update
+                            pass
+                except Exception:
+                    try:
+                        ob["_upvn_base_scale"] = tuple(float(v) for v in ob.worldScale)
+                    except Exception:
+                        pass
+            # apply hover
+            for i in range(9):
+                ob = sc.objects.get(f"choice_{i}")
+                if ob is None:
+                    continue
+                try:
+                    base = getattr(ob, "_upvn_base_scale", None)
+                    if base is None:
+                        base = tuple(float(v) for v in ob.worldScale)
+                    else:
+                        base = tuple(float(v) for v in base)
+                    if name == f"choice_{i}":
+                        # scale up 8% on hover, also brighten via object color if possible
+                        ob.worldScale = (base[0]*1.08, base[1]*1.08, base[2])
+                        try:
+                            # brighten emission color slightly via object color (if use_object_color)
+                            ob.color = (1.12, 1.12, 1.18, 1.0)
+                        except Exception:
+                            pass
+                    else:
+                        ob.worldScale = base
+                        try:
+                            ob.color = (1.0, 1.0, 1.0, 1.0)
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+        except Exception:
+            pass
         for pe in tr.update(name, clicked=clicked):
             idx = tr.choose(pe)
             if idx is not None:

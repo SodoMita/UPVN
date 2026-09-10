@@ -6,14 +6,14 @@ Usage:
   # or with explicit output:
   ./upbge-0.50-linux-x64/blender --background --python tools/make_template.py -- blend/my.blend
 
-v0.6 (2026-09-08): fully data-API (no bpy.ops/context → reliable --background),
-reuses the add-on's build_vn_scene() so the produced .blend contains the exact
-same wiring as "Setup Scene" in the UPVN panel:
-    VN_Main scene, Camera_UI (ortho) + Camera_3D, five VN_* collections,
-    BG_Plane + Dialogue_Box, VNController empty with script_path + upvn_root,
-    Always(pulse) -> Python launcher brick (path-bootstrap text datablock),
-plus the richer 3D classroom stage (floor, desks, board, markers, presets,
-placeholder capsules) used by load_stage/show3d examples.
+v0.6.15: minimal template — only contract objects (BG, Dialogue, 5 Sprites,
+9 choices, 2 cameras, VNController + 5 collections). No classroom desks/
+board/cylinders. For 3D characters see docs/3D_CHARACTERS.md and
+examples/15_3d_stage (load_stage/show3d + marker_center).
+
+Reuses build_vn_scene() so the .blend contains exactly what "Setup Scene"
+creates. Data-API only, reliable --background. Always(pulse) -> Python
+launcher brick is added when run inside UPBGE UI; --background notes it.
 """
 import sys
 import os
@@ -133,9 +133,26 @@ def main(out_path: Path | None = None):
     for sc in list(bpy.data.scenes):
         if sc is not scene:
             bpy.data.scenes.remove(sc, do_unlink=True)
-    # empty master collection of leftover factory objects
+    # remove factory objects (Cube/Light/Camera) that are not part of contract
+    # -- the old unlink-only left them as orphans and they appeared as "random shapes"
+    for ob in list(bpy.data.objects):
+        if ob.name in ("Cube", "Light", "Camera") or ob.name.startswith("Light.") or ob.name.startswith("Cube."):
+            try:
+                bpy.data.objects.remove(ob, do_unlink=True)
+            except Exception:
+                pass
+        elif ob.type == "LIGHT":
+            # Lights are not part of contract; remove any stray
+            try:
+                bpy.data.objects.remove(ob, do_unlink=True)
+            except Exception:
+                pass
+    # ensure scene collection is empty before build_vn_scene repopulates it
     for ob in list(scene.collection.objects):
-        scene.collection.objects.unlink(ob)
+        try:
+            scene.collection.objects.unlink(ob)
+        except Exception:
+            pass
     try:
         bpy.context.window.scene = scene
     except Exception:
@@ -147,48 +164,37 @@ def main(out_path: Path | None = None):
     ctrl = build_vn_scene(bpy, scene_name="VN_Main",
                           script_path="//game/script.rpy")
 
-    # ---- 3D classroom stage (load_stage classroom_3d content) ----
-    stage_col = bpy.data.collections["VN_3DStage"]
-    wood = _mat("MatDesk", (0.49, 0.37, 0.25, 1.0))
-    wood_dark = _mat("MatDeskTeacher", (0.55, 0.42, 0.30, 1.0))
-    green = _mat("MatBoard", (0.12, 0.22, 0.13, 1.0), roughness=0.5)
-    grey = _mat("MatFloor", (0.30, 0.30, 0.33, 1.0), roughness=1.0)
-    eileen_c = _mat("MatChar_Eileen_placeholder", (0.55, 0.8, 0.55, 1.0), roughness=0.9)
-    sylvie_c = _mat("MatChar_Sylvie_placeholder", (0.55, 0.55, 0.9, 1.0), roughness=0.9)
-
-    # Floor
-    floor = _plane("Floor_classroom", 12.0, (0, 0, 0), mat=grey, collection=stage_col)
-
-    # Markers (spawn targets for show3d)
-    for mname, pos in [("marker_eileen", (-1.6, 1.2, 0)), ("marker_sylvie", (1.6, 1.2, 0)),
-                       ("marker_center", (0, 0.5, 0))]:
-        e = _empty(mname, pos, "ARROWS", 0.5)
-        stage_col.objects.link(e)
-
-    # Camera presets (lerp targets)
-    for pname, pos, rot in [("preset_closeup_eileen", (-1.6, -1.5, 1.4), (1.1, 0, 0)),
-                            ("preset_closeup_sylvie", (1.6, -1.5, 1.4), (1.1, 0, 0)),
-                            ("preset_wide", (0, -5, 2.2), (1.05, 0, 0))]:
-        pe = _empty(pname, pos, "SPHERE", 0.3, rot=rot)
-        stage_col.objects.link(pe)
-
-    # Desks: 4 + 4 students + 1 teacher
-    desk_positions = [(-2.2, 0.2, 0.25), (-0.7, 0.2, 0.25), (0.8, 0.2, 0.25), (2.3, 0.2, 0.25),
-                      (-2.2, -0.4, 0.25), (-0.7, -0.4, 0.25), (0.8, -0.4, 0.25), (2.3, -0.4, 0.25),
-                      (-1.4, 0.9, 0.35)]
-    for i, pos in enumerate(desk_positions):
-        d = _cube(f"Desk_{i:02d}", (0.9, 0.55, 0.5) if i < 8 else (1.1, 0.6, 0.6), pos,
-                  wood if i < 8 else wood_dark)
-        stage_col.objects.link(d)
-
-    # Blackboard
-    board = _plane("Blackboard", 4.0, (0, 2.0, 1.2), rot=(1.5708, 0, 0), mat=green,
-                   collection=stage_col)
-    board.scale = (1.5 * 4 / 2, 1 * 4 / 2, 1)
-
-    # Placeholder capsule characters
-    _cylinder("Char_Eileen_placeholder", 0.25, 1.4, (-1.6, 1.2, 0.9), eileen_c, stage_col)
-    _cylinder("Char_Sylvie_placeholder", 0.25, 1.4, (1.6, 1.2, 0.9), sylvie_c, stage_col)
+    # ---- minimal 3D stage — single marker for show3d, no random geometry ----
+    # The VN stage is empty by default; add your own 3D characters via
+    #   stage MyStage = "stages/my.blend"
+    #   load_stage MyStage
+    #   show3d MyCharacter at marker_center with fade
+    #   anim MyCharacter "ActionName" loop
+    # See docs/3D_CHARACTERS.md and examples/15_3d_stage.
+    try:
+        stage_col = bpy.data.collections.get("VN_3DStage")
+        if stage_col is None:
+            stage_col = bpy.data.collections.new("VN_3DStage")
+            scene.collection.children.link(stage_col)
+        # keep VN_3DStage tidy: remove any leftover classroom objects if present
+        for ob in list(stage_col.objects):
+            if ob.name.startswith(("Desk_", "Floor_", "Blackboard", "Char_", "marker_", "preset_")):
+                try:
+                    stage_col.objects.unlink(ob)
+                except Exception:
+                    pass
+        # ensure one canonical marker for show3d
+        if "marker_center" not in stage_col.objects and "marker_center" not in bpy.data.objects:
+            try:
+                m = bpy.data.objects.new("marker_center", None)
+                m.empty_display_type = 'ARROWS'
+                m.empty_display_size = 0.5
+                m.location = (0, 0.5, 0)
+                stage_col.objects.link(m)
+            except Exception:
+                pass
+    except Exception as e:
+        print(f"[make_template] minimal 3D stage setup note: {e}")
 
     # ---- save ----
     out_path = Path(out_path)
