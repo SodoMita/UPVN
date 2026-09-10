@@ -45,7 +45,7 @@ Headless fallback: when bpy unavailable (CI), the module still imports and expos
 bl_info = {
     "name": "UPVN — Visual Novel Editor",
     "author": "UPVN",
-    "version": (0, 6, 11),
+    "version": (0, 6, 12),
     "blender": (4, 2, 0),
     "location": "View3D > Sidebar > UPVN, Text Editor > Sidebar > UPVN",
     "description": "Create Ren'Py-like visual novel inside UPBGE with minimal coding — self-contained engine, one-click scene setup, characters, scenes, dialogue, menus, arbitrary saves, preview",
@@ -787,6 +787,8 @@ if HAS_BPY:
         menu_choice2: bpy.props.StringProperty(name="Choice 2", default="Wait")
         menu_jump2: bpy.props.StringProperty(name="Jump 2", default="wait")
         stage_name: bpy.props.StringProperty(name="3D Stage", default="classroom_3d")
+        renpy_source: bpy.props.StringProperty(name="Ren'Py Source", default="", subtype='DIR_PATH', description="Ren'Py project folder (contains game/) to import from")
+        renpy_dest: bpy.props.StringProperty(name="UPVN Dest (empty=current)", default="", subtype='DIR_PATH', description="Destination UPVN project folder (contains game/); empty = current blend folder")
         arbitrary_slot: bpy.props.IntProperty(name="Arbitrary Slot", default=1, min=1, max=999999, description="Any slot 1..∞ (pagination 6/page)")
         controller_module: bpy.props.StringProperty(
             name="Python Controller", default="bge_frontend.frontend",
@@ -1782,6 +1784,113 @@ except Exception:
                 self.report({'ERROR'}, f"Arbitrary preview failed {e}")
             return {'FINISHED'}
 
+
+    class UPVN_OT_ImportRenpy(bpy.types.Operator):
+        bl_idname = "upvn.import_renpy"
+        bl_label = "Import Ren'Py Project"
+        bl_description = "Convert a Ren'Py project (game folder) into this UPVN project — no image textures needed (palette colours)"
+        directory: bpy.props.StringProperty(subtype='DIR_PATH', options={'HIDDEN'})
+        def invoke(self, context, event):
+            context.window_manager.fileselect_add(self)
+            return {'RUNNING_MODAL'}
+        def execute(self, context):
+            import pathlib, sys
+            src = pathlib.Path(self.directory) if self.directory else pathlib.Path(bpy.path.abspath(context.scene.upvn_props.renpy_source))
+            if not src.exists():
+                self.report({'ERROR'}, f"Source not found: {src}")
+                return {'FINISHED'}
+            # destination is parent of current project_path (//game/script.rpy -> project root)
+            try:
+                dst_root = pathlib.Path(bpy.path.abspath(context.scene.upvn_props.project_path)).parent.parent
+                if not dst_root.exists():
+                    dst_root = pathlib.Path(bpy.path.abspath("//"))
+            except Exception:
+                dst_root = pathlib.Path(bpy.path.abspath("//"))
+            # but user can override via renpy_dest
+            dest_prop = getattr(context.scene.upvn_props, "renpy_dest", "").strip()
+            if dest_prop:
+                try:
+                    dst = pathlib.Path(bpy.path.abspath(dest_prop))
+                except Exception:
+                    dst = dst_root
+            else:
+                dst = dst_root
+
+            # call converter (headless-safe)
+            try:
+                from tools.convert_renpy import convert_renpy_project
+            except Exception:
+                # try engine discovery fallback
+                import sys as _sys, pathlib as _pl
+                root = _pl.Path(__file__).resolve().parents[1]
+                if str(root) not in _sys.path:
+                    _sys.path.insert(0, str(root))
+                from tools.convert_renpy import convert_renpy_project
+            try:
+                res = convert_renpy_project(src, dst, overwrite=True, generate_blend=False)
+            except Exception as e:
+                self.report({'ERROR'}, f"Convert failed: {e}")
+                return {'FINISHED'}
+            # update project_path to point at converted game if needed
+            try:
+                # keep existing project_path if it already points at dst/game/script.rpy
+                pass
+            except Exception:
+                pass
+            pe = res.get("report", {}).get("parse_errors", [])
+            if pe:
+                self.report({'WARNING'}, f"Converted with {len(pe)} parse errors — see console. Smoke: {res.get('smoke')}")
+            else:
+                self.report({'INFO'}, f"Ren'Py imported: {len(res.get('copied',[]))} files → {dst} (headless {res.get('smoke',{}).get('events',0)} events)")
+            print(f"[UPVN] Ren'Py import {src} -> {dst}: {res}")
+            return {'FINISHED'}
+
+    class UPVN_OT_ConvertRenpyQuick(bpy.types.Operator):
+        bl_idname = "upvn.convert_renpy_quick"
+        bl_label = "Convert (headless path)"
+        bl_description = "Run converter using the paths typed in the panel (no folder browser)"
+        def execute(self, context):
+            import pathlib
+            p = context.scene.upvn_props
+            src = pathlib.Path(bpy.path.abspath(p.renpy_source)) if p.renpy_source else None
+            dst_raw = p.renpy_dest.strip() if getattr(p, "renpy_dest", "") else ""
+            if not src or not src.exists():
+                self.report({'ERROR'}, f"Ren'Py source not found: {p.renpy_source}")
+                return {'FINISHED'}
+            try:
+                dst = pathlib.Path(bpy.path.abspath(dst_raw)) if dst_raw else pathlib.Path(bpy.path.abspath("//"))
+                if dst.is_file():
+                    dst = dst.parent
+                # if dst points to a file inside project, use its parent parent as root?
+                # For UPVN layout dst should be project root containing game/
+                if dst.name == "game":
+                    dst = dst.parent
+            except Exception as e:
+                self.report({'ERROR'}, f"Bad dest: {e}")
+                return {'FINISHED'}
+            try:
+                from tools.convert_renpy import convert_renpy_project
+            except Exception:
+                import sys as _sys, pathlib as _pl
+                root = _pl.Path(__file__).resolve().parents[1] if '__file__' in globals() else _pl.Path(".")
+                if str(root) not in _sys.path:
+                    _sys.path.insert(0, str(root))
+                from tools.convert_renpy import convert_renpy_project
+            try:
+                res = convert_renpy_project(src, dst, overwrite=True, generate_blend=False)
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                self.report({'ERROR'}, f"Convert failed: {e}")
+                return {'FINISHED'}
+            pe = res.get("report", {}).get("parse_errors", [])
+            if pe:
+                self.report({'WARNING'}, f"Converted with {len(pe)} errors (see console)")
+            else:
+                self.report({'INFO'}, f"Converted {len(res.get('copied',[]))} files → {dst}")
+            return {'FINISHED'}
+
+
     def _builder_from_file(path: str) -> UPVN_GameBuilder:
         """Load existing script.rpy into builder preserving labels (v0.5 fix)."""
         # Use UPVN_GameBuilder's own preservation logic (it loads _existing_text)
@@ -1886,6 +1995,16 @@ except Exception:
             layout.operator("upvn.preview_arbitrary", icon='IMAGE_REFERENCE')
             layout.label(text="Saves: arbitrary slots 1..∞ (←→ pagination)", icon='INFO')
             layout.label(text="H: history  Q: quick menu  Preserved labels", icon='INFO')
+            layout.separator()
+            box = layout.box()
+            box.label(text="Ren'Py → UPVN (no textures)", icon='IMPORT')
+            box.prop(props, "renpy_source")
+            box.prop(props, "renpy_dest")
+            row = box.row(align=True)
+            row.operator("upvn.import_renpy", text="Browse & Import", icon='FILE_FOLDER')
+            row.operator("upvn.convert_renpy_quick", text="Convert paths", icon='CHECKMARK')
+            box.label(text="Palette renders — llvmpipe & lavapipe identical", icon='INFO')
+            box.label(text="Headless: python -m tools.convert_renpy SRC DST", icon='CONSOLE')
 
     class UPVN_PT_TextPanel(bpy.types.Panel):
         bl_label = "UPVN — Script"

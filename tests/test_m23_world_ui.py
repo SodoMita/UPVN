@@ -4,6 +4,7 @@ pointer raycast maps LMB on choice_N to VNController.choose.
 """
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
@@ -122,6 +123,6 @@ def test_frontend_and_addon_are_3d_unlit():
     assert "_rewrite_unlit" in ad
     assert "ShaderNodeEmission" in ad
     assert "Speaker_Text" in ad and "choice_" in ad
-    assert '"version": (0, 6, 11)' in ad
+    assert re.search(r'"version":\s*\(0,\s*6,\s*\d+\)', ad)
     assert "scene_name=None" in ad
     assert "_get_or_create" in ad
