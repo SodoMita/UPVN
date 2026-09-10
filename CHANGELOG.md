@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.6.13 — 2026-09-10 Desktop no-texture palette + Ren'Py converter (llvmpipe/lavapipe)
+
+- **Palette instead of textures**: `engine/render/contract.py` `BG_PALETTE`/`SPRITE_PALETTE`
+  + `bg_color_for`/`sprite_color_for` — every `scene`/`show` tints `object.color`
+  on a **white emission** material (`_rewrite_unlit` pure emission, no `TexImage`
+  node). No `bge.texture` (`ImageFFmpeg`/`Texture`) at all.
+  Fixes `Texture is not available` on emission nodes and makes the game run
+  identically on **llvmpipe** (GL, what UPBGE uses) and **lavapipe** (Vulkan)
+  software renderers — no image decoding anywhere.
+  `SceneManager._apply_bg_color` + `SpriteRenderer._bge_show` set `plane.color`
+  from the palette (character hex wins, then sprite map, then hash pastel).
+  See `docs/SOFTWARE_RENDERERS.md` for the driver table and headless-Wayland recipe.
+
+- **Sample scene is now truly texture-free**: `blend/upvn_editor_addon.py`
+  `_rewrite_unlit` is emission-only; `build_vn_scene` creates BG/Sprite mats as
+  white bases (`(1,1,1,1)`) so palette tints faithfully. `blend/UPVN_Template.blend`
+  regenerated (798KB, bricks skip in --background as expected).
+
+- **Ren'Py → UPVN converter**: `tools/convert_renpy.py`
+  `python -m tools.convert_renpy SRC DST --overwrite [--blend]` — parses full tier,
+  copies every `.rpy/.rpym` (no assets needed), validates headless (compat mode),
+  writes `README_CONVERTED.md`; `--blend` generates `blend/UPVN_Template.blend`
+  when run inside Blender. Headless proof: `examples/14_renpy_dropin` → 33 events.
+  Blender panel adds **Ren'Py → UPVN** box (`renpy_source`/`renpy_dest` + Browse &
+  Import / Convert paths) calling the same converter.
+
+- **Tests**: 276 passed, 16 skipped (version pins relaxed to `0.6.*`).
+
+- **Desktop verified (2026-09-10)**: sway 1.10 + pixman + XWayland + `grim`
+  screenshots + `foot` (`desktop_sway_foot.png`), `blender --background`
+  add-on import → `Engine: OK`, `make_template` OK, `smoke_palette_preview.png`
+  (20KB headless). Plain Blender 4.3.2 usable for editing (Validate/Preview);
+  UPBGE play path needs only `Setup Scene` once (bricks need UI context).
+
 ## 0.6.12 — 2026-09-10 M25 Usability Stabilization Freeze
 
 - **BUG-009 (P0)**: UPBGE 0.50 `KX_GameObject` exposes only
