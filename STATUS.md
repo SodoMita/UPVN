@@ -204,3 +204,15 @@ Status: 307 passed / 16 skipped. `feat/desktop-gui`.
 - Sample stage: examples/10_full_sample_game/stages/classroom_3d.blend
   (+evidence m26d_hover_scale_live.png). Tests: 314 passed / 16 skipped
   (7 new M26d regressions).
+
+## M26e — bootstrap script fixed, bake tool executed + standalone-verified (2026-09-10)
+
+- desktop_sway.sh: export XDG_RUNTIME_DIR (was bare assignment → sway abort)
+  + `model` not `mode` for headless output config. Verified by kill-and-
+  rebuild via the script itself. Both pinned in tests.
+- bake_stage_into_template.py: EXCLUDE_SUFFIX interpolation NameError fixed
+  (first real run); copies engine/ + bge_frontend/ next to --out (launcher
+  resolves //; otherwise ModuleNotFoundError). Baked game live-verified from
+  /tmp/bakedgame: spawns/anim/preset-skip/menu/hover-click-select → end,
+  ALIVE.
+- Tests: 318 passed / 16 skipped (4 new M26e; bake tests skip without /opt).

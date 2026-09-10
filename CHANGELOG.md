@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.6.14 — 2026-09-10 (cont.) M26e: bootstrap script fixed; bake tool executed end-to-end
+
+- **tools/desktop_sway.sh sway-start FIXED** (standing bug for many rounds,
+  found by reading it with the working manual recipe side by side): TWO
+  defects — (1) `XDG_RUNTIME_DIR=/tmp/wl-upvn` was assigned WITHOUT `export`,
+  so the sway child aborted with "XDG_RUNTIME_DIR is not set in the
+  environment"; (2) the headless output line used `mode 1280x800`, but
+  headless outputs have no mode list — the config word is `model`. Verified
+  by killing a live session and letting the script rebuild the desktop
+  (sway up, HEADLESS-1 present, ready lines printed). Test-pinned.
+- **tools/bake_stage_into_template.py actually executed** (shipped M26d
+  unexecuted — lesson: run what you ship): first run hit `NameError:
+  EXCLUDE_SUFFIX` (the generated blender-side script never received the
+  constant — now interpolated); second issue: the baked blend's embedded
+  launcher imports engine/bge_frontend relative to the blend (//), so baking
+  outside the repo tree died with "No module named 'bge_frontend'" — the
+  tool now copies the runtime tree next to --out, making the output
+  immediately playable standalone.
+- **Baked game verified LIVE from /tmp/bakedgame**: 3D spawns
+  (repositioned templates), `play_anim eileen wave`, preset skipped safely,
+  menu over the 3D scene, `hover=choice_1 clicked=True` selected it, story
+  reached `end`, player alive. Structural checks: all stage objects present,
+  eileen parked at (30,−3,−30), `wave` action fake-user'd, script_path
+  flipped, scene.camera = Camera_UI, no stage cameras merged.
+- New tests `tests/test_m26e_bake_tool.py` (4; skipped when /opt is wiped):
+  run the tool into tmp_path, assert clean exit + runtime tree copied (no
+  __pycache__) + baked contents (stage in, template parked, script flipped)
+  + the sway script fixes.
+
 ## 0.6.14 — 2026-09-10 (cont.) M26d: 3D-stage tier verified live; LibLoad segfault contained
 
 Driven with a stage probe script over a baked stage (probe script + merged

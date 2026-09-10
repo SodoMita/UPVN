@@ -57,8 +57,8 @@ with bpy.data.libraries.load(SRC, link=False) as (data_from, data_to):
     # M26d: NO cameras — any second camera coincided with the viewport
     # rendering from it instead of Camera_UI (ortho UI disappeared).
     data_to.objects = [n for n in data_from.objects
-                       if not n.startswith(EXCLUDE_SUFFIX)
-                       and not n.split(".")[0].endswith(EXCLUDE_SUFFIX)]
+                       if not n.startswith({EXCLUDE_SUFFIX!r})
+                       and not n.split(".")[0].endswith({EXCLUDE_SUFFIX!r})]
     data_to.actions = list(data_from.actions)
 
 TEMPLATE_NAMES = {{"eileen", "sylvie"}}  # extend per game: show3d asset names
@@ -97,6 +97,21 @@ print("BAKED", OUT, "objects:", len(data_to.objects),
         path = f.name
     rc = os.system(f'{exe} --background --python "{path}"')
     os.unlink(path)
+    if rc == 0:
+        # M26e: the blend's embedded launcher imports engine/bge_frontend
+        # relative to the blend (//). Without them next to --out the player
+        # dies with "No module named 'bge_frontend'" (live-measured). Copy
+        # the runtime tree so the output is immediately playable.
+        out_dir = os.path.dirname(os.path.abspath(args.out))
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        import shutil
+        for folder in ("engine", "bge_frontend"):
+            src = os.path.join(root, folder)
+            dst = os.path.join(out_dir, folder)
+            if os.path.isdir(src) and not os.path.isdir(dst):
+                shutil.copytree(src, dst, ignore=shutil.ignore_patterns(
+                    "__pycache__", "*.pyc", ".pytest_cache"))
+                print(f"copied runtime: {dst}")
     return 1 if rc else 0
 
 
