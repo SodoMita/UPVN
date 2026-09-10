@@ -45,7 +45,7 @@ Headless fallback: when bpy unavailable (CI), the module still imports and expos
 bl_info = {
     "name": "UPVN — Visual Novel Editor",
     "author": "UPVN",
-    "version": (0, 6, 12),
+    "version": (0, 6, 13),
     "blender": (4, 2, 0),
     "location": "View3D > Sidebar > UPVN, Text Editor > Sidebar > UPVN",
     "description": "Create Ren'Py-like visual novel inside UPBGE with minimal coding — self-contained engine, one-click scene setup, characters, scenes, dialogue, menus, arbitrary saves, preview",
