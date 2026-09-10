@@ -23,10 +23,17 @@ fi
 UPBGE=/opt/upbge/upbge-0.50-linux-x64
 
 # 3) headless sway (XWayland hosts the X11-only player)
-XDG_RUNTIME_DIR=/tmp/wl-upvn
+# M26e fix: this MUST be exported — a bare assignment is invisible to the
+# sway child, which aborted with "XDG_RUNTIME_DIR is not set in the
+# environment" (the whole "in-script sway start broken" mystery).
+export XDG_RUNTIME_DIR=/tmp/wl-upvn
 mkdir -m 700 -p "$XDG_RUNTIME_DIR"
 if ! pgrep -x sway >/dev/null 2>&1; then
-    printf 'output HEADLESS-1 mode 1280x800\ndefault_border none\n' \
+    # M26e fix: headless outputs have no mode list — sway's config word is
+    # `model` (W×H@R). The old `mode 1280x800` was rejected at startup and
+    # sway died with "output config mode unavailable" (in-script sway start
+    # looked permanently broken while the manual recipe worked).
+    printf 'output HEADLESS-1 model 1280x800\ndefault_border none\n' \
         > "$XDG_RUNTIME_DIR/cfg"
     WLR_BACKENDS=headless WLR_LIBINPUT_NO_DEVICES=1 WLR_RENDERER=pixman \
         nohup sway -c "$XDG_RUNTIME_DIR/cfg" >"$XDG_RUNTIME_DIR/sway.log" 2>&1 &
