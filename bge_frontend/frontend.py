@@ -221,6 +221,24 @@ def _sync_world_ui(ctrl):
             pass
 
 
+def _pointer_probe(sc, cam):
+    """Env-gated (UPVN_POINTER_PROBE=1) once-per-30-ticks physics probe:
+    what does a scene rayCast see along key columns? Answers ray-vs-SENSOR
+    questions in the field without touching game code."""
+    logic = _bge.logic
+    logic._upvn_probe_n = getattr(logic, "_upvn_probe_n", 0) + 1
+    if logic._upvn_probe_n % 30 != 1:
+        return
+    try:
+        for label, pz in (("choice0col", 1.97), ("choice1col", 1.41),
+                          ("spritecol", 0.0), ("high", 4.0), ("low", -4.0)):
+            hit, p, n = sc.rayCast((0.0, cam.worldPosition.y + 5.0, pz),
+                                   (0.0, cam.worldPosition.y - 5.0, pz), 20.0)
+            print(f"[probe] {label} z={pz}: hit={getattr(hit,'name',None)} at={p}")
+    except Exception as e:
+        print(f"[probe] failed: {e}")
+
+
 def _object_under_cursor():
     if not HAS_BGE:
         return None
@@ -285,6 +303,10 @@ def _tick_pointer(ctrl):
         return
     try:
         import bge as _bge
+        import os as _os
+        if _os.environ.get("UPVN_POINTER_PROBE"):
+            _pointer_probe(_bge.logic.getCurrentScene(),
+                           _bge.logic.getCurrentScene().active_camera)
         from engine.core.vn_controller import _bge_just
         from engine.ui.pointer import HotspotMap, PointerTracker
         from engine.ui.world_ui import normalize_hit_name
