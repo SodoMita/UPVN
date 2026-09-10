@@ -183,3 +183,24 @@ flipped to the sample script), xdotool clicks/keys to advance.
   layout_screen_ui, zoom-proof; 5 headless tests.
 
 Status: 307 passed / 16 skipped. `feat/desktop-gui`.
+
+## M26d — 3D stage tier + hover proven live (2026-09-10)
+
+- LibLoad SEGFAULTS UPBGE 0.50.0 on any file (bisected incl. template-copy
+  control) → opt-in via UPVN_ENABLE_LIBLOAD=1; baked stages are the tier:
+  tools/bake_stage_into_template.py (no stage cameras; templates parked at
+  30,-3,-30 — excluded collections don't exist at runtime, addObject rejects
+  active objects → spawn() repositions the master).
+- camera_preset guards Camera_UI BEFORE resolving Camera_3D (moving the
+  dormant template camera stole the viewport: perspective render, no UI).
+- _bind_camera re-asserts every tick (stage camera present ⇒ viewport could
+  drift despite active_camera reading Camera_UI).
+- Hover LIVE-MEASURED over a 3D scene menu: plate 560 → 604 px (×1.08),
+  symmetric ±22 px, previously-hovered plate returns to base; click selects
+  and the story advances (probe script reached `end`, player alive).
+- package_game.py ships the whole project tree now (was *.rpy only — assets/
+  stages/ were lost in packaged builds); stage path candidates include
+  //../game/stages/ (packaged layout).
+- Sample stage: examples/10_full_sample_game/stages/classroom_3d.blend
+  (+evidence m26d_hover_scale_live.png). Tests: 314 passed / 16 skipped
+  (7 new M26d regressions).

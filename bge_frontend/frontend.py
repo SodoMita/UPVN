@@ -424,21 +424,36 @@ def _apply_camera_state(logic, ctrl):
 
 
 def _bind_camera():
-    """Force scene.active_camera = Camera_UI once (editor camera is not the game camera)."""
+    """Force scene.active_camera = Camera_UI. M26d: this ran ONCE with a
+    sticky guard, but a live-verified run proved that is not enough — a
+    merged 3D stage brought its own Camera_3D and the viewport rendered from
+    it (perspective, no UI planes, pointer rays hit stage geometry) even
+    though the boot bind had printed. Re-assert every tick; the check is one
+    attribute compare."""
     if not HAS_BGE:
         return
     try:
         import bge as _bge
         logic = _bge.logic
-        if getattr(logic, "_upvn_cam_bound", False):
-            return
         sc = logic.getCurrentScene()
-        cam = sc.objects.get("Camera_UI")
-        if cam is None:
+        cam = sc.active_camera
+        want = sc.objects.get("Camera_UI")
+        if want is None:
             return
-        sc.active_camera = cam
-        logic._upvn_cam_bound = True
-        print("[UPVN] active_camera bound to Camera_UI")
+        # force-set every tick: this build's viewport camera selection is not
+        # fully explained by active_camera read-back, and one extra camera in
+        # the scene (dormant template Camera_3D) coincided with perspective
+        # rendering. The write is a no-op when already correct.
+        sc.active_camera = want
+        if cam is not None and getattr(cam, "name", "") == "Camera_UI":
+            logic._upvn_cam_bound = True
+            return
+        if not getattr(logic, "_upvn_cam_bound", False):
+            logic._upvn_cam_bound = True
+            print("[UPVN] active_camera bound to Camera_UI")
+        else:
+            print("[UPVN] active_camera re-bound to Camera_UI "
+                  f"(was {getattr(cam, 'name', '?')})")
     except Exception:
         pass
 

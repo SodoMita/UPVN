@@ -75,20 +75,22 @@ def test_scene_manager_never_libloads():
             )
 
 
-def test_stage_manager_libload_is_exists_guarded():
-    """StageManager may LibLoad, but only after an os.path.exists check."""
+def test_stage_manager_libload_is_exists_guarded_and_gated():
+    """StageManager may LibLoad, but only after an os.path.exists check AND
+    behind the UPVN_ENABLE_LIBLOAD gate (UPBGE 0.50.0 segfaults on ANY
+    LibLoad — verified against even a copy of the running template)."""
     src_path = os.path.join(REPO, "engine", "render", "stage_manager.py")
     src = open(src_path).read()
     assert "logic.LibLoad" in src
-    # every LibLoad call site must sit behind an os.path.exists guard in its
-    # branch (the guarded load_stage loop)
-    lines = src.splitlines()
-    for i, line in enumerate(lines):
-        if "logic.LibLoad" in line:
-            window = "\n".join(lines[max(0, i - 12):i])
-            assert "os.path.exists(path)" in window, (
-                f"LibLoad at line {i + 1} lacks an os.path.exists guard nearby"
-            )
+    fn = src[src.index("def load_stage"):]
+    fn = fn[:fn.index("\n    def ")]  # load_stage body only
+    assert "os.path.exists(path)" in fn
+    assert fn.index("os.path.exists(path)") < fn.index("logic.LibLoad"), (
+        "LibLoad must sit behind the exists check"
+    )
+    assert "UPVN_ENABLE_LIBLOAD" in fn, (
+        "LibLoad must be opt-in (build segfaults on any LibLoad)"
+    )
 
 
 def test_frontend_is_single_ortho_writer():
