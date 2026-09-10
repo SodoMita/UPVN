@@ -196,17 +196,35 @@ def test_template_ships_the_backlog_objects():
     blend = ROOT / "blend" / "UPVN_Template.blend"
     import subprocess
     names = [contract.HISTORY_PLANE, contract.HISTORY_TEXT, contract.REWIND_TEXT]
-    expr = ("import bpy;"
-            "print('HAVE', [n for n in %r if bpy.data.objects.get(n)])" % names)
+    expr = (
+        "import bpy;"
+        "print('HAVE', [n for n in %r if bpy.data.objects.get(n)]);"
+        "o=bpy.data.objects.get('History_Box');"
+        "vs=list(o.data.vertices) if o else [];"
+        "print('QUAD', len(vs)==4 and all(abs(abs(v.co.x)-1.0)<1e-4 for v in vs),"
+        " round(max((abs(v.co.x) for v in vs), default=0),3),"
+        " len(o.data.uv_layers) if o else 0,"
+        " [round(c,2) for c in o.color] if o else None)" % names)
     blender = "/opt/upbge/upbge-0.50-linux-x64/blender"
     from shutil import which
     if not Path(blender).exists() and not which(blender):
         pytest.skip("UPBGE not installed in this sandbox")
     out = subprocess.run([blender, "--background", str(blend), "--python-expr", expr],
                          capture_output=True, text=True, timeout=180)
-    line = [l for l in (out.stdout + out.stderr).splitlines() if l.startswith("HAVE")]
-    assert line, out.stdout + out.stderr
-    assert all(n in line[0] for n in names), line[0]
+    lines = (out.stdout + out.stderr).splitlines()
+    have = [l for l in lines if l.startswith("HAVE")]
+    quad = [l for l in lines if l.startswith("QUAD")]
+    assert have, out.stdout + out.stderr
+    assert all(n in have[0] for n in names), have[0]
+    # layout_screen_ui treats worldScale as the half extent, so the panel mesh
+    # must be the +/-1 quad every other VN plane uses — a +/-0.5 mesh renders at
+    # half size and the backlog text lands outside its own box (measured).
+    assert quad and quad[0].startswith("QUAD True"), quad
+    fields = quad[0].split()
+    assert fields[1] == "True" and fields[2] == "1.0", quad[0]   # +/-1 quad
+    assert int(fields[3]) >= 1, "UV layer required for TexImage sampling"
+    assert "[0.03, 0.04, 0.09, 1.0]" in quad[0], \
+        "History_Box must be tinted dark or it paints white-on-white"
 
 
 # ------------------------------------------------------- input plumbing (fake bge)
