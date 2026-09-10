@@ -886,10 +886,15 @@ except Exception:
             em.inputs["Strength"].default_value = 1.0
         except Exception:
             pass
-        try:
-            nt.links.new(tex.outputs["Color"], em.inputs["Color"])
-        except Exception:
-            pass
+        # M25 BUG-005: an *unassigned* TexImage node evaluates to black in the
+        # UPBGE rasterizer and overrides the default colour above — every VN
+        # plate rendered black in the player. Only link once a real image is
+        # assigned (the frontend may do so later).
+        if getattr(tex, "image", None) is not None:
+            try:
+                nt.links.new(tex.outputs["Color"], em.inputs["Color"])
+            except Exception:
+                pass
         nt.links.new(em.outputs[0], out.inputs[0])
         for attr, val in (("blend_method", "OPAQUE"), ("shadow_method", "NONE"),
                           ("use_backface_culling", False)):
@@ -1239,14 +1244,14 @@ except Exception:
             ctrl = _b.data.objects.new("VNController", None)
             ctrl.empty_display_type = "CUBE"
             scene.collection.objects.link(ctrl)
-        ctrl["script_path"] = script_path
+        _set_runtime_prop(_b, ctrl, "script_path", script_path)
         # relative root to the folder that contains engine/ (launcher falls back
         # to the blend dir + parents when this is empty/stale)
         try:
             blend_dir = os.path.dirname(os.path.abspath(_b.path.abspath("//"))) if _b.data.filepath else None
         except Exception:
             blend_dir = None
-        ctrl["upvn_root"] = _engine_root_relative(blend_dir)
+        _set_runtime_prop(_b, ctrl, "upvn_root", _engine_root_relative(blend_dir))
 
         # --- logic bricks (UPBGE only) ---
         # UPBGE 0.50 exposes brick editing through bpy.ops.logic.* (the same
@@ -1255,7 +1260,7 @@ except Exception:
         # UI/GL context, so in --background mode we skip adding bricks and say so
         # loudly. Existing bricks are never touched: Setup Scene is idempotent and
         # preserves a working wiring when the object already has it.
-        ctrl["upvn_bricks"] = "no"
+        _set_runtime_prop(_b, ctrl, "upvn_bricks", "no")
         if has_game and install_launcher:
             launcher = _b.data.texts.get("upvn_launcher")
             if launcher is None:
@@ -1272,14 +1277,57 @@ except Exception:
             need_keys = "AllKeys" not in sensor_names
             need_mouse = "Mouse" not in sensor_names
             if not any((need_sensor, need_controller, need_keys, need_mouse)):
-                ctrl["upvn_bricks"] = "existing"
+                _set_runtime_prop(_b, ctrl, "upvn_bricks", "existing")
             else:
                 brick_state = _add_logic_bricks(
                     _b, ctrl, launcher, controller_module,
                     need_sensor=need_sensor, need_controller=need_controller,
                     need_keys=need_keys, need_mouse=need_mouse)
-                ctrl["upvn_bricks"] = brick_state
+                _set_runtime_prop(_b, ctrl, "upvn_bricks", brick_state)
         return ctrl
+
+
+    def _set_runtime_prop(_b, obj, name, value):
+        """Write a property that is visible in the editor AND at game runtime.
+
+        M25 BUG-009: in UPBGE 0.50 the player's KX_GameObject only exposes
+        entries of obj.game.properties ("Game Properties"); plain ID custom
+        properties (obj[name]) are invisible at runtime, so a blend carrying
+        script_path as a bare custom property silently fell back to the
+        candidate list and never loaded the project's script. The editor UI
+        keeps reading the custom property, so write both representations.
+        """
+        obj[name] = value
+        try:
+            props = obj.game.properties
+        except Exception:
+            return
+        p = None
+        try:
+            p = props.get(name)
+        except Exception:
+            p = None
+        if p is None:
+            try:
+                with _b.context.temp_override(active_object=obj, object=obj,
+                                              selected_objects=[obj],
+                                              selected_editable_objects=[obj]):
+                    _b.ops.object.game_property_new()
+            except Exception:
+                return
+            p = obj.game.properties[-1]
+            p.name = name
+            p = obj.game.properties.get(name) or p
+        typ = ("STRING" if isinstance(value, str) else
+               "BOOL" if isinstance(value, bool) else
+               "INT" if isinstance(value, int) else "FLOAT")
+        if p.type != typ:
+            p.type = typ
+            p = obj.game.properties.get(name) or p
+        try:
+            p.value = value
+        except Exception:
+            pass
 
 
     def _add_logic_bricks(_b, obj, launcher_text, controller_module,

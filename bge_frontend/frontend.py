@@ -191,8 +191,18 @@ def _sync_world_ui(ctrl):
         except Exception:
             pass
         apply_world_ui(_get_obj, payload, ortho=ortho)
-    except Exception:
-        pass
+    except Exception as e:
+        # M25 BUG-002: this used to be a bare `except: pass`, which silently
+        # swallowed every UI failure every tick (the player also discards
+        # Python stdout, so field reports saw a black screen with no clue).
+        try:
+            import bge as _bge
+            if not getattr(_bge.logic, "_upvn_ui_sync_err", False):
+                _bge.logic._upvn_ui_sync_err = True
+                _bge.logic._last_upvn_error = f"world UI sync: {e}"
+                print(f"[UPVN] world UI sync error (shown once): {e}")
+        except Exception:
+            pass
 
 
 def _object_under_cursor():
@@ -358,14 +368,57 @@ def main(cont=None):
         _tick_pointer(ctrl)
     except Exception:
         pass
+    try:
+        _render_diag(logic)
+    except Exception:
+        pass
     # M18 debug/QA keys: F1 state dump, F12 in-game screenshot
     try:
         _debug_keys(logic, ctrl)
     except Exception:
         pass
+    # M25 QA: optional per-tick state heartbeat for external harnesses.
+    # The standalone player's embedded Python stdout is block-buffered and
+    # lost on kill -9, so the smoke walkthrough (tools/smoke_walkthrough.sh)
+    # polls this machine-readable file instead of the log. Set the env var
+    # UPVN_HEARTBEAT=/path/to.json to enable; unset = zero overhead.
+    try:
+        _hb = os.environ.get("UPVN_HEARTBEAT")
+        if _hb:
+            import json as _json
+            _st = ctrl.state
+            _evt = ctrl.current_event or {}
+            _sm = getattr(ctrl, "screen_mgr", None)
+            with open(_hb, "w") as _f:
+                _f.write(_json.dumps({
+                    "label": _st.current_label,
+                    "idx": _st.instruction_index,
+                    "event": _evt.get("type"),
+                    "choices": len(_evt.get("choices") or []),
+                    "modal": (None if _sm is None or _sm.active_modal is None
+                              else _sm.active_modal.name),
+                }))
+    except Exception:
+        pass
 
 
 _shot_seq = [0]
+
+
+def _render_diag(logic):
+    """Draw the F1 diagnostic into the existing dialogue FONT objects."""
+    if not getattr(logic, "_upvn_diag_on", False):
+        return
+    from engine.ui.world_ui import set_font_text
+    sc = logic.getCurrentScene()
+    sp = sc.objects.get("Speaker_Text")
+    dt = sc.objects.get("Dialogue_Text")
+    box = sc.objects.get("Dialogue_Box")
+    for ob in (sp, dt, box):
+        if ob is not None:
+            ob.visible = True
+    set_font_text(sp, "UPVN DIAG (F1 to close)")
+    set_font_text(dt, getattr(logic, "_upvn_diag", ""))
 
 
 def _debug_keys(logic, ctrl):
@@ -384,6 +437,25 @@ def _debug_keys(logic, ctrl):
         ev = ctrl.current_event or {}
         print(f"[UPVN] F1 state: label={st.current_label} idx={st.instruction_index} "
               f"event={ev.get('type')} vars={ {k: v for k, v in list(st.variables.items())[:12]} }")
+        # M25: the player discards Python stdout, so a console dump is useless
+        # in the field. F1 now also toggles an ON-SCREEN diagnostic using the
+        # existing Speaker_Text/Dialogue_Text FONT objects (no new UI system).
+        try:
+            import bge as _bge
+            sc = _bge.logic.getCurrentScene()
+            cam = sc.active_camera
+            lines = [
+                f"label: {st.current_label}  ip: {st.instruction_index}",
+                f"mode: {ev.get('type')}  choices: {len(ev.get('choices') or [])}",
+                f"script: {getattr(ctrl, 'script_path', '?')}",
+                f"camera: {cam.name if cam else None}",
+                f"vars: { {k: v for k, v in list(st.variables.items())[:6]} }",
+                f"last error: {getattr(_bge.logic, '_last_upvn_error', None)}",
+            ]
+            _bge.logic._upvn_diag_on = not getattr(_bge.logic, "_upvn_diag_on", False)
+            _bge.logic._upvn_diag = "\n".join(lines)
+        except Exception:
+            pass
     if _bge_just("keyboard", f12):
         _shot_seq[0] += 1
         import os as _os

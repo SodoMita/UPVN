@@ -18,17 +18,21 @@ sys.path.insert(0, str(ROOT))
 from engine.core.vn_controller import _digit_choice_index, _bge_input_state  # noqa: E402
 
 
-def _digits(*just: int, active=(), count=9) -> dict:
-    """Build a digit-state dict: 'just' for indices in just, 'active' for active."""
-    out = {}
+def _digits(*just: int, active=(), count=9) -> list:
+    """Build digit-ordered states: 'just' for indices in just, 'active' for active.
+
+    M25 BUG-010: the helper consumes a SEQUENCE in digit order (states[i] ==
+    state of digit key i+1). Raw bge key codes / ASCII ordinals must never
+    appear here — that mismatch is exactly what kept digit select dead.
+    """
+    out = []
     for i in range(min(9, count)):
-        k = ord("1") + i
         if i in just:
-            out[k] = "just"
+            out.append("just")
         elif i in active:
-            out[k] = "active"
+            out.append("active")
         else:
-            out[k] = None
+            out.append(None)
     return out
 
 

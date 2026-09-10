@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.6.12 — 2026-09-10 M25 Usability Stabilization Freeze
+
+- **BUG-009 (P0)**: UPBGE 0.50 `KX_GameObject` exposes only
+  `object.game.properties` at runtime; ID custom properties are invisible, so
+  the player ignored `script_path` and fell back to the sample game. Addon
+  `_set_runtime_prop()` writes both; template regenerated with real game
+  properties. Old projects: re-run Setup Scene.
+- **BUG-010 (P0)**: `_digit_choice_index` compared `ord('1')+i` against
+  evdev-like bge codes (ONEKEY==14) — 1-9 select dead in the player. States are
+  now a digit-ordered sequence; dicts rejected (fail closed). Regression tests
+  + walkthrough step pin "You chose left.".
+- **BUG-011 (P1)**: save/load modals render nothing in the standalone player,
+  block the story, and Esc quits at engine level. Ctrl+S/Ctrl+L now call
+  `VNController.quick_save/quick_load` (slot `quick`, no modal); load maps the
+  save format onto a state snapshot and restarts the generator.
+- **BUG-007/008** (from freeze start): skip/auto never auto-resolve menus;
+  bare-S skip requires Ctrl NOT active.
+- **QA**: `UPVN_HEARTBEAT` env var — frontend writes per-tick JSON state
+  (label/idx/event/choices/modal) for harnesses; player stdout is
+  block-buffered and lost on kill -9. `tools/smoke_walkthrough.sh` v3:
+  wayland/xvfb backends, self-verifying steps, `--delay 80` chords,
+  retry-until-state. docs/SANDBOX_UPBGE.md + docs/MANUAL_QA.md + BUGS.md.
+- Tests: 276 passed, 16 skipped.
+
 ## 0.6.11 — 2026-09-09 Cursor, ortho 15, zoom-stable UI, art, LibLoad crash
 
 - Mouse cursor shown (`bge.render.showMouse(True)`). Choice clicks use

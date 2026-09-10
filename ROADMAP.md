@@ -233,6 +233,29 @@
     - "an unlayable widget degrades to nothing instead of raising"
     - "pytest green: 257 passed, 0 skipped"
   example_project: examples/14_renpy_dropin
+
+- id: M24
+  name: Play feel — cursor, ortho 15, zoom-stable NDC UI, placeholder art, choice raycast
+  status: done
+  depends_on: [M23]
+  acceptance:
+    - "mouse visible; choice click resolves via getScreenRay/rayCast"
+    - "dialogue stays on screen under zoom (NDC layout)"
+  example_project: examples/20_smoke_game
+
+- id: M25
+  name: Usability Stabilization Freeze — P0..P2 bugfixes, headless-first QA, smoke game
+  status: done
+  depends_on: [M24]
+  acceptance:
+    - "BUGS.md lists BUG-001..BUG-011 with symptom/cause/fix/keep-fixed"
+    - "examples/20_smoke_game plays end-to-end in UPBGE 0.50 player with screenshot evidence"
+    - "digit choice select (1-9) verified IN-GAME (BUG-006/010), quick-save/load direct (BUG-011)"
+    - "tools/smoke_walkthrough.sh self-verifying (heartbeat state) on Wayland + Xvfb backends"
+    - "docs/SANDBOX_UPBGE.md headless-wayland recipe + docs/MANUAL_QA.md checklist"
+    - "pytest tests/ -q green (276 passed, 16 skipped at freeze)"
+  example_project: examples/20_smoke_game
+  done_when: "feature freeze holds: no new Ren'Py syntax until install/setup/play is boring"
 ```
 
 ## Agent protocol (repeat every session)
@@ -248,6 +271,11 @@
 
 - M17 Blender UX hardening DONE 2026-09-08 — add-on v0.6 (engine discovery: repo/module-dir/zipimport/prefs/blend-file; status rows; Locate/Check/Bundle; friendly reports), one-click Setup Scene (data-API scene + official bpy.ops.logic.* bricks in UI), frontend reads VNController.script_path + sys.path bootstrap, make_template regenerates 110KB template (was brickless 96KB), tools/package_addon.py → dist/upvn_editor_addon_v0.6.0.zip self-contained (zipimport-verified in clean subprocess), tests/test_m17_addon_init.py 5 tests, verified in real UPBGE 0.50 headless (libpulse stub): engine OK/register OK/scene OK; 113 passed 2 skipped
 - M23 screens-draw DONE 2026-09-09 — headless renderer paints M22 widget trees into golden traces (zorder + modal dim); scope overlay makes screen params visible in `if`; 257 passed
+- M25 Usability Stabilization Freeze DONE 2026-09-10 — BUG-001..011 fixed (see BUGS.md):
+  runtime game-properties (009), digit-ordered choice states (010), direct quick-save/load (011);
+  headless-Wayland (sway+XWayland) proof stack replaces Xvfb (docs/SANDBOX_UPBGE.md);
+  self-verifying smoke walkthrough via UPVN_HEARTBEAT; 276 passed 16 skipped;
+  evidence in examples/20_smoke_game/evidence/
 - Next candidate: draw the rendered widget trees in the UPBGE frontend (blf + planes) so `call screen` is visible in-game (the headless side is now proven); run the full interactive loop in UPBGE UI (Setup Scene → P) on a machine with a display; publish dist zips + addon zip as GitHub release
 - Optional: migrate editor GameBuilder to declarative forms (character/state/set/choice) per STATUS; asset browser thumbnails; side-image live preview
 - 0.5.2 Audit fixes DONE 2026-09-08 — M-1 safe_eval AST whitelist (blocks Attribute/Subscript/ListComp), L-1 save _sanitize_slot/_slot_path is_relative_to, L-2 load schema validation, I-1 tests skip when the_question missing (42+2 skipped vs 44 passed both green, stub 555B), I-2 zip hygiene no pyc 52 files 214KB (was 76 324KB) LICENSE included, I-3 MIT LICENSE, requirements dev black, package copies LICENSE, exploit/traversal blocked verified, headless 59 events still

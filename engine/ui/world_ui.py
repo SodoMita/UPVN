@@ -70,6 +70,20 @@ def build_world_ui(event: Optional[dict], ui_mgr=None, diag=None,
 def set_font_text(obj: Any, text: str) -> None:
     if obj is None:
         return
+    # M25 BUG-004: in the UPBGE 0.50 player a FONT game object is a
+    # KX_FontObject with no .text/.body/.data — the only runtime handle on the
+    # curve is `blenderObject`. Without this the dialogue/choice glyphs never
+    # appear (silent no-op), which looked like "dialogue offscreen" in field
+    # reports.
+    bo = getattr(obj, "blenderObject", None)
+    if bo is not None:
+        data = getattr(bo, "data", None)
+        if data is not None and hasattr(data, "body"):
+            try:
+                data.body = text
+                return
+            except Exception:
+                pass
     for attr in ("text", "Text"):
         try:
             setattr(obj, attr, text)
@@ -122,17 +136,38 @@ def _set_scale(obj: Any, scl) -> None:
             pass
 
 
+def aspect_wh() -> float:
+    """Window width/height; falls back to 16:9 when bge is unavailable."""
+    try:
+        import bge  # type: ignore
+
+        w = float(bge.render.getWindowWidth())
+        h = float(bge.render.getWindowHeight())
+        if w > 0.0 and h > 0.0:
+            return max(0.5, w / h)
+    except Exception:
+        pass
+    return 16.0 / 9.0
+
+
 def layout_screen_ui(get_obj: Callable[[str], Any], payload: dict, ortho: float = 15.0) -> None:
-    """Place UI as a fraction of the current ortho frustum so zoom leaves text on screen."""
-    half = max(1.0, float(ortho) / 2.0)
+    """Place UI as a fraction of the current ortho frustum so zoom leaves text on screen.
+
+    M25 BUG-003: `ortho_scale` spans the *width* of the window, so the vertical
+    half-extent is half_width / aspect. Using the width for Z pushed the whole
+    dialogue box below the frame on any non-square window (read as "black
+    screen / missing UI" in the player).
+    """
+    half = max(1.0, float(ortho) / 2.0)          # horizontal half-extent
+    half_v = max(0.5, half / aspect_wh())        # vertical half-extent
     y_ui = -0.55
     box = get_obj("Dialogue_Box")
     sp = get_obj("Speaker_Text")
     dt = get_obj("Dialogue_Text")
-    _set_pos(box, (0.0, y_ui + 0.05, -half * 0.72))
+    _set_pos(box, (0.0, y_ui + 0.05, -half_v * 0.72))
     _set_scale(box, (half * 0.92, half * 0.14, 1.0))
-    _set_pos(sp, (-half * 0.85, y_ui, -half * 0.62))
-    _set_pos(dt, (-half * 0.85, y_ui, -half * 0.70))
+    _set_pos(sp, (-half * 0.85, y_ui, -half_v * 0.62))
+    _set_pos(dt, (-half * 0.85, y_ui, -half_v * 0.70))
     try:
         if sp is not None:
             sp.size = half * 0.045
@@ -149,10 +184,10 @@ def layout_screen_ui(get_obj: Callable[[str], Any], payload: dict, ortho: float 
         text_obj = get_obj(ch["name"] + "_text")
         if not ch.get("visible"):
             continue
-        z = half * 0.42 - i * (half * 0.12)
+        z = half_v * 0.42 - i * (half_v * 0.12)
         _set_pos(plane, (0.0, y_ui + 0.02, z))
         _set_scale(plane, (half * 0.70, half * 0.045, 1.0))
-        _set_pos(text_obj, (-half * 0.62, y_ui, z + half * 0.01))
+        _set_pos(text_obj, (-half * 0.62, y_ui, z + half_v * 0.01))
         try:
             if text_obj is not None:
                 text_obj.size = half * 0.038
