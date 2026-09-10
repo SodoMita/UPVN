@@ -235,6 +235,33 @@ def _object_under_cursor():
         except Exception:
             hit = None
         if hit is None:
+            # M26: getScreenRay is unreliable on orthographic cameras in
+            # UPBGE 0.50 (measured in-field: always None on Camera_UI), so
+            # shoot an explicit ray straight along the camera's view axis
+            # through the frustum point the mouse selects. UPBGE 0.50's
+            # mouse.position y is measured from the TOP of the window.
+            try:
+                w = float(_bge.render.getWindowWidth()) or 1280.0
+                h = float(_bge.render.getWindowHeight()) or 800.0
+            except Exception:
+                w, h = 1280.0, 800.0
+            try:
+                ortho = float(getattr(cam, "ortho_scale", 0.0) or 0.0)
+            except Exception:
+                ortho = 0.0
+            if ortho <= 0.0:
+                ortho = 15.0  # contract CAMERA_UI_ORTHO_SCALE
+            nx = float(x) - 0.5
+            ny = 0.5 - float(y)                       # top-origin → up-positive
+            px = cam.worldPosition.x + nx * ortho
+            pz = cam.worldPosition.z + ny * ortho * (h / w)
+            py = cam.worldPosition.y
+            try:
+                hit, _p, _n = sc.rayCast((px, py + 5.0, pz),
+                                         (px, py - 5.0, pz), 20.0)
+            except Exception:
+                hit = None
+        if hit is None:
             try:
                 vect = cam.getScreenVect(x, y)
                 origin = cam.worldPosition
