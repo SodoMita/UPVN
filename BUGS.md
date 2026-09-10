@@ -18,6 +18,11 @@ play; P1 = play breaks silently; P2 = cosmetic / QA pain.
 | BUG-009 | P0 | Game properties written as ID custom props are invisible at runtime (UPBGE 0.50) | fixed |
 | BUG-010 | P0 | Digit choice select compared ASCII ordinals against bge key codes | fixed |
 | BUG-011 | P1 | Modal screens (save/load) invisible + blocking in player; Esc quits at engine level | fixed (direct quick-save/load) |
+| BUG-012 | P0 | SENSOR physics invisible to KX_GameObject.rayCast (UPBGE 0.50) — mouse choices dead | fixed (STATIC+BOX) |
+| BUG-013 | P1 | ortho getScreenRay always None; KX_Scene.rayCast missing; mouse y from top | fixed (manual frustum rayCast) |
+| BUG-014 | P1 | _hide_idle_sprites hid the opening sprite right after load | fixed (keep sprite_mgr planes) |
+| BUG-015 | P1 | Setup Scene clobbered configured script_path with panel default | fixed (adopt blend value) |
+| BUG-016 | P0 | blenderplayer SIGSEGV at startup with factory PulseAudio userpref | fixed (audio_device='None' recipe) |
 
 ## BUG-001 — stale template
 The shipped `blend/UPVN_Template.blend` predated the addon's object contract
@@ -117,3 +122,57 @@ walkthrough steps 06–09 (save file on disk + state returns to save point).
   player logs — use the heartbeat file or screenshots (grim / import).
 - **Xvfb instability** (zombie servers, black captures <16 s) motivated the
   headless-Wayland stack; see docs/SANDBOX_UPBGE.md.
+
+
+## BUG-012 — SENSOR not ray-detectable (UPBGE 0.50)
+**Symptom:** mouse clicks on choice plates never selected (digit keys worked);
+debug showed `hover=None clicked=True`.
+**Cause:** `_static_ghost` set `physics_type='SENSOR'`; in UPBGE 0.50
+`KX_GameObject.rayCast` does not report SENSOR objects (probed live:
+STATIC planes hit, SENSOR planes missed).
+**Fix:** plates/planes use `STATIC` + BOX collision bounds; template
+regenerated; `tools/update_template_materials.py` upgrades old blends.
+Kept fixed: in-field walkthrough (click choice 0 → `left` label), probe
+env `UPVN_POINTER_PROBE=1`.
+
+## BUG-013 — ortho camera picking
+**Symptom:** hover always None under Camera_UI.
+**Cause:** `Camera.getScreenRay` returns None on ortho cameras in 0.50;
+`KX_Scene.rayCast` does not exist; `bge.logic.mouse.position` y is measured
+from the window TOP (verified: mouse at window top reports y≈0).
+**Fix:** `_object_under_cursor` builds the frustum column manually
+(ortho_scale × NDC, y flipped) and casts `cam.rayCast(top, bottom)`.
+Kept fixed: same walkthrough as BUG-012.
+
+## BUG-014 — opening sprite hidden after load
+**Symptom:** palette stage appeared, `show eileen` logged `painted=True`,
+nothing on screen, no error.
+**Cause:** `frontend.main` called `_hide_idle_sprites()` right after
+`ctrl.load()`; the load already applied opening events, so the just-shown
+sprite was hidden again.
+**Fix:** `_hide_idle_sprites(ctrl)` keeps planes referenced by
+`ctrl.sprite_mgr.planes`.
+
+## BUG-015 — Setup Scene clobbered script_path
+**Symptom:** template carried `script_path=//../examples/20_smoke_game/...`;
+after Setup Scene the player ran the fallback demo ("press P after Create
+Project").
+**Cause:** panel default `//game/script.rpy` overwrote the blend's game
+property unconditionally.
+**Fix:** operator + `build_vn_scene` adopt the existing value when the
+caller passes the default; panel field synced.
+
+## BUG-016 — startup segfault (audio userpref)
+**Symptom:** `blenderplayer <any>.blend` → SIGSEGV before the first frame
+(`AUD_Device_setSpeedOfSound` ← `LA_Launcher::InitEngine`, gdb backtrace);
+`blender --background` worked.
+**Cause:** factory userprefs request PulseAudio; the audio device object is
+NULL without a sound server.
+**Fix (sandbox recipe):** run once:
+`blender --background --python-expr "import bpy;
+bpy.context.preferences.system.audio_device='None';
+bpy.context.preferences.filepaths.use_scripts_auto_execute=True;
+bpy.ops.wm.save_userpref()"`
+(Blender 5.0: audio prefs live in `preferences.system`, not
+`preferences.audio`; autoexec flag is `use_scripts_auto_execute`.)
+Kept fixed: docs/SANDBOX_UPBGE.md step 0; smoke walkthrough depends on it.
