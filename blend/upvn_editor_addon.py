@@ -45,7 +45,7 @@ Headless fallback: when bpy unavailable (CI), the module still imports and expos
 bl_info = {
     "name": "UPVN — Visual Novel Editor",
     "author": "UPVN",
-    "version": (0, 6, 11),
+    "version": (0, 6, 12),
     "blender": (4, 2, 0),
     "location": "View3D > Sidebar > UPVN, Text Editor > Sidebar > UPVN",
     "description": "Create Ren'Py-like visual novel inside UPBGE with minimal coding — self-contained engine, one-click scene setup, characters, scenes, dialogue, menus, arbitrary saves, preview",
@@ -870,7 +870,19 @@ except Exception:
         return obj
 
     def _rewrite_unlit(mat, color):
-        """Emission-only — VN planes must not pick up scene lights."""
+        """Emission-only, texture-free — VN planes must not pick up scene
+        lights, and their color is driven at runtime via KX_GameObject.color.
+
+        M26: the node graph is Output ← Emission ← Object Info *Color*. The
+        rasterizer multiplies the object's color into the emission, so
+        palette code (engine/render/contract.py::apply_object_color) paints
+        every stage/sprite/plate without any image texture. `color` seeds the
+        matching object's default tint (build_vn_scene assigns it) and also
+        stays as the material's fallback if an object never sets a color.
+        The old TexImage node is gone on purpose: UPBGE 0.50's bge.texture
+        cannot bind node materials ("Texture is not available"), an unassigned
+        TexImage evaluated black (BUG-005), and the palette makes images
+        optional (image_mode="color" for the template and all samples)."""
         mat.use_nodes = True
         nt = mat.node_tree
         try:
@@ -879,22 +891,16 @@ except Exception:
             pass
         out = nt.nodes.new("ShaderNodeOutputMaterial")
         em = nt.nodes.new("ShaderNodeEmission")
-        tex = nt.nodes.new("ShaderNodeTexImage")
-        tex.location = (-280, 0)
+        objinfo = nt.nodes.new("ShaderNodeObjectInfo")
         try:
             em.inputs["Color"].default_value = color
             em.inputs["Strength"].default_value = 1.0
         except Exception:
             pass
-        # M25 BUG-005: an *unassigned* TexImage node evaluates to black in the
-        # UPBGE rasterizer and overrides the default colour above — every VN
-        # plate rendered black in the player. Only link once a real image is
-        # assigned (the frontend may do so later).
-        if getattr(tex, "image", None) is not None:
-            try:
-                nt.links.new(tex.outputs["Color"], em.inputs["Color"])
-            except Exception:
-                pass
+        try:
+            nt.links.new(objinfo.outputs["Color"], em.inputs["Color"])
+        except Exception:
+            pass
         nt.links.new(em.outputs[0], out.inputs[0])
         for attr, val in (("blend_method", "OPAQUE"), ("shadow_method", "NONE"),
                           ("use_backface_culling", False)):
@@ -1092,10 +1098,12 @@ except Exception:
         try:
             from engine.render.contract import (BG_PLANE, BG_MATERIAL,
                                                 SPRITE_MATERIAL, SPRITE_POSITIONS,
-                                                POSITIONS, DIALOGUE_PLANE)
+                                                POSITIONS, DIALOGUE_PLANE,
+                                                IMAGE_MODE_DEFAULT)
         except Exception:
             BG_PLANE, BG_MATERIAL = "BG_Plane", "MABackground"
             SPRITE_MATERIAL, DIALOGUE_PLANE = "MASprite", "Dialogue_Box"
+            IMAGE_MODE_DEFAULT = "color"
             SPRITE_POSITIONS = ("far_left", "left", "center", "right", "far_right")
             POSITIONS = {p: ({"far_left": -5.0, "left": -3.0, "center": 0.0,
                               "right": 3.0, "far_right": 5.0}[p], -0.15, 0.0)
@@ -1131,6 +1139,15 @@ except Exception:
             if scale is not None:
                 ob.scale = scale
 
+        def _tint(ob, color):
+            """Seed the object color that M26 materials multiply into emission
+            (Object Info -> Color). Runtime palette code overwrites it freely."""
+            try:
+                ob.color = color
+            except Exception:
+                pass
+            return ob
+
         bg = scene.objects.get(BG_PLANE)
         if bg is None:
             bg = _data_plane(BG_PLANE, size=10.0, rot=PLANE_ROTATION)
@@ -1139,6 +1156,7 @@ except Exception:
             collections["VN_Backgrounds"].objects.link(bg)
         _apply_2d_layout(bg, (0.0, 0.0, 0.0))
         _single_material(bg, mat_bg)
+        _tint(bg, (0.12, 0.14, 0.22, 1.0))
         dlg = scene.objects.get(DIALOGUE_PLANE)
         if dlg is None:
             dlg = _data_plane(DIALOGUE_PLANE, size=8.0, color=(0.05, 0.05, 0.12, 1.0),
@@ -1147,6 +1165,7 @@ except Exception:
             collections["VN_UI"].objects.link(dlg)
         _apply_2d_layout(dlg, DIALOGUE_LOCATION, DIALOGUE_SCALE)
         _single_material(dlg, mat_ui)
+        _tint(dlg, (0.05, 0.06, 0.14, 1.0))
         _static_ghost(bg)
         _static_ghost(dlg)
 
@@ -1174,6 +1193,7 @@ except Exception:
                     ob.data.materials.append(mat_font)
             except Exception:
                 pass
+            _tint(ob, (0.92, 0.93, 1.0, 1.0))
             _static_ghost(ob)
             return ob
 
@@ -1192,6 +1212,7 @@ except Exception:
                 _link_ob(scene, ch, collections["VN_UI"])
                 _apply_2d_layout(ch, loc, (3.2, 0.28, 1.0))
                 _single_material(ch, mat_choice)
+                _tint(ch, (0.12, 0.18, 0.32, 1.0))
                 _static_ghost(ch)
                 tname = cname + "_text"
                 _ensure_font(tname, (loc[0] - 2.8, loc[1] - 0.05, loc[2] + 0.08), size=0.24)
@@ -1228,6 +1249,7 @@ except Exception:
                 collections["VN_Characters"].objects.link(sp)
             _apply_2d_layout(sp, loc, SPRITE_SCALE)
             _single_material(sp, mat_sprite)
+            _tint(sp, (0.62, 0.78, 0.55, 1.0))
             _static_ghost(sp)
             try:
                 sp.hide_render = False
@@ -1245,6 +1267,9 @@ except Exception:
             ctrl.empty_display_type = "CUBE"
             scene.collection.objects.link(ctrl)
         _set_runtime_prop(_b, ctrl, "script_path", script_path)
+        # M26: image policy for the renderers — "color" (texture-free palette,
+        # template + samples) or "auto" (converted Ren'Py projects).
+        _set_runtime_prop(_b, ctrl, "image_mode", IMAGE_MODE_DEFAULT)
         # relative root to the folder that contains engine/ (launcher falls back
         # to the blend dir + parents when this is empty/stale)
         try:

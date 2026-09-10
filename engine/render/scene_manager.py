@@ -20,8 +20,20 @@ except ImportError:
     HAS_BGE = False
 
 from ..core.vn_state import VNState
-from .contract import BG_PLANE, BG_MATERIAL, ASSET_BACKGROUNDS
+from .contract import (BG_PLANE, BG_MATERIAL, ASSET_BACKGROUNDS,
+                       image_mode_from, stage_color, apply_object_color)
 import time
+
+# Relative search prefixes for background images, relative to the .blend.
+# '//../' and '//../../' cover repo (<repo>/blend + <repo>/assets) and
+# packaged (<pkg>/blend + <pkg>/assets) layouts.
+BG_PATH_PREFIXES = ("//", "//game/", "//../", "//../game/",
+                    "//../../", "//../../game/")
+
+def _dbg(msg: str):
+    """Asset decisions are rare — print unconditionally so a debug tee
+    (UPVN_DEBUG_TEE) or a console captures them."""
+    print(f"[SceneManager] {msg}")
 
 BACKGROUND_LAYER = 0
 TRANSITIONS = {"fade": 0.6, "dissolve": 0.45, None: 0.0}
@@ -67,7 +79,19 @@ class SceneManager:
             plane = scene.objects.get(BG_PLANE)
             if not plane:
                 return
-            # Use bge.texture to swap image
+            # M26 policy: "color" (default for the template + samples) never
+            # touches image files — the palette paints the stage, so a missing
+            # texture cannot equal a missing background.
+            mode = image_mode_from(plane)
+            if mode == "color":
+                painted = apply_object_color(plane, stage_color(asset))
+                _dbg(f"stage '{asset}' → palette color "
+                     f"(image_mode=color, painted={painted})")
+                if transition in ("fade", "dissolve"):
+                    plane["upvn_transition"] = transition
+                    plane["upvn_transition_t0"] = time.time()
+                return
+            # image_mode == "auto": best-effort PNG/JPG/WebP, palette fallback
             import bge.texture as vt
             try:
                 mat_id = vt.materialID(plane, BG_MATERIAL)
@@ -76,12 +100,14 @@ class SceneManager:
             if mat_id < 0:
                 mat_id = 0  # first material slot fallback
             import os
-            stems = [asset, asset.replace(" ", "_"), asset.replace(" ", "/")]
+            stems = [asset, asset.replace(" ", "_"), asset.replace(" ", "/"),
+                     asset.split()[-1] if " " in asset else asset]
             tex_path = None
             for stem in stems:
                 for ext in (".png", ".jpg", ".webp"):
-                    for prefix in (f"//{ASSET_BACKGROUNDS}/", f"//game/{ASSET_BACKGROUNDS}/"):
-                        alt = bge.logic.expandPath(f"{prefix}{stem}{ext}")
+                    for prefix in BG_PATH_PREFIXES:
+                        alt = bge.logic.expandPath(
+                            f"{prefix}{ASSET_BACKGROUNDS}/{stem}{ext}")
                         if os.path.exists(alt):
                             tex_path = alt
                             break
@@ -90,11 +116,23 @@ class SceneManager:
                 if tex_path:
                     break
             if tex_path and os.path.exists(tex_path):
-                img = vt.ImageFFmpeg(tex_path)
-                img.scale = False
-                tex = vt.Texture(plane, mat_id)
-                tex.source = img
-                plane["upvn_tex"] = tex
+                try:
+                    img = vt.ImageFFmpeg(tex_path)
+                    img.scale = False
+                    tex = vt.Texture(plane, mat_id)
+                    tex.source = img
+                    plane["upvn_tex"] = tex
+                    _dbg(f"stage '{asset}' → image {tex_path}")
+                except Exception as e:
+                    _dbg(f"stage '{asset}' image bind failed ({e}) → palette")
+                    apply_object_color(plane, stage_color(asset))
+                if transition in ("fade", "dissolve"):
+                    plane["upvn_transition"] = transition
+                    plane["upvn_transition_t0"] = time.time()
+            else:
+                painted = apply_object_color(plane, stage_color(asset))
+                _dbg(f"stage '{asset}' → no image found, palette color "
+                     f"(painted={painted})")
                 if transition in ("fade", "dissolve"):
                     plane["upvn_transition"] = transition
                     plane["upvn_transition_t0"] = time.time()

@@ -85,6 +85,164 @@ LAUNCHER_TEXT = "upvn_launcher"
 ASSET_BACKGROUNDS = "assets/backgrounds"     # <asset>.png|jpg|webp
 ASSET_SPRITES = "assets/sprites"             # <asset with '/' or '_'>.png
 
+# ---------------------------------------------------------------------------
+# Texture-free palette (M26).
+#
+# The shipped template and every sample game play WITHOUT image textures:
+# stages and sprites are solid colors driven by KX_GameObject.color, which the
+# template materials wire through Object Info → Emission (see
+# blend/upvn_editor_addon.py::_rewrite_unlit). PNG/JPG loading is still
+# supported for real projects ("auto" image mode — e.g. a converted Ren'Py
+# game), but it is best-effort: when nothing loads, the palette below paints
+# the plane so a missing image never equals a missing stage/sprite.
+#
+# Policy resolution (image_mode_from, first match wins):
+#   1. env UPVN_IMAGES            ("color" | "auto")
+#   2. controller prop image_mode (game property or custom property)
+#   3. IMAGE_MODE_DEFAULT
+# The shipped template and sample scenes use "color" — zero texture lookups.
+# tools/renpy_convert.py writes "auto" into converted projects so their
+# assets/ images are used when present.
+IMAGE_MODE_DEFAULT = "color"
+_IMAGE_MODES = ("color", "auto")
+
+# curated stage colors for the sample worlds (bg <name> → RGB 0..1)
+COLOR_STAGES = {
+    "classroom": (0.87, 0.78, 0.60),      # warm tan walls
+    "lecturehall": (0.55, 0.62, 0.78),    # cool slate
+    "meadow": (0.55, 0.78, 0.45),         # summer green
+    "uni": (0.72, 0.50, 0.42),            # brick
+    "room": (0.62, 0.52, 0.44),           # dorm wood
+    "black": (0.02, 0.02, 0.03),
+    "white": (0.95, 0.95, 0.95),
+    "night": (0.07, 0.08, 0.16),
+    "sakura": (0.95, 0.78, 0.84),
+}
+
+# per-character sprite tints for the sample cast (tag → RGB 0..1)
+SPRITE_TINTS = {
+    "eileen": (0.98, 0.62, 0.35),         # warm silhouette
+    "sylvie": (0.45, 0.65, 0.95),         # cool silhouette
+    "lucy": (0.55, 0.90, 0.65),
+}
+
+# fallback sprite silhouette when neither a tint nor an image exists
+SPRITE_FALLBACK_COLOR = (0.75, 0.70, 0.90, 1.0)
+
+
+def hash_color(name: str) -> tuple:
+    """Deterministic, pleasant color for an arbitrary asset name (0..1 RGBA).
+
+    Stable across runs/platforms (hash() is not — it is seeded per process)."""
+    import hashlib
+    digest = hashlib.md5((name or "asset").encode("utf-8")).digest()
+    hue = digest[0] / 255.0
+    sat = 0.45 + (digest[1] / 255.0) * 0.25      # 0.45..0.70
+    val = 0.55 + (digest[2] / 255.0) * 0.25      # 0.55..0.80
+    # HSV → RGB (h in [0,1))
+    i = int(hue * 6.0) % 6
+    f = hue * 6.0 - int(hue * 6.0)
+    p = val * (1.0 - sat)
+    q = val * (1.0 - f * sat)
+    t = val * (1.0 - (1.0 - f) * sat)
+    r, g, b = (
+        (val, t, p), (q, val, p), (p, val, t),
+        (p, q, val), (t, p, val), (val, p, q),
+    )[i]
+    return (r, g, b, 1.0)
+
+
+def stage_color(asset: str) -> tuple:
+    """Palette color for a `bg <name>` stage asset (RGBA 0..1).
+
+    Curated COLOR_STAGES first (match on any whitespace-separated token, so
+    'bg classroom' and 'bg classroom day' both hit), deterministic hash
+    fallback for anything else."""
+    tokens = [t.lower().strip(" \t-_") for t in (asset or "").split()]
+    for token in tokens:
+        if token in COLOR_STAGES:
+            rgb = COLOR_STAGES[token]
+            return (rgb[0], rgb[1], rgb[2], 1.0)
+    return hash_color("stage:" + (asset or ""))
+
+
+def sprite_color(tag: str) -> tuple:
+    """Palette tint for a character tag (RGBA 0..1), hash fallback."""
+    key = (tag or "").lower().strip()
+    if key in SPRITE_TINTS:
+        rgb = SPRITE_TINTS[key]
+        return (rgb[0], rgb[1], rgb[2], 1.0)
+    for token in key.split("_"):
+        if token in SPRITE_TINTS:
+            rgb = SPRITE_TINTS[token]
+            return (rgb[0], rgb[1], rgb[2], 1.0)
+    return hash_color("sprite:" + key)
+
+
+def _prop_str(owner, key: str) -> str | None:
+    """Read a property from a KX_GameObject / dict / bpy object, or None.
+
+    Covers both runtime shapes (game properties expose __getitem__/__contains__)
+    and editor shapes (bpy objects carry custom properties the same way)."""
+    if owner is None:
+        return None
+    try:
+        if key in owner:
+            val = owner[key]
+            if val is not None:
+                return str(val)
+    except Exception:
+        pass
+    try:
+        val = owner.get(key)
+        if val is not None:
+            return str(val)
+    except Exception:
+        pass
+    return None
+
+
+def image_mode_from(owner=None, env=None) -> str:
+    """Resolve the image policy: "color" (texture-free palette) or "auto"
+    (use a PNG/JPG/WebP when one is found, palette otherwise).
+
+    Order: env UPVN_IMAGES → owner property image_mode → IMAGE_MODE_DEFAULT.
+    Unknown values fail closed to "color" (the robust path)."""
+    modes = {"color": "color", "auto": "auto",
+             "0": "color", "off": "color", "none": "color",
+             "1": "auto", "images": "auto", "on": "auto"}
+    import os
+    env_val = env if env is not None else os.environ.get("UPVN_IMAGES")
+    if env_val:
+        resolved = modes.get(str(env_val).strip().lower())
+        if resolved:
+            return resolved
+    prop = _prop_str(owner, "image_mode")
+    if prop:
+        resolved = modes.get(prop.strip().lower())
+        if resolved:
+            return resolved
+    return IMAGE_MODE_DEFAULT
+
+
+def apply_object_color(obj, color) -> bool:
+    """Set a runtime object tint (KX_GameObject.color / fallback .color).
+
+    The template materials multiply Object Info → Color into Emission, so this
+    is the texture-free way everything gets painted. Returns True on success."""
+    if obj is None:
+        return False
+    try:
+        obj.color = color
+        return True
+    except Exception:
+        pass
+    try:
+        obj.color = color
+        return True
+    except Exception:
+        return False
+
 
 def required_objects() -> list[dict]:
     """Authoritative, ordered list of every named item the code expects.
