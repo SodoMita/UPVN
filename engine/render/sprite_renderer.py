@@ -130,6 +130,49 @@ class SpriteRenderer:
                             break
                     except Exception:
                         continue
+            # image bank (converted projects): SPRIMG_<stem> planes carry
+            # editor-assigned textures (see tools/wire_converted_blend.py).
+            bank = None
+            if mode == "auto":
+                stem = asset.replace(" ", "_")
+                last = asset.split()[-1] if " " in asset else asset
+                for key in (asset, stem, last, tag):
+                    cand = scene.objects.get("Sprite_img_" + str(key).lower())
+                    if cand is not None:
+                        bank = cand
+                        break
+            if bank is not None:
+                try:
+                    for ob in scene.objects:
+                        if str(ob.name).startswith("Sprite_img_"):
+                            ob.visible = (ob is bank)
+                    plane.visible = False
+                    bank.visible = True
+                    bank.worldPosition = POSITIONS[position]  # type: ignore
+                    self.planes[tag] = {"obj": bank, "asset": asset,
+                                        "position": position, "t0": time.time(),
+                                        "transition": transition, "bank": True}
+                    _dbg(f"show {tag} '{asset}' → bank plane {bank.name}")
+                    if transition in ("dissolve", "fade"):
+                        bank.color = (1, 1, 1, 0.0)
+                        info_t0 = time.time()
+                        self.planes[tag].update({"t0": info_t0})
+                    else:
+                        bank.color = (1, 1, 1, 1.0)
+                    return
+                except Exception as e:
+                    _dbg(f"show {tag} '{asset}' bank show failed ({e}) → palette")
+            def _palette_plane():
+                # palette fallback: hide every bank sprite first
+                try:
+                    for ob in scene.objects:
+                        if str(ob.name).startswith("Sprite_img_"):
+                            ob.visible = False
+                except Exception:
+                    pass
+                plane.visible = True
+                return plane
+
             tint = sprite_color(tag)
             if tex_path:
                 try:
@@ -145,6 +188,12 @@ class SpriteRenderer:
                         mat_id = 0
                     tex = vt.Texture(plane, mat_id)
                     tex.source = img
+                    try:
+                        for ob in scene.objects:
+                            if str(ob.name).startswith("SPRIMG_"):
+                                ob.visible = False
+                    except Exception:
+                        pass
                     self.planes[tag] = {"obj": plane, "tex": tex, "asset": asset, "position": position, "t0": time.time(), "transition": transition, "tint": tint}
                     _dbg(f"show {tag} '{asset}' → image {tex_path}")
                     # start alpha fade for dissolve
@@ -157,6 +206,7 @@ class SpriteRenderer:
                     _dbg(f"show {tag} '{asset}' image bind failed ({e}) → palette tint")
             # no image (or bind failed) — paint the silhouette with the palette
             # tint so a missing texture must not equal "no sprite".
+            _palette_plane()
             painted = apply_object_color(plane, tint)
             _dbg(f"show {tag} '{asset}' at {position} → palette tint "
                  f"(mode={mode}, painted={painted})")

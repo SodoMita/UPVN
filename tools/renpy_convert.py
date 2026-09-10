@@ -130,7 +130,8 @@ def convert(src: Path, out: Path, blender: Path | None = None) -> dict:
         if guess.is_file():
             blender = guess
     if blender is not None and Path(blender).is_file():
-        wiring = wire_blend(out / "blend" / "UPVN_Template.blend", Path(blender))
+        wiring = wire_blend(out / "blend" / "UPVN_Template.blend", Path(blender),
+                            out / "assets")
         print(f"[convert] blend wiring: {'OK' if wiring.get('ok') else wiring}")
     else:
         print("[convert] WARNING: no blender binary — open the blend in UPBGE, "
@@ -158,25 +159,26 @@ def convert(src: Path, out: Path, blender: Path | None = None) -> dict:
     return report
 
 
-def wire_blend(blend: Path, blender: Path) -> dict:
-    """Set game properties script_path=//../game, image_mode=auto."""
-    expr = (
-        "import bpy; ob = bpy.data.objects.get('VNController'); "
-        "ob['script_path'] = '//../game'; "
-        "p = ob.game.properties.get('script_path'); p.value = '//../game'; "
-        "ob['image_mode'] = 'auto'; "
-        "p2 = ob.game.properties.get('image_mode') or ob.game.properties.new(); "
-        "p2.name = 'image_mode'; p2.type = 'STRING'; p2.value = 'auto'; "
-        "bpy.ops.wm.save_mainfile(); print('UPVN_WIRE_OK')"
-    )
+def wire_blend(blend: Path, blender: Path, assets: Path | None = None) -> dict:
+    """Wire props + image bank via tools/wire_converted_blend.py.
+
+    bge.texture cannot bind node materials in UPBGE 0.50, so converted
+    projects get one plane per asset with the texture assigned in the editor;
+    the runtime (image_mode=auto) shows the matching plane and falls back to
+    the palette when an asset is missing."""
+    wire_script = ROOT / "tools" / "wire_converted_blend.py"
+    cmd = [str(blender), "--background", str(blend),
+           "--python", str(wire_script)]
+    if assets is not None:
+        cmd += ["--", str(assets)]
     try:
-        proc = subprocess.run(
-            [str(blender), "--background", str(blend), "--python-expr", expr],
-            capture_output=True, text=True, timeout=120)
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
     except Exception as e:
         return {"ok": False, "reason": f"blender run failed: {e}"}
-    ok = "UPVN_WIRE_OK" in (proc.stdout or "")
+    out = (proc.stdout or "")
+    ok = "UPVN_WIRE_OK" in out
     return {"ok": ok, "blender": str(blender),
+            "log": [l for l in out.splitlines() if l.startswith("[wire]")][:8],
             "stderr": (proc.stderr or "")[-400:] if not ok else ""}
 
 
