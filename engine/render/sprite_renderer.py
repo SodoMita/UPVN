@@ -99,8 +99,10 @@ class SpriteRenderer:
             plane.visible = True
             plane["upvn_asset"] = asset
             # M26 policy: "color" never touches image files; "auto" tries
-            # PNG/JPG/WebP first and falls back to the palette tint.
-            mode = image_mode_from(plane)
+            # PNG/JPG/WebP first and falls back to the palette tint. The
+            # policy lives on the VNController game property (image_mode).
+            ctrl = scene.objects.get("VNController")
+            mode = image_mode_from(ctrl if ctrl is not None else plane)
             tex_path = None
             if mode == "auto":
                 import bge.texture as vt

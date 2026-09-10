@@ -81,8 +81,11 @@ class SceneManager:
                 return
             # M26 policy: "color" (default for the template + samples) never
             # touches image files — the palette paints the stage, so a missing
-            # texture cannot equal a missing background.
-            mode = image_mode_from(plane)
+            # texture cannot equal a missing background. The policy lives on
+            # the VNController game property (image_mode); the plane is only a
+            # fallback reader.
+            ctrl = scene.objects.get("VNController")
+            mode = image_mode_from(ctrl if ctrl is not None else plane)
             if mode == "color":
                 painted = apply_object_color(plane, stage_color(asset))
                 _dbg(f"stage '{asset}' → palette color "
