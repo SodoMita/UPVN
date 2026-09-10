@@ -117,13 +117,13 @@ class SpriteRenderer:
             img.scale = False
             tex = vt.Texture(plane, mat_id)
             tex.source = img
+            try:
+                tex.refresh(True)
+            except Exception:
                 try:
-                    tex.refresh(True)
+                    tex.refresh(False)
                 except Exception:
-                    try:
-                        tex.refresh(False)
-                    except Exception:
-                        pass
+                    pass
             # store
             try:
                 plane["upvn_tag"] = tag
