@@ -82,7 +82,26 @@ def set_runtime_prop(obj, name, value):
         print(f"[update_template] value failed for {name}: {e}")
 
 
+def fix_physics():
+    """SENSOR objects are not ray-detectable in UPBGE 0.50 — STATIC + BOX."""
+    n = 0
+    for ob in bpy.data.objects:
+        if ob.type != "MESH":
+            continue
+        if ob.name.startswith(("choice_", "Sprite_", "BG_", "Dialogue_")) and \
+                not ob.name.endswith("_text"):
+            try:
+                ob.game.physics_type = "STATIC"
+                ob.game.use_collision_bounds = True
+                ob.game.collision_bounds_type = "BOX"
+                n += 1
+            except Exception:
+                pass
+    print(f"[update_template] STATIC physics on {n} ray targets")
+
+
 def main():
+    fix_physics()
     for name, color in MATERIALS.items():
         mat = bpy.data.materials.get(name)
         if mat is None:

@@ -225,6 +225,7 @@ def _pointer_probe(sc, cam):
     """Env-gated (UPVN_POINTER_PROBE=1) once-per-30-ticks physics probe:
     what does a scene rayCast see along key columns? Answers ray-vs-SENSOR
     questions in the field without touching game code."""
+    import bge as _bge
     logic = _bge.logic
     logic._upvn_probe_n = getattr(logic, "_upvn_probe_n", 0) + 1
     if logic._upvn_probe_n % 30 != 1:
@@ -232,8 +233,8 @@ def _pointer_probe(sc, cam):
     try:
         for label, pz in (("choice0col", 1.97), ("choice1col", 1.41),
                           ("spritecol", 0.0), ("high", 4.0), ("low", -4.0)):
-            hit, p, n = sc.rayCast((0.0, cam.worldPosition.y + 5.0, pz),
-                                   (0.0, cam.worldPosition.y - 5.0, pz), 20.0)
+            hit, p, n = cam.rayCast((0.0, cam.worldPosition.y + 5.0, pz),
+                                    (0.0, cam.worldPosition.y - 5.0, pz), 20.0)
             print(f"[probe] {label} z={pz}: hit={getattr(hit,'name',None)} at={p}")
     except Exception as e:
         print(f"[probe] failed: {e}")
@@ -275,8 +276,10 @@ def _object_under_cursor():
             pz = cam.worldPosition.z + ny * ortho * (h / w)
             py = cam.worldPosition.y
             try:
-                hit, _p, _n = sc.rayCast((px, py + 5.0, pz),
-                                         (px, py - 5.0, pz), 20.0)
+                # KX_Scene has no rayCast in UPBGE 0.50 — cast from the
+                # camera object (KX_GameObject.rayCast, ignores self).
+                hit, _p, _n = cam.rayCast((px, py + 5.0, pz),
+                                          (px, py - 5.0, pz), 20.0)
             except Exception:
                 hit = None
         if hit is None:
