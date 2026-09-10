@@ -58,8 +58,16 @@ class SceneManager:
             self._transition_name = event.get("transition")
             self._transition_start = time.time()
             self._transition_duration = TRANSITIONS.get(self._transition_name, 0.5)
-        elif t == "load_stage" and HAS_BGE:
-            self._load_stage_bge(event["stage"])
+        elif t == "load_stage":
+            # M26c: 3D-stage loading is StageManager's job (it existence-
+            # checks every candidate path before LibLoad). This manager used
+            # to LibLoad the raw expanded path with NO exists-check — a
+            # missing stage file SIGSEGVs the player in UPBGE 0.50 before
+            # the Python except can run (kernel log: blenderplayer sig=11;
+            # full-sample game died at label classroom → load_stage
+            # classroom_3d). Log-and-continue here; StageManager handles it.
+            print(f"[SceneManager] load_stage '{event.get('stage')}' → "
+                  f"3D stage handled by StageManager (no stage file: skipped)")
 
     def set_background(self, asset: str, transition: str | None = None):
         self._prev_bg = self.state.scene.background
@@ -216,17 +224,8 @@ class SceneManager:
         # ease out
         return t
 
-    def _load_stage_bge(self, stage_name: str):
-        if not HAS_BGE:
-            return
-        try:
-            import bge.logic as logic
-            path = logic.expandPath(f"//stages/{stage_name}.blend")
-            # LibLoad merges collections
-            logic.LibLoad(path, "Scene", load_actions=True)  # type: ignore
-            print(f"[SceneManager] Loaded stage {stage_name} from {path}")
-        except Exception as e:
-            print(f"[SceneManager] LibLoad failed for {stage_name}: {e}")
+    # M26c: _load_stage_bge removed — it LibLoad'ed unguarded paths and
+    # segfaulted the player on missing stage files (StageManager owns this).
 
     # headless helper for screenshot verification
     def current_background(self) -> str | None:

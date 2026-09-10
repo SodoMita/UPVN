@@ -355,6 +355,25 @@ def _tick_pointer(ctrl):
         traceback.print_exc()
 
 
+def zoom_ortho_scale(base, zoom_from, zoom_to, duration, easing, t_raw):
+    """M26c pure zoom math (unit-tested without bge): eased zoom factor →
+    ortho scale. Ortho = base / zoom, clamped to ≥1.0; zoom factor clamped
+    to ≥0.05 so a 0/1.0 zoom can't divide by zero. Returns the scale only;
+    the caller decides tween completion from the same t_raw.
+    `easing` is an engine.atl name resolved lazily (e.g. "ease", "linear").
+    """
+    zoom_from = float(zoom_from)
+    zoom_to = float(zoom_to)
+    t = min(1.0, max(0.0, float(t_raw)))
+    try:
+        from engine.atl.easing import get_easing
+        ease = get_easing(easing or "ease")
+    except Exception:
+        ease = lambda x: x
+    zoom = zoom_from + (zoom_to - zoom_from) * ease(t)
+    return max(1.0, float(base) / max(0.05, zoom))
+
+
 def _apply_camera_state(logic, ctrl):
     """M26c: apply the interpreter's camera_zoom tween to the ortho game
     camera. `camera zoom 1.2 duration 1.0 with ease` used to set state only —
@@ -369,35 +388,32 @@ def _apply_camera_state(logic, ctrl):
         import time as _t
         t0 = cam_state.get("_zoom_t0")
         dur = float(cam_state.get("_zoom_dur", 0.0) or 0.0)
+        t_raw = 1.0
         if t0 is not None and dur > 0:
             t_raw = (_t.time() - t0) / dur
-            if t_raw < 1.0:
-                from engine.atl.easing import get_easing
-                ease = get_easing(cam_state.get("_zoom_ease") or "ease")
-                frm = float(cam_state.get("_zoom_from", 1.0))
-                zoom = frm + (float(zoom_to) - frm) * ease(min(1.0, max(0.0, t_raw)))
-            else:
-                zoom = float(zoom_to)
-                # tween finished — drop the transient keys so this stays cheap
-                for k in ("_zoom_from", "_zoom_to", "_zoom_dur",
-                          "_zoom_ease", "_zoom_t0"):
-                    cam_state.pop(k, None)
-        else:
-            zoom = float(zoom_to)
+        if t_raw >= 1.0:
+            # tween finished — drop the transient keys so this stays cheap
+            for k in ("_zoom_from", "_zoom_to", "_zoom_dur",
+                      "_zoom_ease", "_zoom_t0"):
+                cam_state.pop(k, None)
         cam = logic.getCurrentScene().active_camera
         if cam is not None and getattr(cam, "ortho_scale", None) is not None:
-            from engine.render.contract import CAMERA_UI_ORTHO_SCALE
-            base = CAMERA_UI_ORTHO_SCALE
-            try:
-                marker = logic._upvn_ortho_base
-            except Exception:
-                marker = None
-            if marker is None:
-                # first run: remember the un-zoomed base the template set
-                logic._upvn_ortho_base = float(cam.ortho_scale) *                     float(cam_state.get("zoom", 1.0) or 1.0)
-                marker = logic._upvn_ortho_base
-            base = marker
-            cam.ortho_scale = max(1.0, base / max(0.05, zoom))
+            # M26c: the contract constant is the single source of truth for
+            # the un-zoomed base. Two live-measured traps with "capture the
+            # current ortho" schemes: the interpreter sets zoom before this
+            # function's first tick (inflated base ×1.2 → zoom-in ended
+            # unchanged), and calm ticks BETWEEN tweens carry the previous
+            # zoom's ortho (compounding base 12.5 → authored 1.5× played as
+            # 1.8×). Setup Scene enforces CAMERA_UI_ORTHO_SCALE;
+            # upvn_camera_custom cameras accept zooms relative to it.
+            cam.ortho_scale = zoom_ortho_scale(
+                CAMERA_UI_ORTHO_SCALE,
+                cam_state.get("_zoom_from", cam_state.get("zoom", zoom_to)),
+                zoom_to,
+                dur,
+                cam_state.get("_zoom_ease"),
+                t_raw,
+            )
     except Exception as e:
         try:
             if not logic._upvn_cam_err:
@@ -582,6 +598,14 @@ def main(cont=None):
             _st = ctrl.state
             _evt = ctrl.current_event or {}
             _sm = getattr(ctrl, "screen_mgr", None)
+            _ortho = None
+            try:
+                _cam = _bge.logic.getCurrentScene().active_camera
+                _ortho = (round(float(_cam.ortho_scale), 3)
+                          if getattr(_cam, "ortho_scale", None) is not None
+                          else None)
+            except Exception:
+                pass
             with open(_hb, "w") as _f:
                 _f.write(_json.dumps({
                     "label": _st.current_label,
@@ -590,6 +614,7 @@ def main(cont=None):
                     "choices": len(_evt.get("choices") or []),
                     "modal": (None if _sm is None or _sm.active_modal is None
                               else _sm.active_modal.name),
+                    "ortho": _ortho,
                 }))
     except Exception:
         pass
