@@ -202,8 +202,8 @@ def _sync_world_ui(ctrl, hovered=None):
             ui_mgr=getattr(ctrl, "ui_mgr", None),
             diag=getattr(ctrl, "_load_diag", None),
         )
-        # M26c: hovered hotspot (set by _tick_pointer, consumed by layout)
-        hovered = getattr(logic, "_upvn_hover", None)
+        # hovered comes in as a parameter (set by _tick_pointer) — this
+        # function has no `logic` in scope
         ortho = CAMERA_UI_ORTHO_SCALE
         try:
             import bge as _bge
@@ -355,6 +355,58 @@ def _tick_pointer(ctrl):
         traceback.print_exc()
 
 
+def _apply_camera_state(logic, ctrl):
+    """M26c: apply the interpreter's camera_zoom tween to the ortho game
+    camera. `camera zoom 1.2 duration 1.0 with ease` used to set state only —
+    nothing in the player applied it. Ortho scale = base / zoom, so zoom>1
+    moves closer. UI layout re-reads ortho each frame, so dialogue/choices
+    stay framed (M24 zoom-stable UI holds)."""
+    try:
+        cam_state = getattr(ctrl.state, "camera", None) or {}
+        zoom_to = cam_state.get("_zoom_to")
+        if zoom_to is None:
+            return
+        import time as _t
+        t0 = cam_state.get("_zoom_t0")
+        dur = float(cam_state.get("_zoom_dur", 0.0) or 0.0)
+        if t0 is not None and dur > 0:
+            t_raw = (_t.time() - t0) / dur
+            if t_raw < 1.0:
+                from engine.atl.easing import get_easing
+                ease = get_easing(cam_state.get("_zoom_ease") or "ease")
+                frm = float(cam_state.get("_zoom_from", 1.0))
+                zoom = frm + (float(zoom_to) - frm) * ease(min(1.0, max(0.0, t_raw)))
+            else:
+                zoom = float(zoom_to)
+                # tween finished — drop the transient keys so this stays cheap
+                for k in ("_zoom_from", "_zoom_to", "_zoom_dur",
+                          "_zoom_ease", "_zoom_t0"):
+                    cam_state.pop(k, None)
+        else:
+            zoom = float(zoom_to)
+        cam = logic.getCurrentScene().active_camera
+        if cam is not None and getattr(cam, "ortho_scale", None) is not None:
+            from engine.render.contract import CAMERA_UI_ORTHO_SCALE
+            base = CAMERA_UI_ORTHO_SCALE
+            try:
+                marker = logic._upvn_ortho_base
+            except Exception:
+                marker = None
+            if marker is None:
+                # first run: remember the un-zoomed base the template set
+                logic._upvn_ortho_base = float(cam.ortho_scale) *                     float(cam_state.get("zoom", 1.0) or 1.0)
+                marker = logic._upvn_ortho_base
+            base = marker
+            cam.ortho_scale = max(1.0, base / max(0.05, zoom))
+    except Exception as e:
+        try:
+            if not logic._upvn_cam_err:
+                logic._upvn_cam_err = True
+                print(f"[UPVN] camera zoom apply failed: {e}")
+        except Exception:
+            pass
+
+
 def _bind_camera():
     """Force scene.active_camera = Camera_UI once (editor camera is not the game camera)."""
     if not HAS_BGE:
@@ -492,6 +544,8 @@ def main(cont=None):
                 pass
     # also tick sub-managers for transitions
     try:
+        if ctrl.audio_mgr is not None and hasattr(ctrl.audio_mgr, "update"):
+            ctrl.audio_mgr.update(dt)
         if ctrl.sprite_mgr:
             ctrl.sprite_mgr.update(dt)
         if ctrl.scene_mgr and hasattr(ctrl.scene_mgr, "transition_alpha"):
@@ -504,6 +558,7 @@ def main(cont=None):
         _sync_world_ui(ctrl,
                        hovered=getattr(_bge.logic, "_upvn_hover", None))
         _tick_pointer(ctrl)
+        _apply_camera_state(logic, ctrl)
     except Exception:
         pass
     try:
