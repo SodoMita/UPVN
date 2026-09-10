@@ -1276,6 +1276,36 @@ except Exception:
         _ensure_font(SPEAKER_TEXT, SPEAKER_LOCATION, size=0.28)
         _ensure_font(DIALOGUE_TEXT, DIALOGUE_TEXT_LOCATION, size=0.26)
 
+        # --- backlog + rewind objects (M26d) ---------------------------------
+        # engine/ui/world_ui.py writes these when H is pressed / the player is
+        # rolled back. Without them the overlay existed only in headless traces.
+        try:
+            from engine.render.contract import (HISTORY_PLANE, HISTORY_TEXT,
+                                                REWIND_TEXT)
+        except Exception:
+            HISTORY_PLANE, HISTORY_TEXT, REWIND_TEXT = ("History_Box", "History_Text",
+                                                         "Rewind_Text")
+        hb = scene.objects.get(HISTORY_PLANE)
+        if hb is None:
+            def _mk_hist():
+                return _data_plane(HISTORY_PLANE, size=10.0,
+                                   color=(0.03, 0.04, 0.09, 1.0), rot=PLANE_ROTATION)
+            hb = _get_or_create(scene, HISTORY_PLANE, _mk_hist)
+            _link_ob(scene, hb, collections["VN_UI"])
+            _apply_2d_layout(hb, (0.0, -0.45, 0.9), (6.6, 3.0, 1.0))
+            _single_material(hb, mat_ui)
+            _tint(hb, (0.03, 0.04, 0.09, 1.0))
+            _static_ghost(hb)
+            # NB: stays *visible* in the .blend like Dialogue_Box / choice_N —
+            # the runtime hides it every tick while the backlog is closed. A
+            # hide_viewport/hide_render default here would leave the overlay
+            # permanently invisible in the player (the game object starts
+            # hidden and `visible = True` on a hidden-by-default object is a
+            # no-op in UPBGE 0.50).
+        # FONT text grows down from its origin → anchor at the panel top
+        _ensure_font(HISTORY_TEXT, (-6.0, -0.5, 3.4), size=0.20)
+        _ensure_font(REWIND_TEXT, (-6.0, -0.5, 4.4), size=0.17)
+
         for i in range(CHOICE_COUNT):
             z = 2.4 - i * 0.7
             loc = (0.0, -0.5, z)

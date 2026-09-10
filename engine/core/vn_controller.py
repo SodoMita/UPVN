@@ -348,6 +348,16 @@ class VNController:
 
     # ---------------------------- per-frame update (called from UPBGE)
     def update(self, dt: float = 0.016):
+        # M26d: the backlog owns the screen while it is open. This is checked
+        # before the HAS_BGE split on purpose — an overlay that swallowed input
+        # only in the player (and only in headless in the traces) drifted apart
+        # depending on how the game was run. `advance` closes it, everything
+        # else is ignored, so skip/auto/rollback never scroll past text the
+        # player is reading.
+        if self._history_open():
+            if self._is_advance_pressed() or self._is_history_key_pressed():
+                self._close_history()
+            return
         # dt from frontend; also works if called without dt via Always sensor
         if not HAS_BGE:
             # M10: tick stage/sprite for headless atl (so is_move_done reflects)
@@ -422,7 +432,8 @@ class VNController:
                 except Exception:
                     pass
             return
-        # M07 skip/auto handling (BGE)
+        # M07 skip/auto handling (BGE). M26d: the backlog is gated earlier in
+        # update(), so while it is open this block is never reached at all.
         if self._waiting and self._current_event and (self.state.skip or self.state.auto):
             self._auto_timer += dt
             delay = 0.05 if self.state.skip else self.state.auto_delay
@@ -515,8 +526,7 @@ class VNController:
                     if _bge_just("keyboard", ev.AKEY):  # A for auto
                         self.toggle_auto()
                     if _bge_just("keyboard", ev.HKEY):  # H for history
-                        if self.screen_mgr:
-                            self.screen_mgr.handle_key("h")
+                        self.toggle_history()
                     if _bge_just("keyboard", ev.QKEY):  # Q for quick menu
                         if self.screen_mgr:
                             self.screen_mgr.handle_key("q")
@@ -569,23 +579,80 @@ class VNController:
             return True
         return False
 
-    def _is_rollback_pressed(self) -> bool:
+    # Rewind input (M26d): the wheel stays the primary gesture (Ren'Py's own),
+    # but the standalone player drops synthetic wheel events in this sandbox and
+    # a keyboard-only QA pass could not reach rollback at all — so PageUp /
+    # Backspace rewind and PageDown replays. Keys are polled with the same
+    # `just` edge helper as the rest of the input layer.
+    _REWIND_KEYS = ("WHEELUPMOUSE", "PAGEUPKEY", "BACKSPACEKEY")
+    _REPLAY_KEYS = ("WHEELDOWNMOUSE", "PAGEDOWNKEY")
+
+    def _any_just(self, names) -> bool:
         if not HAS_BGE:
             return False
         try:
             import bge as _bge_imp
-            return _bge_just("mouse", _bge_imp.events.WHEELUPMOUSE)
+            ev = _bge_imp.events
+        except Exception:
+            return False
+        for n in names:
+            code = getattr(ev, n, None)
+            if code is None:
+                continue
+            dev = "mouse" if n.startswith("WHEEL") else "keyboard"
+            try:
+                if _bge_just(dev, code):
+                    return True
+            except Exception:
+                continue
+        return False
+
+    def _rewind_blocked(self) -> bool:
+        """A modal (save/load browser) owns the screen — don't rewind under it."""
+        try:
+            return bool(self.screen_mgr and self.screen_mgr.is_modal_active())
         except Exception:
             return False
 
+    def _is_rollback_pressed(self) -> bool:
+        return not self._rewind_blocked() and self._any_just(self._REWIND_KEYS)
+
     def _is_rollforward_pressed(self) -> bool:
+        return not self._rewind_blocked() and self._any_just(self._REPLAY_KEYS)
+
+    # ---------------------------------------------------------------- backlog (M26d)
+    def _history_open(self) -> bool:
+        try:
+            return bool(self.screen_mgr and self.screen_mgr.is_overlay_visible("history"))
+        except Exception:
+            return False
+
+    def _close_history(self) -> None:
+        try:
+            self.screen_mgr.hide("history")
+        except Exception:
+            pass
+
+    def _is_history_key_pressed(self) -> bool:
+        """H again — while the backlog is open it is the close key.
+
+        Needed because `update()` returns early when the overlay is up, so the
+        H handler deeper in the input block never runs.
+        """
         if not HAS_BGE:
             return False
         try:
             import bge as _bge_imp
-            return _bge_just("mouse", _bge_imp.events.WHEELDOWNMOUSE)
+            return bool(_bge_just("keyboard", _bge_imp.events.HKEY))
         except Exception:
             return False
+
+    def toggle_history(self) -> bool:
+        """H / the panel button. Returns the new open state."""
+        if self.screen_mgr is None:
+            return False
+        self.screen_mgr.handle_key("h")
+        return self._history_open()
 
     def choose(self, index: int):
         """Called from UI when player picks a menu choice."""

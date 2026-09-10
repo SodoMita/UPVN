@@ -54,6 +54,13 @@ SPRITE_TAG_PREFIX = "Sprite_"           # f"Sprite_{tag}" per-actor plane
 DIALOGUE_PLANE = "Dialogue_Box"
 SPEAKER_TEXT = "Speaker_Text"
 DIALOGUE_TEXT = "Dialogue_Text"
+# Backlog (H) and the rewind indicator (M26d). Both are drawn from the same
+# FONT/plane recipe as the dialogue box, so `H` is visible in the player and
+# not only in headless traces. Missing objects degrade quietly (the overlay just
+# stays invisible) — Setup Scene / the template bake create them.
+HISTORY_PLANE = "History_Box"
+HISTORY_TEXT = "History_Text"
+REWIND_TEXT = "Rewind_Text"
 CHOICE_PREFIX = "choice_"
 CHOICE_COUNT = 9
 UI_MATERIAL = "MAUI"
@@ -356,6 +363,12 @@ def required_objects() -> list[dict]:
          "engine/ui/world_ui.py"),
         (DIALOGUE_TEXT, "3D FONT — dialogue body",
          "engine/ui/world_ui.py"),
+        (HISTORY_PLANE, "backlog panel shown by H (M26d)",
+         "engine/ui/world_ui.py::apply_world_ui"),
+        (HISTORY_TEXT, "3D FONT — backlog body (M26d)",
+         "engine/ui/world_ui.py::format_history"),
+        (REWIND_TEXT, "3D FONT — '« rewound N' indicator while rolled back (M26d)",
+         "engine/ui/world_ui.py::apply_world_ui"),
     ):
         items.append({"kind": "object", "name": name,
                       "purpose": purpose, "used_by": used_by})
@@ -369,6 +382,13 @@ def required_objects() -> list[dict]:
                       "name": f"{CHOICE_PREFIX}{i}",
                       "purpose": f"clickable 3D menu button {i}",
                       "used_by": "engine/ui/world_ui.py + engine/ui/pointer.py"})
+        # the label is a separate FONT child; apply_world_ui writes it every
+        # tick, so a scene without it shows plates with no text (M26d: it was
+        # already required in practice but absent from the contract)
+        items.append({"kind": "object",
+                      "name": f"{CHOICE_PREFIX}{i}_text",
+                      "purpose": f"FONT label of menu button {i}",
+                      "used_by": "engine/ui/world_ui.py::apply_world_ui"})
     for mat, purpose in (
         (BG_MATERIAL, "material slot of BG_Plane receiving the background texture"),
         (SPRITE_MATERIAL, "material slot of every Sprite_* plane receiving the sprite texture"),
