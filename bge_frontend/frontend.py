@@ -212,6 +212,13 @@ def _sync_world_ui(ctrl, hovered=None):
         except Exception:
             pass
         apply_world_ui(_get_obj, payload, ortho=ortho, hovered=hovered)
+        # expose the last payload so the QA heartbeat can report what the UI
+        # actually decided (text, visibility) — not just the story position.
+        try:
+            import bge as _bge
+            _bge.logic._upvn_last_payload = payload
+        except Exception:
+            pass
     except Exception as e:
         # M25 BUG-002: this used to be a bare `except: pass`, which silently
         # swallowed every UI failure every tick (the player also discards
@@ -582,15 +589,53 @@ def main(cont=None):
             _st = ctrl.state
             _evt = ctrl.current_event or {}
             _sm = getattr(ctrl, "screen_mgr", None)
+            _payload = getattr(logic, "_upvn_last_payload", None) or {}
+            _interp = getattr(ctrl, "interp", None)
+            _hb_data = {
+                "label": _st.current_label,
+                "idx": _st.instruction_index,
+                "event": _evt.get("type"),
+                "choices": len(_evt.get("choices") or []),
+                "modal": (None if _sm is None or _sm.active_modal is None
+                          else _sm.active_modal.name),
+                # --- M26d: what the UI layer actually decided this tick, plus
+                # the rewind/history counters a harness needs to assert on.
+                "speaker": _payload.get("speaker"),
+                "dialogue": _payload.get("dialogue"),
+                "dialogue_visible": bool(_payload.get("dialogue_visible")),
+                "history": len(getattr(_st, "history", []) or []),
+                "history_open": bool(_sm and _sm.is_overlay_visible("history"))
+                if _sm is not None else False,
+                "rollback_depth": len(getattr(_interp, "rollback_stack", []) or [])
+                if _interp is not None else 0,
+                "rollforward_depth": len(getattr(ctrl, "_forward_stack", []) or []),
+                "skipping": bool(getattr(_st, "skip", False)),
+                "auto": bool(getattr(_st, "auto", False)),
+            }
+            try:
+                _sc = logic.getCurrentScene()
+                for _n, _k in (("Dialogue_Text", "font_body"),
+                               ("Speaker_Text", "font_speaker"),
+                               ("History_Text", "history_body")):
+                    try:
+                        _o = _sc.objects.get(_n)
+                        _bo = getattr(_o, "blenderObject", None) if _o is not None else None
+                        _d = getattr(_bo, "data", None) if _bo is not None else None
+                        _hb_data[_k] = getattr(_d, "body", None) if _d is not None else None
+                        # world scale + curve font size decide how big the text
+                        # actually draws; `.size` on a KX object is not the
+                        # transform (it silently creates a python property).
+                        if _bo is not None:
+                            _hb_data[_k + "_scale"] = [round(float(v), 4) for v in _bo.scale]
+                            _hb_data[_k + "_font"] = round(float(getattr(_d, "font_size", 1.0)), 4) if _d is not None else None
+                        elif _o is not None:
+                            _hb_data[_k + "_scale"] = [round(float(v), 4) for v in _o.worldScale]
+                    except Exception:
+                        pass
+            except Exception:
+                pass
             with open(_hb, "w") as _f:
-                _f.write(_json.dumps({
-                    "label": _st.current_label,
-                    "idx": _st.instruction_index,
-                    "event": _evt.get("type"),
-                    "choices": len(_evt.get("choices") or []),
-                    "modal": (None if _sm is None or _sm.active_modal is None
-                              else _sm.active_modal.name),
-                }))
+                _f.write(_json.dumps(_hb_data))
     except Exception:
         pass
 

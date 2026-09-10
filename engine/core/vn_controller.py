@@ -280,7 +280,7 @@ class VNController:
         # advance to first wait event
         self._advance()
 
-    def _advance(self, send_value=None):
+    def _advance(self, send_value=None, replay=False):
         if self._gen is None:
             return
         # M25 BUG-007b: a menu may only be resolved with an explicit choice.
@@ -289,6 +289,16 @@ class VNController:
         if send_value is None and self._current_event is not None \
                 and self._current_event.get("type") == "menu":
             return
+        if not replay:
+            # M26d: a real player advance invalidates the pending roll-forward
+            # (same rule as an editor's redo stack). Rewind replays pass
+            # replay=True so the redo frames survive the restore.
+            self._forward_stack.clear()
+            self._forward_labels_stack.clear()
+            try:
+                self.state.rollback_mode = False
+            except Exception:
+                pass
         try:
             if self._current_event is None:
                 # first call
@@ -584,38 +594,70 @@ class VNController:
         else:
             raise RuntimeError("no menu to choose from")
 
+    # ---------------------------------------------------------------- rewind (M26d)
+    #
+    # The interpreter pushes a snapshot *before* it yields each say/menu, and
+    # `run()` replays from `state.instruction_index`. That pairing is what the
+    # old implementation got wrong: it popped the *current* frame, restored it
+    # and re-advanced — which re-executes the very line already on screen, so
+    # wheel-up did nothing visible while the redo stack silently grew.
+    #
+    # Invariant now: `rollback_stack[-1]` is always the frame for the line
+    # currently displayed. Rolling back therefore needs the frame *below* it,
+    # and the replay re-pushes the frame we are peeking, so the popped
+    # duplicate is discarded to keep the stack one-frame-per-interaction.
+    def _rollback_stacks(self):
+        rs = getattr(self.interp, "rollback_stack", None)
+        ls = getattr(self.interp, "rollback_labels_stack", None)
+        return rs, ls
+
+    def _restore_and_replay(self, snap, labels):
+        """Put the story back on `snap` and re-display its next interaction."""
+        self.state.restore(snap)
+        if labels is not None:
+            self.interp.labels = copy.deepcopy(labels)
+        self._gen = self.interp.run()
+        self._current_event = None
+        self._waiting = False
+        self._advance(replay=True)
+
+    def can_rollback(self) -> bool:
+        """True when at least one earlier interaction exists (M26d)."""
+        if not self.interp:
+            return False
+        rs, _ = self._rollback_stacks()
+        return bool(rs) and len(rs) >= 2
+
     def rollback(self, steps: int = 1):
-        """Rollback N steps (M08). Stores forward history for roll-forward."""
-        if not self.interp or not self.interp.rollback_stack:
-            return
-        for _ in range(steps):
-            if not self.interp.rollback_stack:
+        """Rollback N interactions (M08, corrected M26d). Returns steps taken."""
+        if not self.interp:
+            return 0
+        taken = 0
+        for _ in range(max(1, int(steps))):
+            rs, ls = self._rollback_stacks()
+            if not rs or len(rs) < 2:
                 break
-            # save current state + labels for forward
-            self._forward_stack.append(self.state.snapshot())
-            self._forward_labels_stack.append(copy.deepcopy(self.interp.labels))
+            # remember the line we are leaving so roll_forward can return here
+            cur_snap = copy.deepcopy(rs[-1])
+            cur_lab = copy.deepcopy(ls[-1]) if ls else None
+            self._forward_stack.append(cur_snap)
+            self._forward_labels_stack.append(cur_lab)
             if len(self._forward_stack) > 100:
                 self._forward_stack.pop(0)
                 self._forward_labels_stack.pop(0)
-            snap = self.interp.rollback_stack.pop()
-            lab = self.interp.rollback_labels_stack.pop() if hasattr(self.interp, "rollback_labels_stack") and self.interp.rollback_labels_stack else None
-            self.state.restore(snap)
-            if lab is not None:
-                self.interp.labels = lab
-        # reinitialize generator at restored point (keep restored labels)
-        # we must not deepcopy labels again; use current interp.labels directly
-        # create a fresh generator that will continue from restored state without losing spliced structure
-        # To keep restored labels, we temporarily override interpreter's labels deepcopy behavior:
-        # Use current labels as base, not original script copy.
-        # So we create a new interpreter-like gen but keep labels
-        # Instead we just run with current interpreter's labels (already restored)
-        # We need to ensure run() doesn't deepcopy again — it does deepcopy on init, but here we reuse existing interp
-        # So we patch: set labels directly and make _gen
-        self._gen = self.interp.run()
-        # restore labels after run() deepcopy would have overwritten? run() uses self.labels deepcopy from script, but we just restored self.interp.labels
-        # run() deepcopy is only in __init__, not in run(), so run() will use current self.labels as is (good)
-        self._current_event = None
-        self._advance()
+            rs.pop()
+            if ls:
+                ls.pop()
+            prev_snap = rs.pop()           # replay re-pushes this one
+            prev_lab = ls.pop() if ls else None
+            self._restore_and_replay(prev_snap, prev_lab)
+            self.state.rollback_mode = True
+            taken += 1
+        return taken
+
+    def rewind_depth(self) -> int:
+        """How far back from the newest point the player currently is."""
+        return len(self._forward_stack)
 
     def _save_manager(self):
         """Return (creating if needed) the SaveManager for this controller."""
@@ -685,25 +727,25 @@ class VNController:
             return False
 
     def roll_forward(self, steps: int = 1):
-        """Redo after rollback (M08)."""
-        if not self._forward_stack:
-            return
-        for _ in range(steps):
+        """Redo after rollback (M08, corrected M26d). Returns steps taken."""
+        if not self.interp or not self._forward_stack:
+            return 0
+        rs, ls = self._rollback_stacks()
+        taken = 0
+        for _ in range(max(1, int(steps))):
             if not self._forward_stack:
                 break
+            # No manual push here: the line we are leaving still owns its frame
+            # (rollback popped the target's frame and the replay re-pushed it),
+            # and `_restore_and_replay` re-pushes the frame of the line we are
+            # arriving at — appending here duplicated every frame per redo.
             snap = self._forward_stack.pop()
             lab = self._forward_labels_stack.pop() if self._forward_labels_stack else None
-            # push current onto rollback so you can rollback again
-            if self.interp:
-                self.interp.rollback_stack.append(self.state.snapshot())
-                if hasattr(self.interp, "rollback_labels_stack"):
-                    self.interp.rollback_labels_stack.append(copy.deepcopy(self.interp.labels))
-            self.state.restore(snap)
-            if lab is not None and self.interp:
-                self.interp.labels = lab
-        self._gen = self.interp.run()
-        self._current_event = None
-        self._advance()
+            self._restore_and_replay(snap, lab)
+            taken += 1
+        if not self._forward_stack:
+            self.state.rollback_mode = False
+        return taken
 
     def toggle_skip(self):
         self.state.skip = not self.state.skip

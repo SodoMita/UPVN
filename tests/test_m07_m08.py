@@ -69,13 +69,16 @@ def test_auto_toggle():
 
 def test_rollback_n_steps_hash():
     import json
-    # Create a new controller and step interactively — verify N-step rollback hash equality (M08)
+    # M26d semantics: one rollback == one interaction back (Ren'Py's rule).
+    # The old assertion (2 steps to reach the menu) documented the off-by-one
+    # where restoring the *current* frame re-displayed the same line.
     c2 = VNController("examples/03_variables_routes/script.rpy")
     c2.load()
     # initial event is say "Can you help..."
     assert c2.current_event["type"] == "say"
     h1 = json.loads(json.dumps(c2.state.snapshot(), sort_keys=True))
-    # advance to menu
+    h1_text = h1["history"][0]["text"] if h1["history"] else c2.current_event["text"]
+    assert c2.current_event["text"] in (h1_text or c2.current_event["text"])
     c2._advance()  # to menu
     assert c2.current_event["type"] == "menu"
     h2 = json.loads(json.dumps(c2.state.snapshot(), sort_keys=True))
@@ -83,24 +86,77 @@ def test_rollback_n_steps_hash():
     assert c2.current_event["type"] == "say"
     assert "Thanks!" in c2.current_event["text"]
     h_before = json.loads(json.dumps(c2.state.snapshot(), sort_keys=True))
-    # stack is [h1, h2, beforeThanks]; h_before has affection 1
-    # Two rollbacks should get back to menu state (h2) — affection 0, history 1
-    c2.rollback(steps=2)
+    # stack is [h1, h2, beforeThanks] — one frame per displayed interaction
+    assert len(c2.interp.rollback_stack) == 3
+
+    assert c2.rollback() == 1                     # -> the menu
     after = json.loads(json.dumps(c2.state.snapshot(), sort_keys=True))
     assert after["variables"] == h2["variables"]
     assert after["instruction_index"] == h2["instruction_index"]
-    assert len(after["history"]) == len(h2["history"])
-    # one more rollback (with duplicate push) needs 2 pops to reach h1 — just verify we can get back to start via 2 steps
-    c2.rollback(steps=2)
+    assert len(after["history"]) == len(h2["history"])   # no duplicated backlog line
+
+    assert c2.rollback() == 1                     # -> the first say
     after2 = json.loads(json.dumps(c2.state.snapshot(), sort_keys=True))
     assert after2["variables"] == h1["variables"]
     assert after2["instruction_index"] == h1["instruction_index"]
-    # forward 2 -> should be back to h2
-    c2.roll_forward(steps=2)
+
+    assert c2.rollback() == 0                     # nothing before the first line
+    # backlog is exactly the line on screen: the first say, nothing else
+    at_first = json.loads(json.dumps(c2.state.snapshot(), sort_keys=True))
+    assert [h["text"] for h in at_first["history"]] == [h1_text]
+
+    # ...and the frames we left stay reachable in order
+    assert c2.roll_forward() == 1
     assert json.loads(json.dumps(c2.state.snapshot(), sort_keys=True))["variables"] == h2["variables"]
-    # forward 2 -> should be back to h_before (Thanks state) affection 1
-    c2.roll_forward(steps=2)
+    assert c2.roll_forward() == 1
     assert json.loads(json.dumps(c2.state.snapshot(), sort_keys=True))["variables"] == h_before["variables"]
+    assert c2.roll_forward() == 0                 # nothing left to redo
+    assert c2.rewind_depth() == 0
+    # stack is back to one frame per interaction (a redo must not inflate it)
+    assert len(c2.interp.rollback_stack) == 3
+
+
+def test_rewind_state_flags(tmp_path):
+    """rollback_mode drives the on-screen indicator and clears on advance."""
+    c = VNController("examples/03_variables_routes/script.rpy")
+    c.load()
+    assert c.state.rollback_mode is False
+    assert c.can_rollback() is False          # at the very first line
+    c._advance()
+    assert c.can_rollback() is True
+    c.rollback()
+    assert c.state.rollback_mode is True
+    assert c.rewind_depth() == 1
+    c._advance()                              # a real click resumes the story
+    assert c.state.rollback_mode is False
+    assert c.rewind_depth() == 0              # redo stack dropped on advance
+
+
+def test_rollback_replays_variables_and_history():
+    """Rewinding a `$ var` change must actually revert it (state, not visuals)."""
+    from engine.script.parser import parse_string
+    c = VNController(script_dict=parse_string('''
+default gold = 0
+label start:
+    "one"
+    $ gold = 5
+    "two [gold]"
+    return
+'''))
+    c.load()
+    assert c.current_event["text"] == "one"
+    c._advance()
+    assert c.state.variables["gold"] == 5
+    assert [h["raw"] for h in c.state.history] == ["one", "two [gold]"]
+    c.rollback()
+    assert c.state.variables["gold"] == 0, "the $ assignment must be reverted"
+    assert [h["raw"] for h in c.state.history] == ["one"]
+    assert c.current_event["text"] == "one"
+    c.roll_forward()
+    assert c.state.variables["gold"] == 5
+    assert c.current_event["text"] == "two 5"
+    assert [h["raw"] for h in c.state.history] == ["one", "two [gold]"]
+
 
 def test_rollback_stack_size():
     from engine.script.parser import parse_string
