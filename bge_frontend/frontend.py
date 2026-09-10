@@ -270,13 +270,24 @@ def _tick_pointer(ctrl):
         tr = logic._upvn_ptr
         name = normalize_hit_name(_object_under_cursor())
         clicked = _bge_just("mouse", _bge.events.LEFTMOUSE)
+        # M26 field diagnostics (visible via UPVN_DEBUG_TEE): log whenever the
+        # ray's hover target or the click flag changes — a dropped synthetic
+        # click or a ray miss is otherwise invisible in the player.
+        sig = (name, bool(clicked))
+        if getattr(logic, "_upvn_ptr_sig", None) != sig:
+            logic._upvn_ptr_sig = sig
+            mx, my = (getattr(_bge.logic, "mouse").position or (0.0, 0.0))
+            print(f"[pointer] hover={name} clicked={clicked} mouse=({mx:.3f},{my:.3f})")
         for pe in tr.update(name, clicked=clicked):
             idx = tr.choose(pe)
             if idx is not None:
+                print(f"[pointer] click → choice {idx}")
                 ctrl.choose(idx)
                 return
-    except Exception:
-        pass
+    except Exception as e:
+        import traceback
+        print(f"[pointer] tick failed: {e}")
+        traceback.print_exc()
 
 
 def _bind_camera():
