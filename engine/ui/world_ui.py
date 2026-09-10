@@ -150,7 +150,11 @@ def aspect_wh() -> float:
     return 16.0 / 9.0
 
 
-def layout_screen_ui(get_obj: Callable[[str], Any], payload: dict, ortho: float = 15.0) -> None:
+HOVER_SCALE = 1.08   # M26c: choice plate grows 8% under the cursor
+
+
+def layout_screen_ui(get_obj: Callable[[str], Any], payload: dict, ortho: float = 15.0,
+                     hovered: str | None = None) -> None:
     """Place UI as a fraction of the current ortho frustum so zoom leaves text on screen.
 
     M25 BUG-003: `ortho_scale` spans the *width* of the window, so the vertical
@@ -186,7 +190,11 @@ def layout_screen_ui(get_obj: Callable[[str], Any], payload: dict, ortho: float 
             continue
         z = half_v * 0.42 - i * (half_v * 0.12)
         _set_pos(plane, (0.0, y_ui + 0.02, z))
-        _set_scale(plane, (half * 0.70, half * 0.045, 1.0))
+        # M26c: scale-on-hover is applied HERE — layout owns choice-plane
+        # scale, so the multiplier survives camera zoom/ortho changes and
+        # cannot go stale (a cached base scale would). Re-applied each frame.
+        bump = HOVER_SCALE if (hovered and ch["name"] == hovered) else 1.0
+        _set_scale(plane, (half * 0.70 * bump, half * 0.045 * bump, 1.0))
         _set_pos(text_obj, (-half * 0.62, y_ui, z + half_v * 0.01))
         try:
             if text_obj is not None:
@@ -196,7 +204,8 @@ def layout_screen_ui(get_obj: Callable[[str], Any], payload: dict, ortho: float 
     _ = vis_n
 
 
-def apply_world_ui(get_obj: Callable[[str], Any], payload: dict, ortho: float | None = None) -> None:
+def apply_world_ui(get_obj: Callable[[str], Any], payload: dict, ortho: float | None = None,
+                   hovered: str | None = None) -> None:
     """Write payload onto named scene objects. `get_obj(name) -> obj|None`."""
     speaker_obj = get_obj("Speaker_Text")
     dialogue_obj = get_obj("Dialogue_Text")
@@ -215,7 +224,7 @@ def apply_world_ui(get_obj: Callable[[str], Any], payload: dict, ortho: float | 
         _set_visible(text_obj, on)
         set_font_text(text_obj, ch.get("text") or "")
     if ortho is not None:
-        layout_screen_ui(get_obj, payload, ortho=ortho)
+        layout_screen_ui(get_obj, payload, ortho=ortho, hovered=hovered)
 
 
 def normalize_hit_name(name: Optional[str]) -> Optional[str]:
