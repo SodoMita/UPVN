@@ -1272,7 +1272,24 @@ except Exception:
             ctrl = _b.data.objects.new("VNController", None)
             ctrl.empty_display_type = "CUBE"
             scene.collection.objects.link(ctrl)
-        _set_runtime_prop(_b, ctrl, "script_path", script_path)
+        # M26: never clobber a configured script_path with the default —
+        # keep the blend's existing value when the caller passes the default
+        # (panel default / API default). See UPVN_OT_SetupScene.execute.
+        effective_script_path = script_path
+        try:
+            if script_path in (None, "", "//game/script.rpy"):
+                cur = ctrl.get("script_path")
+                if not cur:
+                    try:
+                        pp = ctrl.game.properties.get("script_path")
+                        cur = pp.value if pp is not None else None
+                    except Exception:
+                        cur = None
+                if cur:
+                    effective_script_path = str(cur)
+        except Exception:
+            pass
+        _set_runtime_prop(_b, ctrl, "script_path", effective_script_path)
         # M26: image policy for the renderers — "color" (texture-free palette,
         # template + samples) or "auto" (converted Ren'Py projects).
         _set_runtime_prop(_b, ctrl, "image_mode", IMAGE_MODE_DEFAULT)
@@ -1480,6 +1497,32 @@ except Exception:
 
         def execute(self, context):
             p = context.scene.upvn_props
+            # M26: the blend's own VNController.script_path is the source of
+            # truth ("the game you build is the game that plays"). When the
+            # panel still carries the default, adopt the blend's value instead
+            # of overwriting it — Setup Scene used to clobber a configured
+            # path (e.g. '//../examples/20_smoke_game/script.rpy') back to
+            # '//game/script.rpy', and pressing P then played the fallback
+            # demo. The panel field is synced so both stay consistent.
+            try:
+                existing = context.scene.objects.get("VNController")
+                if existing is not None:
+                    cur = None
+                    gp = existing.get("script_path")
+                    if gp:
+                        cur = str(gp)
+                    else:
+                        try:
+                            pp = existing.game.properties.get("script_path")
+                            cur = str(pp.value) if pp is not None else None
+                        except Exception:
+                            cur = None
+                    if cur and (not p.project_path
+                                or p.project_path == "//game/script.rpy"):
+                        p.project_path = cur
+                        print("[UPVN] Setup Scene: adopting blend script_path:", cur)
+            except Exception as e:
+                print("[UPVN] Setup Scene: script_path sync skipped:", e)
             try:
                 ctrl = build_vn_scene(script_path=p.project_path,
                                       scene_name=context.scene.name)
