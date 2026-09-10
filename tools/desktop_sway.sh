@@ -37,6 +37,20 @@ case "${1:-up}" in
     status) status_desktop; exit $? ;;
 esac
 
+# 0) swap: this class of sandbox ships 2 GB RAM and no swap, and UPBGE's
+#    player+editor peak at ~1.2-1.6 GB RSS. Without swap the kernel OOM-kills
+#    the player a few seconds after the first frame, which looks like a black
+#    screen rather than an out-of-memory error. Idempotent.
+if [ "$(swapon --show=SIZE --noheadings --bytes 2>/dev/null | head -1 || true)" = "" ] \
+        && ! swapon --show --noheadings 2>/dev/null | grep -q .; then
+    if [ -w / ] || sudo -n true 2>/dev/null; then
+        { sudo fallocate -l "${UPVN_SWAP_MB:-3072}M" /swapfile \
+          && sudo chmod 600 /swapfile && sudo mkswap /swapfile >/dev/null \
+          && sudo swapon /swapfile; } 2>/dev/null \
+            || echo "note: could not add swap (needs CAP_SYS_ADMIN); run with more RAM"
+    fi
+fi
+
 # 1) packages
 if ! command -v sway >/dev/null 2>&1 || [ ! -d "$UPBGE" ]; then
     sudo apt-get update -qq
