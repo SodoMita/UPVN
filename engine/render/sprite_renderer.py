@@ -20,7 +20,8 @@ from ..core.vn_state import VNState
 from .contract import (POSITIONS, SPRITE_MATERIAL, SPRITE_FALLBACK_TAG,
                        SPRITE_TAG_PREFIX, BG_PLANE, ASSET_SPRITES,
                        image_mode_from, sprite_color, SPRITE_FALLBACK_COLOR,
-                       apply_object_color)
+                       apply_object_color, plane_material,
+                       apply_material_image, reset_material_palette)
 import time
 
 # Relative search prefixes for sprite images, relative to the .blend
@@ -174,7 +175,42 @@ class SpriteRenderer:
                 return plane
 
             tint = sprite_color(tag)
+            # an explicit `define e = Character("Eileen", color="#c8ffc8")`
+            # wins over the curated/hash palette (Ren'Py authors expect their
+            # color). The "#ffffff" DEFAULT is ignored — it would wash the
+            # silhouette out white for every author who never set one.
+            try:
+                ch = self.state.characters.get(tag)
+                ch_color = str(getattr(ch, "color", "") or "").strip()
+                if ch_color and ch_color.lower() not in ("#ffffff", "white"):
+                    h = ch_color.lstrip("#")
+                    if len(h) >= 6:
+                        tint = (int(h[0:2], 16) / 255.0,
+                                int(h[2:4], 16) / 255.0,
+                                int(h[4:6], 16) / 255.0, 1.0)
+            except Exception:
+                pass
             if tex_path:
+                # (2) direct material node swap first (M26b): each Sprite_*
+                # plane owns MASprite_<pos>, so sprites texture independently
+                if apply_material_image(plane_material(plane), tex_path):
+                    try:
+                        for ob in scene.objects:
+                            if str(ob.name).startswith("Sprite_img_"):
+                                ob.visible = False
+                    except Exception:
+                        pass
+                    plane.visible = True
+                    self.planes[tag] = {"obj": plane, "asset": asset,
+                                        "position": position,
+                                        "t0": time.time(),
+                                        "transition": transition,
+                                        "tint": (1.0, 1.0, 1.0)}
+                    _dbg(f"show {tag} '{asset}' → material texture {tex_path}")
+                    if transition in ("dissolve", "fade"):
+                        plane.color = (1, 1, 1, 1.0)
+                    return
+                # (3) legacy bge.texture (blend-mode materials only)
                 try:
                     img = vt.ImageFFmpeg(tex_path)
                     img.scale = False
@@ -207,6 +243,7 @@ class SpriteRenderer:
             # no image (or bind failed) — paint the silhouette with the palette
             # tint so a missing texture must not equal "no sprite".
             _palette_plane()
+            reset_material_palette(plane_material(plane))
             painted = apply_object_color(plane, tint)
             _dbg(f"show {tag} '{asset}' at {position} → palette tint "
                  f"(mode={mode}, painted={painted})")

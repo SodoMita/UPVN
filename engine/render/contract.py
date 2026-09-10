@@ -245,6 +245,102 @@ def apply_object_color(obj, color) -> bool:
         return False
 
 
+# ---------------------------------------------------------------------------
+# M26b: texture-capable material graph (sprite/background PNGs at runtime).
+#
+# bge.texture cannot bind node materials in UPBGE 0.50 ("Texture is not
+# available", measured in-field), but an editor/runtime-assigned TexImage node
+# renders fine when the mesh has UVs and the image is file-backed (a packed
+# 1×1 white starter keeps the graph valid without any asset). The graph is
+#     Output ← Emission ← Mix(A=Object Info.Color, B=TexImage.Color, Factor)
+# Factor 0.0 → object color drives (palette); Factor 1.0 → texture drives.
+# The runtime flips the factor per material — each Sprite_* plane owns a
+# material slot copy (MASprite_<pos>), so sprites texture independently.
+TEX_NODE_NAME = "UPVN Tex Image"
+MIX_NODE_NAME = "UPVN Tex Mix"
+WHITE_IMAGE_NAME = "UPVN_White1px"
+
+
+def _bpy_module():
+    try:
+        import bpy
+        return bpy
+    except ImportError:
+        return None
+
+
+def plane_material(plane):
+    """First bpy material of a KX_GameObject plane (None headless / missing)."""
+    bpy = _bpy_module()
+    if bpy is None or plane is None:
+        return None
+    try:
+        bo = getattr(plane, "blenderObject", None)
+        slots = getattr(bo, "material_slots", None)
+        if not slots:
+            return None
+        return slots[0].material
+    except Exception:
+        return None
+
+
+def apply_material_image(mat, image_path) -> bool:
+    """Point the material's TexImage node at a file-backed image and switch
+    the mix factor to texture. Returns False when the graph is not
+    texture-capable or the path does not exist (caller falls back)."""
+    import os
+    bpy = _bpy_module()
+    if bpy is None or mat is None or not image_path:
+        return False
+    try:
+        if not os.path.isfile(image_path):
+            return False
+        nt = getattr(mat, "node_tree", None)
+        if nt is None:
+            return False
+        tex = None
+        for n in nt.nodes:
+            if n.type == "TEX_IMAGE":
+                tex = n
+                break
+        if tex is None:
+            return False
+        img = bpy.data.images.load(image_path, check_existing=True)
+        tex.image = img
+        for n in nt.nodes:
+            if n.type == "MIX":
+                try:
+                    for inp in n.inputs:
+                        if inp.name == "Factor":
+                            inp.default_value = 1.0
+                except Exception:
+                    pass
+        return True
+    except Exception:
+        return False
+
+
+def reset_material_palette(mat) -> bool:
+    """Mix factor back to 0.0 → Object Info color (the palette) drives."""
+    if mat is None:
+        return False
+    try:
+        nt = getattr(mat, "node_tree", None)
+        if nt is None:
+            return False
+        for n in nt.nodes:
+            if n.type == "MIX":
+                try:
+                    for inp in n.inputs:
+                        if inp.name == "Factor":
+                            inp.default_value = 0.0
+                except Exception:
+                    pass
+        return True
+    except Exception:
+        return False
+
+
 def required_objects() -> list[dict]:
     """Authoritative, ordered list of every named item the code expects.
 

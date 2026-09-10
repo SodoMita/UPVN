@@ -121,7 +121,7 @@ def test_m17_package_addon_zip_single_folder():
         assert "engine/script/parser.py" not in names          # no zip-root dup
         assert "bge_frontend/frontend.py" not in names
         assert not any(n.endswith(".pyc") for n in names)
-        assert "upvn_editor_addon_v0.6.13.zip" in zpath.name
+        assert "upvn_editor_addon_v0.6.14.zip" in zpath.name
 
         # simulate Blender's UI install: extract into a fake addons dir
         addons_dir = Path(td) / "addons"
