@@ -32,6 +32,15 @@ def _plane(name, size=10.0):
     mesh.from_pydata([(-1, -1, 0), (1, -1, 0), (1, 1, 0), (-1, 1, 0)], [],
                      [(0, 1, 2, 3)])
     mesh.update()
+    # The rasterizer samples TexImage through UVs — from_pydata creates no UV
+    # layer and the texture then renders black in the player.
+    try:
+        uv = mesh.uv_layers.new(name="UVMap")
+        uvs = ((0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0))
+        for i, (u, v) in enumerate(uvs):
+            uv.data[i].uv = (u, v)
+    except Exception as e:
+        print(f"[wire] uv layer failed on {name}: {e}")
     ob = bpy.data.objects.new(name, mesh)
     ob.scale = (size / 2, size / 2, 1)
     ob.rotation_euler = (1.5707963267948966, 0.0, 0.0)
@@ -47,6 +56,10 @@ def _image_material(name, img_path):
     em = nt.nodes.new("ShaderNodeEmission")
     tex = nt.nodes.new("ShaderNodeTexImage")
     img = bpy.data.images.load(str(img_path))
+    try:
+        img.pack()   # self-contained blend — survives moves between machines
+    except Exception:
+        pass
     tex.image = img
     try:
         em.inputs["Strength"].default_value = 1.0
