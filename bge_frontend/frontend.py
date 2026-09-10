@@ -134,14 +134,30 @@ def _unregister_overlay():
         pass
 
 
-def _hide_idle_sprites():
+def _hide_idle_sprites(ctrl=None):
+    """Hide Sprite_* planes no story actor currently claims.
+
+    M26 bugfix: this used to hide *every* Sprite_* unconditionally right
+    after ctrl.load() — but the load already applied the story's opening
+    `show` events, so the opening sprite was made visible and immediately
+    hidden again (the field symptom: stage color changed, sprite never
+    appeared, no error anywhere). Planes claimed by ctrl.sprite_mgr are kept."""
     if not HAS_BGE:
         return
+    keep = set()
+    try:
+        mgr = getattr(ctrl, "sprite_mgr", None)
+        for info in (getattr(mgr, "planes", None) or {}).values():
+            ob = info.get("obj")
+            if ob is not None:
+                keep.add(str(getattr(ob, "name", "")))
+    except Exception:
+        pass
     try:
         import bge as _bge
         sc = _bge.logic.getCurrentScene()
         for ob in sc.objects:
-            if str(ob.name).startswith("Sprite_"):
+            if str(ob.name).startswith("Sprite_") and str(ob.name) not in keep:
                 ob.visible = False
     except Exception:
         pass
@@ -351,7 +367,7 @@ def main(cont=None):
                 ctrl.load()
                 logic._upvn_ctrl = ctrl
                 _unregister_overlay()
-                _hide_idle_sprites()
+                _hide_idle_sprites(ctrl)
                 print(f"[UPVN] Loaded script {path} (from {'VNController.script_path' if owner is not None else 'candidate'})")
             except Exception as e:
                 print(f"[UPVN] failed to load {path}: {e}")
@@ -376,7 +392,7 @@ def main(cont=None):
             ctrl._load_diag = diag
             logic._upvn_ctrl = ctrl
             _unregister_overlay()
-            _hide_idle_sprites()
+            _hide_idle_sprites(ctrl)
 
     # per-frame tick with dt
     global _last_time

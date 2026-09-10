@@ -6,6 +6,7 @@ export DISPLAY=:0
 export LIBGL_ALWAYS_SOFTWARE=1
 export SDL_AUDIODRIVER=dummy
 export UPVN_HEARTBEAT=/tmp/upvn_hb.json
+export UPVN_DEBUG_TEE=/tmp/upvn_debug.log
 UPBGE="${UPBGE_DIR:-/home/user/upbge/upbge-0.50-linux-x64}"
 BLEND="${1:-/home/user/UPVN/blend/UPVN_Template.blend}"
 SECS="${2:-25}"
