@@ -870,7 +870,13 @@ except Exception:
         return obj
 
     def _rewrite_unlit(mat, color):
-        """Emission-only — VN planes must not pick up scene lights."""
+        """Emission-only — VN planes must not pick up scene lights.
+
+        Desktop path: no image textures at all (software GL llvmpipe/lavapipe
+        friendly). Material is pure emission; BGE side tints via object.color
+        (palette in engine/render/contract.py). This avoids the vt.Texture
+        / TexImage mismatch that made plates black on some drivers.
+        """
         mat.use_nodes = True
         nt = mat.node_tree
         try:
@@ -879,22 +885,11 @@ except Exception:
             pass
         out = nt.nodes.new("ShaderNodeOutputMaterial")
         em = nt.nodes.new("ShaderNodeEmission")
-        tex = nt.nodes.new("ShaderNodeTexImage")
-        tex.location = (-280, 0)
         try:
             em.inputs["Color"].default_value = color
             em.inputs["Strength"].default_value = 1.0
         except Exception:
             pass
-        # M25 BUG-005: an *unassigned* TexImage node evaluates to black in the
-        # UPBGE rasterizer and overrides the default colour above — every VN
-        # plate rendered black in the player. Only link once a real image is
-        # assigned (the frontend may do so later).
-        if getattr(tex, "image", None) is not None:
-            try:
-                nt.links.new(tex.outputs["Color"], em.inputs["Color"])
-            except Exception:
-                pass
         nt.links.new(em.outputs[0], out.inputs[0])
         for attr, val in (("blend_method", "OPAQUE"), ("shadow_method", "NONE"),
                           ("use_backface_culling", False)):
@@ -1108,8 +1103,11 @@ except Exception:
             _rewrite_unlit(mat, color)
             return mat
 
-        mat_bg = _ensure_material(_b, BG_MATERIAL, (0.12, 0.14, 0.22, 1.0))
-        mat_sprite = _ensure_material(_b, SPRITE_MATERIAL, (0.62, 0.78, 0.55, 1.0))
+        # BG/Sprite are WHITE bases — object.color (palette) tints them in-game.
+        # This makes software renderers (llvmpipe, lavapipe) behave identically
+        # and avoids per-object material duplication.
+        mat_bg = _ensure_material(_b, BG_MATERIAL, (1.0, 1.0, 1.0, 1.0))
+        mat_sprite = _ensure_material(_b, SPRITE_MATERIAL, (1.0, 1.0, 1.0, 1.0))
         mat_ui = _ensure_material(_b, "MAUI", (0.05, 0.06, 0.14, 1.0))
         mat_choice = _ensure_material(_b, "MAChoice", (0.12, 0.18, 0.32, 1.0))
         mat_font = _ensure_material(_b, "MAFont", (0.92, 0.93, 1.0, 1.0))

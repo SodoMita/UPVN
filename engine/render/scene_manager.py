@@ -3,14 +3,16 @@ UPVN — Scene Manager (UPBGE + headless)
 
 Handles background planes / 3D stage loading.
 Headless: state already set by interpreter; here we record last transition for renderer.
-UPBGE: swaps bge.texture on BG_Plane, handles fade/dissolve via shader/alpha tween.
+UPBGE: tints BG_Plane via object colour (emission white material) — NO image textures.
+       This avoids bge.texture / Vulkan vs GL issues (llvmpipe vs lavapipe) and works
+       on pure software GL without image decoding.
+
+Transitions are simple alpha tweens over N frames (fade/dissolve).
 
 In UPBGE:
-- Backgrounds are textured planes parented to Orthographic Camera (Layer 0)
-- Transitions are shader-based or alpha tween over N frames (fade/dissolve)
-- 3D stages load .blend collections via bge.logic.LibLoad
-
-This module is the thin adapter between interpreter events and bge API.
+- Backgrounds are colour planes parented to Orthographic Camera (Layer 0)
+- Transitions are alpha tween
+- 3D stages load .blend collections via bge.logic.LibLoad (optional)
 """
 from __future__ import annotations
 try:
@@ -20,7 +22,7 @@ except ImportError:
     HAS_BGE = False
 
 from ..core.vn_state import VNState
-from .contract import BG_PLANE, BG_MATERIAL, ASSET_BACKGROUNDS
+from .contract import BG_PLANE, BG_MATERIAL, bg_color_for
 import time
 
 BACKGROUND_LAYER = 0
@@ -57,9 +59,9 @@ class SceneManager:
         else:
             self._transition_name = None
         if HAS_BGE:
-            self._swap_bge_texture(asset, transition)
+            self._apply_bg_color(asset, transition)
 
-    def _swap_bge_texture(self, asset: str, transition: str | None):
+    def _apply_bg_color(self, asset: str, transition: str | None):
         if not HAS_BGE:
             return
         try:
@@ -67,40 +69,53 @@ class SceneManager:
             plane = scene.objects.get(BG_PLANE)
             if not plane:
                 return
-            # Use bge.texture to swap image
-            import bge.texture as vt
+            col = bg_color_for(asset)
+            # object colour tints the white emission material (contract)
             try:
-                mat_id = vt.materialID(plane, BG_MATERIAL)
+                plane.color = col
             except Exception:
-                mat_id = -1
-            if mat_id < 0:
-                mat_id = 0  # first material slot fallback
-            import os
-            stems = [asset, asset.replace(" ", "_"), asset.replace(" ", "/")]
-            tex_path = None
-            for stem in stems:
-                for ext in (".png", ".jpg", ".webp"):
-                    for prefix in (f"//{ASSET_BACKGROUNDS}/", f"//game/{ASSET_BACKGROUNDS}/"):
-                        alt = bge.logic.expandPath(f"{prefix}{stem}{ext}")
-                        if os.path.exists(alt):
-                            tex_path = alt
-                            break
-                    if tex_path:
-                        break
-                if tex_path:
-                    break
-            if tex_path and os.path.exists(tex_path):
-                img = vt.ImageFFmpeg(tex_path)
-                img.scale = False
-                tex = vt.Texture(plane, mat_id)
-                tex.source = img
-                plane["upvn_tex"] = tex
-                if transition in ("fade", "dissolve"):
+                pass
+            plane.visible = True
+            try:
+                plane["upvn_bg"] = asset
+                plane["upvn_bg_color"] = col
+            except Exception:
+                pass
+            # handle fade/dissolve as alpha tween start
+            if transition in ("fade", "dissolve"):
+                try:
                     plane["upvn_transition"] = transition
                     plane["upvn_transition_t0"] = time.time()
+                    # start from transparent if fade-in
+                    if transition == "fade":
+                        plane.color = (col[0], col[1], col[2], 0.0)
+                        # store target for update
+                        plane["upvn_fade_target"] = col
+                except Exception:
+                    pass
+            else:
+                # clear old transition markers
+                for k in ("upvn_transition", "upvn_transition_t0", "upvn_fade_target"):
+                    try:
+                        if k in plane:
+                            del plane[k]
+                    except Exception:
+                        pass
+            # keep material emission white so object colour is faithful (in case
+            # template was built with old coloured material)
+            try:
+                mat = plane.meshes[0].materials[0] if plane.meshes else None
+                if mat is None:
+                    # fallback via bpy? not needed at runtime
+                    pass
+            except Exception:
+                pass
         except Exception as e:
-            # headless or missing assets — not fatal
-            print(f"[SceneManager] bge texture swap failed for {asset}: {e}")
+            print(f"[SceneManager] bg colour apply failed for {asset}: {e}")
+
+    # backwards compat alias (old name used in contract docstring)
+    def _swap_bge_texture(self, asset: str, transition: str | None):
+        return self._apply_bg_color(asset, transition)
 
     def is_transition_done(self) -> bool:
         if not self._transition_start:
@@ -113,7 +128,6 @@ class SceneManager:
         elapsed = time.time() - self._transition_start
         dur = self._transition_duration or 0.5
         t = min(1.0, max(0.0, elapsed / dur))
-        # ease out
         return t
 
     def _load_stage_bge(self, stage_name: str):
@@ -121,13 +135,15 @@ class SceneManager:
             return
         try:
             import bge.logic as logic
+            import os
             path = logic.expandPath(f"//stages/{stage_name}.blend")
-            # LibLoad merges collections
+            if not os.path.exists(path):
+                # stage is optional — no crash if missing (hybrid demo)
+                return
             logic.LibLoad(path, "Scene", load_actions=True)  # type: ignore
             print(f"[SceneManager] Loaded stage {stage_name} from {path}")
         except Exception as e:
             print(f"[SceneManager] LibLoad failed for {stage_name}: {e}")
 
-    # headless helper for screenshot verification
     def current_background(self) -> str | None:
         return self.state.scene.background

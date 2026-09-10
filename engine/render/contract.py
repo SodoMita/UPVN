@@ -81,9 +81,90 @@ CONTROLLER = "VNController"
 # launcher text datablock referenced by the Always -> Python brick
 LAUNCHER_TEXT = "upvn_launcher"
 
-# asset file layout relative to the .blend file
+# asset file layout relative to the .blend file (kept for compatibility, but NOT required)
 ASSET_BACKGROUNDS = "assets/backgrounds"     # <asset>.png|jpg|webp
 ASSET_SPRITES = "assets/sprites"             # <asset with '/' or '_'>.png
+
+# ---------------------------------------------------------------- color palette (no image textures)
+# Desktop-friendly: llvmpipe / lavapipe both render solid emission planes without
+# needing image decoding or bge.texture. The headless renderer already draws
+# procedural gradients; BGE side just tints the object colour on white emission
+# materials. This avoids the "Texture is not available" / node-material mismatch
+# that blocked field testing.
+
+BG_PALETTE: dict[str, tuple[float, float, float, float]] = {
+    "bg classroom": (0.92, 0.88, 0.75, 1.0),
+    "bg lecturehall": (0.18, 0.22, 0.36, 1.0),
+    "bg meadow": (0.52, 0.72, 0.56, 1.0),
+    "bg uni": (0.42, 0.52, 0.68, 1.0),
+    "bg hallway": (0.56, 0.48, 0.38, 1.0),
+    "bg school": (0.88, 0.82, 0.70, 1.0),
+    "black": (0.04, 0.06, 0.10, 1.0),
+    "white": (0.96, 0.96, 0.96, 1.0),
+}
+
+SPRITE_PALETTE: dict[str, tuple[float, float, float, float]] = {
+    "eileen": (0.78, 1.00, 0.78, 1.0),
+    "sylvie": (0.78, 0.78, 1.00, 1.0),
+    "mei": (1.00, 0.78, 0.78, 1.0),
+    "player": (1.00, 0.92, 0.72, 1.0),
+    "narrator": (1.00, 1.00, 1.00, 1.0),
+}
+
+_PASTEL = [
+    (0.88, 0.72, 0.72, 1.0),
+    (0.72, 0.88, 0.72, 1.0),
+    (0.72, 0.72, 0.88, 1.0),
+    (0.88, 0.88, 0.72, 1.0),
+    (0.88, 0.72, 0.88, 1.0),
+    (0.72, 0.88, 0.88, 1.0),
+    (0.82, 0.72, 0.88, 1.0),
+    (0.88, 0.82, 0.72, 1.0),
+]
+
+
+def bg_color_for(asset: str | None) -> tuple[float, float, float, float]:
+    if not asset:
+        return BG_PALETTE["black"]
+    key = asset.strip().lower()
+    if key in BG_PALETTE:
+        return BG_PALETTE[key]
+    norm = key.replace("_", " ")
+    if norm in BG_PALETTE:
+        return BG_PALETTE[norm]
+    h = sum(ord(c) for c in key) % len(_PASTEL)
+    r, g, b, a = _PASTEL[h]
+    return (r * 0.75, g * 0.75, b * 0.85, a)
+
+
+def sprite_color_for(tag: str | None, asset: str | None = None,
+                     character_color: str | None = None) -> tuple[float, float, float, float]:
+    if character_color:
+        try:
+            h = character_color.lstrip("#")
+            r = int(h[0:2], 16) / 255.0
+            g = int(h[2:4], 16) / 255.0
+            b = int(h[4:6], 16) / 255.0
+            return (r, g, b, 1.0)
+        except Exception:
+            pass
+    key = (tag or "").strip().lower()
+    if key in SPRITE_PALETTE:
+        return SPRITE_PALETTE[key]
+    if asset:
+        first = asset.split()[0].lower()
+        if first in SPRITE_PALETTE:
+            return SPRITE_PALETTE[first]
+    h = sum(ord(c) for c in (key + (asset or ""))) % len(_PASTEL)
+    return _PASTEL[h]
+
+
+def hex_to_rgba(hex_str: str, alpha: float = 1.0) -> tuple[float, float, float, float]:
+    try:
+        hs = hex_str.lstrip("#")
+        return (int(hs[0:2], 16)/255.0, int(hs[2:4],16)/255.0, int(hs[4:6],16)/255.0, alpha)
+    except Exception:
+        return (1.0, 1.0, 1.0, alpha)
 
 
 def required_objects() -> list[dict]:
