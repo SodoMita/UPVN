@@ -21,7 +21,9 @@ except ImportError:
 
 from ..core.vn_state import VNState
 from .contract import (BG_PLANE, BG_MATERIAL, ASSET_BACKGROUNDS,
-                       image_mode_from, stage_color, apply_object_color)
+                       image_mode_from, stage_color, apply_object_color,
+                       plane_material, apply_material_image,
+                       reset_material_palette)
 import time
 
 # Relative search prefixes for background images, relative to the .blend.
@@ -95,6 +97,7 @@ class SceneManager:
                 except Exception:
                     pass
                 plane.visible = True
+                reset_material_palette(plane_material(plane))
                 return apply_object_color(plane, stage_color(asset))
 
             if mode == "color":
@@ -134,15 +137,9 @@ class SceneManager:
                     return
                 except Exception as e:
                     _dbg(f"stage '{asset}' bank show failed ({e}) → palette")
-            import bge.texture as vt
-            try:
-                mat_id = vt.materialID(plane, BG_MATERIAL)
-            except Exception:
-                mat_id = -1
-            if mat_id < 0:
-                mat_id = 0  # first material slot fallback
             import os
-            stems = [asset, asset.replace(" ", "_"), asset.replace(" ", "/"),
+            stems = [asset, asset.replace(" ", "_"),
+                     asset.replace(" ", "/").replace("/", "_"),
                      asset.split()[-1] if " " in asset else asset]
             tex_path = None
             for stem in stems:
@@ -157,16 +154,39 @@ class SceneManager:
                         break
                 if tex_path:
                     break
-            if tex_path and os.path.exists(tex_path):
+            if tex_path:
+                # (2) direct material node swap — per-material, no
+                # bge.texture needed (M26b; works on TexImage node graphs)
+                if apply_material_image(plane_material(plane), tex_path):
+                    try:
+                        for ob in scene.objects:
+                            if str(ob.name).startswith("BGIMG_"):
+                                ob.visible = False
+                    except Exception:
+                        pass
+                    plane.visible = True
+                    _dbg(f"stage '{asset}' → material texture {tex_path}")
+                    if transition in ("fade", "dissolve"):
+                        plane["upvn_transition"] = transition
+                        plane["upvn_transition_t0"] = time.time()
+                    return
+                # (3) legacy bge.texture (blend-mode materials only)
+                import bge.texture as vt
+                try:
+                    mat_id = vt.materialID(plane, BG_MATERIAL)
+                except Exception:
+                    mat_id = -1
+                if mat_id < 0:
+                    mat_id = 0  # first material slot fallback
                 try:
                     img = vt.ImageFFmpeg(tex_path)
                     img.scale = False
                     tex = vt.Texture(plane, mat_id)
                     tex.source = img
                     plane["upvn_tex"] = tex
-                    _dbg(f"stage '{asset}' → image {tex_path}")
+                    _dbg(f"stage '{asset}' → bge.texture {tex_path}")
                 except Exception as e:
-                    _dbg(f"stage '{asset}' image bind failed ({e}) → palette")
+                    _dbg(f"stage '{asset}' texture bind failed ({e}) → palette")
                     apply_object_color(plane, _palette_bg() or stage_color(asset))
                 if transition in ("fade", "dissolve"):
                     plane["upvn_transition"] = transition

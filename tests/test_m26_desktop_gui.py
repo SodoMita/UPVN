@@ -145,3 +145,99 @@ def test_image_mode_prop_written_by_builder(tmp_path):
     assert '_set_runtime_prop(_b, ctrl, "image_mode", IMAGE_MODE_DEFAULT)' in src
     # and never clobbers a configured script_path with the default
     assert "effective_script_path" in src
+
+
+# ------------------------------------------------------- M26b texture graph
+def _fake_mat_with_tex_graph():
+    """Minimal dict-based stand-in mimicking the node graph contract."""
+    class Sock:
+        def __init__(self, name, value=None):
+            self.name = name
+            self.value = value
+
+        @property
+        def default_value(self):
+            return self.value
+
+        @default_value.setter
+        def default_value(self, v):
+            self.value = v
+
+    class TexNode:
+        type = "TEX_IMAGE"
+
+        def __init__(self):
+            self.image = "white"
+
+    class MixNode:
+        type = "MIX"
+
+        def __init__(self):
+            self.inputs = [Sock("Factor", 0.0)]
+
+    class Mat:
+        def __init__(self):
+            self.nodes = [TexNode(), MixNode()]
+
+    return Mat()
+
+
+def test_apply_material_image_rejects_bad_paths():
+    # no bpy headless → helpers must fail closed, not raise
+    assert contract.apply_material_image(_fake_mat_with_tex_graph(),
+                                         "/nonexistent/x.png") is False
+    assert contract.apply_material_image(None, None) is False
+
+
+def test_reset_material_palette_is_safe_headless():
+    assert contract.reset_material_palette(None) is False
+
+
+def test_plane_material_none_headless():
+    assert contract.plane_material(None) is None
+
+
+def test_tex_node_names_are_stable():
+    # the addon bakes these into the .blend — never rename casually
+    assert contract.TEX_NODE_NAME == "UPVN Tex Image"
+    assert contract.MIX_NODE_NAME == "UPVN Tex Mix"
+    assert contract.WHITE_IMAGE_NAME == "UPVN_White1px"
+
+
+def test_template_carries_texture_graph_and_uvs():
+    """blend/UPVN_Template.blend: TexImage+Mix nodes on BG + per-pos sprites,
+    packed white starter, UV layers, per-position sprite materials."""
+    import subprocess
+    blend = Path(__file__).resolve().parents[1] / "blend" / "UPVN_Template.blend"
+    expr = (
+        "import bpy;"
+        "w = bpy.data.images.get('UPVN_White1px');"
+        "print('WHITE_PACKED', w.packed_file is not None if w else None);"
+        "m = bpy.data.materials.get('MABackground');"
+        "k = sorted(n.type for n in m.node_tree.nodes);"
+        "print('BG_NODES', 'TEX_IMAGE' in k and 'MIX' in k);"
+        "sp = bpy.data.objects.get('Sprite_center');"
+        "print('SPRITE_MAT', [x.name for x in sp.data.materials]);"
+        "print('SPRITE_UV', len(sp.data.uv_layers) > 0);"
+        "bg = bpy.data.objects.get('BG_Plane');"
+        "print('BG_UV', len(bg.data.uv_layers) > 0, 'W', round(bg.scale.x, 1))"
+    )
+    out = subprocess.run(
+        ["/opt/upbge/upbge-0.50-linux-x64/blender", "--background",
+         str(blend), "--python-expr", expr],
+        capture_output=True, text=True, timeout=120)
+    lines = out.stdout + out.stderr
+    def val(tag):
+        for l in lines.splitlines():
+            if l.startswith(tag):
+                return l.split(None, 1)[1]
+        return None
+    assert val("WHITE_PACKED") == "True"
+    assert val("BG_NODES") == "True"
+    assert val("SPRITE_MAT") == "['MASprite_center']"
+    assert val("SPRITE_UV") == "True"
+    parts = val("BG_UV").split()
+    bg_uv, bg_w = parts[0], parts[-1]
+    assert bg_uv == "True"
+    # widened background covers the 15-unit frustum on 16:9
+    assert bg_w == "9.0"

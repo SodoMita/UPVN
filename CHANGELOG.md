@@ -1,5 +1,40 @@
 # Changelog
 
+## 0.6.14 — 2026-09-10 M26b: sprite/background textures work at runtime (node swap)
+
+The "textures essential" gap closed, keeping the palette as the fallback.
+Cross-review of `feat/desktop-no-textures` + field experiments established:
+
+- `bge.texture` is dead for node materials in UPBGE 0.50, BUT an
+  editor/runtime-assigned `TexImage` node renders fine **if** the mesh has
+  UVs and the image is file-backed. A **fileless** generated 1×1 image
+  segfaults the player at startup (measured — bisected); **packed** is safe.
+- Template/addon upgrade (v0.6.14): every VN plane gets a full 0..1 UV quad;
+  `MABackground` + per-position `MASprite_<pos>` materials carry the graph
+  `Output ← Emission ← MixRGBA(A=ObjectInfo.Color, B=TexImage(packed 1×1
+  white), Factor=0)`. Factor 0 → palette exactly as before; the runtime
+  flips Factor to 1.0 when it assigns a real PNG (`contract.
+  apply_material_image` / `reset_material_palette`). One material per sprite
+  plane so sprites texture independently. BG plane widened 10 → 18 units
+  (10 left black bars on 16:9 — visible in every earlier screenshot).
+- Renderers (auto mode) now try: image-bank plane → **material node swap**
+  (new; works for any project with assets/, no conversion needed) → legacy
+  bge.texture → palette. `color` mode untouched (verified live).
+- Sprite palette tint honours an explicit `Character(color="#…")`; the
+  `#ffffff` default is ignored (would wash silhouettes white).
+- Cross-review notes on `feat/desktop-no-textures` (faf1414): its AABB mouse
+  pick contradicts the 3D-object contract (rejected — ray pick kept); its
+  regenerated template lost the logic bricks AND game properties (pressing P
+  does nothing until a UI Setup Scene run) and shipped fileless white images
+  in TexImage nodes (player startup segfault; bisected in this branch).
+- Live-verified in the player (llvmpipe): template + `UPVN_IMAGES=auto`
+  renders `assets/sprites/eileen_happy.png` on Sprite_center and the
+  classroom PNG across the full background; converted Ren'Py project still
+  plays via the image bank. Evidence:
+  `examples/20_smoke_game/evidence/m26b_*.png`, `screenshots/m26/*`.
+- Tests: **295 passed, 16 skipped** (template-graph assertions run the real
+  blender binary when present).
+
 ## 0.6.13 — 2026-09-10 M26 Desktop GUI verification + texture-free palette + Ren'Py converter
 
 Goal: "Run this engine in desktop (see docs how), fix all errors until usable

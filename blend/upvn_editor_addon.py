@@ -45,7 +45,7 @@ Headless fallback: when bpy unavailable (CI), the module still imports and expos
 bl_info = {
     "name": "UPVN — Visual Novel Editor",
     "author": "UPVN",
-    "version": (0, 6, 13),
+    "version": (0, 6, 14),
     "blender": (4, 2, 0),
     "location": "View3D > Sidebar > UPVN, Text Editor > Sidebar > UPVN",
     "description": "Create Ren'Py-like visual novel inside UPBGE with minimal coding — self-contained engine, one-click scene setup, characters, scenes, dialogue, menus, arbitrary saves, preview",
@@ -853,6 +853,16 @@ except Exception:
                          [], [(0, 1, 2, 3)])
         mesh.update()
         mesh.name = name + "_mesh"
+        # M26b: TexImage nodes sample through UVs — from_pydata creates no UV
+        # layer and textures then render black (or crash on fileless images)
+        # in the player. Every VN plane gets a full 0..1 quad UV.
+        try:
+            uv = mesh.uv_layers.new(name="UVMap")
+            for i, (u, v) in enumerate(((0.0, 0.0), (1.0, 0.0),
+                                        (1.0, 1.0), (0.0, 1.0))):
+                uv.data[i].uv = (u, v)
+        except Exception:
+            pass
         mat = bpy.data.materials.new(name="MA" + name)
         mat.use_nodes = True
         try:
@@ -869,7 +879,26 @@ except Exception:
         obj.data.materials.append(mat)
         return obj
 
-    def _rewrite_unlit(mat, color):
+    def _ensure_white_image(_b):
+        """1×1 white PNG, packed into the blend. NEVER ship a fileless
+        generated image in a TexImage node: the player segfaults at startup
+        on those (M26b field-verified; packed/file-backed are safe)."""
+        img = _b.data.images.get(WHITE_IMAGE_NAME)
+        if img is None:
+            img = _b.data.images.new(WHITE_IMAGE_NAME, 1, 1, alpha=True)
+            try:
+                img.pixels = [1.0, 1.0, 1.0, 1.0]
+            except Exception:
+                pass
+        try:
+            if not img.packed_file:
+                img.file_format = "PNG"
+                img.pack()
+        except Exception:
+            pass
+        return img
+
+    def _rewrite_unlit(mat, color, _b=None, tex_capable=False):
         """Emission-only, texture-free — VN planes must not pick up scene
         lights, and their color is driven at runtime via KX_GameObject.color.
 
@@ -892,15 +921,41 @@ except Exception:
         out = nt.nodes.new("ShaderNodeOutputMaterial")
         em = nt.nodes.new("ShaderNodeEmission")
         objinfo = nt.nodes.new("ShaderNodeObjectInfo")
+        src_color = objinfo.outputs["Color"]
+        if tex_capable and _b is not None:
+            # M26b: texture-capable graph — Mix(A=ObjectInfo.Color,
+            # B=TexImage.Color, Factor=0). Factor 0 → palette (object color);
+            # the runtime flips Factor to 1.0 when it assigns a real image
+            # (contract.apply_material_image). One material per sprite plane
+            # so sprites texture independently.
+            tex = nt.nodes.new("ShaderNodeTexImage")
+            tex.name = TEX_NODE_NAME
+            try:
+                tex.interpolation = "Closest"
+            except Exception:
+                pass
+            tex.image = _ensure_white_image(_b)
+            mix = nt.nodes.new("ShaderNodeMix")
+            mix.name = MIX_NODE_NAME
+            try:
+                mix.data_type = "RGBA"              # colors, not float
+                mix.inputs[0].default_value = 0.0   # Factor → palette default
+                nt.links.new(objinfo.outputs["Color"], mix.inputs[6])
+                nt.links.new(tex.outputs["Color"], mix.inputs[7])
+                nt.links.new(mix.outputs[2], em.inputs["Color"])
+            except Exception:
+                nt.links.new(objinfo.outputs["Color"], em.inputs["Color"])
+            src_color = None
         try:
             em.inputs["Color"].default_value = color
             em.inputs["Strength"].default_value = 1.0
         except Exception:
             pass
-        try:
-            nt.links.new(objinfo.outputs["Color"], em.inputs["Color"])
-        except Exception:
-            pass
+        if src_color is not None:
+            try:
+                nt.links.new(src_color, em.inputs["Color"])
+            except Exception:
+                pass
         nt.links.new(em.outputs[0], out.inputs[0])
         for attr, val in (("blend_method", "OPAQUE"), ("shadow_method", "NONE"),
                           ("use_backface_culling", False)):
@@ -1105,25 +1160,38 @@ except Exception:
             from engine.render.contract import (BG_PLANE, BG_MATERIAL,
                                                 SPRITE_MATERIAL, SPRITE_POSITIONS,
                                                 POSITIONS, DIALOGUE_PLANE,
-                                                IMAGE_MODE_DEFAULT)
+                                                IMAGE_MODE_DEFAULT,
+                                                TEX_NODE_NAME, MIX_NODE_NAME,
+                                                WHITE_IMAGE_NAME)
         except Exception:
             BG_PLANE, BG_MATERIAL = "BG_Plane", "MABackground"
             SPRITE_MATERIAL, DIALOGUE_PLANE = "MASprite", "Dialogue_Box"
             IMAGE_MODE_DEFAULT = "color"
+            TEX_NODE_NAME, MIX_NODE_NAME = "UPVN Tex Image", "UPVN Tex Mix"
+            WHITE_IMAGE_NAME = "UPVN_White1px"
             SPRITE_POSITIONS = ("far_left", "left", "center", "right", "far_right")
             POSITIONS = {p: ({"far_left": -5.0, "left": -3.0, "center": 0.0,
                               "right": 3.0, "far_right": 5.0}[p], -0.15, 0.0)
                          for p in SPRITE_POSITIONS}
 
-        def _ensure_material(_b, name, color):
+        def _ensure_material(_b, name, color, tex_capable=False):
             mat = _b.data.materials.get(name)
             if mat is None:
                 mat = _b.data.materials.new(name)
-            _rewrite_unlit(mat, color)
+            _rewrite_unlit(mat, color, _b=_b, tex_capable=tex_capable)
+            try:
+                mat.use_fake_user = True   # survive save when unused
+            except Exception:
+                pass
             return mat
 
-        mat_bg = _ensure_material(_b, BG_MATERIAL, (0.12, 0.14, 0.22, 1.0))
+        mat_bg = _ensure_material(_b, BG_MATERIAL, (0.12, 0.14, 0.22, 1.0),
+                                  tex_capable=True)
         mat_sprite = _ensure_material(_b, SPRITE_MATERIAL, (0.62, 0.78, 0.55, 1.0))
+        # one texture-capable material per sprite plane → per-sprite textures
+        for _pos in SPRITE_POSITIONS:
+            _ensure_material(_b, f"{SPRITE_MATERIAL}_{_pos}",
+                             (0.62, 0.78, 0.55, 1.0), tex_capable=True)
         mat_ui = _ensure_material(_b, "MAUI", (0.05, 0.06, 0.14, 1.0))
         mat_choice = _ensure_material(_b, "MAChoice", (0.12, 0.18, 0.32, 1.0))
         mat_font = _ensure_material(_b, "MAFont", (0.92, 0.93, 1.0, 1.0))
@@ -1156,7 +1224,9 @@ except Exception:
 
         bg = scene.objects.get(BG_PLANE)
         if bg is None:
-            bg = _data_plane(BG_PLANE, size=10.0, rot=PLANE_ROTATION)
+            # size 18: the ortho frustum is 15 wide (Camera_UI); a 10-unit
+            # plane left black bars on 16:9 windows (M26b field finding)
+            bg = _data_plane(BG_PLANE, size=18.0, rot=PLANE_ROTATION)
             _single_material(bg, mat_bg)
             scene.collection.objects.link(bg)
             collections["VN_Backgrounds"].objects.link(bg)
@@ -1254,7 +1324,8 @@ except Exception:
                 scene.collection.objects.link(sp)
                 collections["VN_Characters"].objects.link(sp)
             _apply_2d_layout(sp, loc, SPRITE_SCALE)
-            _single_material(sp, mat_sprite)
+            _single_material(sp, _b.data.materials.get(f"{SPRITE_MATERIAL}_{pos}")
+                             or mat_sprite)
             _tint(sp, (0.62, 0.78, 0.55, 1.0))
             _static_ghost(sp)
             try:
