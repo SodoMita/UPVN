@@ -1,3 +1,24 @@
+# Current Status — 2026-09-10 (M26 Desktop GUI verification DONE, branch feat/desktop-gui)
+
+## Last completed
+- **M26 Desktop GUI + texture-free palette + Ren'Py converter (branch
+  `feat/desktop-gui`)**: engine verified live in UPBGE 0.50 (Blender 5.0.1)
+  on the headless-Wayland desktop (docs/how agent can run desktop.md).
+  Startup segfault root-caused (audio_device userpref, see CHANGELOG 0.6.13);
+  template + sample scenes play with ZERO image textures (Object Info →
+  Emission palette, image_mode policy); mouse choices fixed (SENSOR is not
+  rayCast-hittable in 0.50 → STATIC+BOX; ortho getScreenRay dead → manual
+  frustum rayCast; mouse y from window top); opening sprite hidden-after-load
+  fixed; Setup Scene no longer clobbers script_path; UPVN panel verified in
+  the editor GUI (Engine OK, Setup Scene status, game properties show
+  image_mode); Ctrl+S/Ctrl+L round-trip re-verified in GUI;
+  **tools/renpy_convert.py** converts a Ren'Py project to a playable UPVN
+  project (image bank bake, palette fallback) — verified end-to-end with a
+  fake Ren'Py game. Addon v0.6.13 (dist zip). Tests: 290 passed / 16 skipped.
+  Evidence: examples/20_smoke_game/evidence/m26_*.png, screenshots/m26/*.
+  Embedded P in-editor works but needs ~1.6 GB RSS (OOM below that in the
+  2 GB sandbox; standalone player is the lean path here).
+
 # Current Status — 2026-09-10 (M25 Usability Stabilization Freeze DONE)
 
 ## Last completed

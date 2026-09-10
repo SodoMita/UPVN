@@ -168,11 +168,12 @@ def stage_color(asset: str) -> tuple:
 
 def sprite_color(tag: str) -> tuple:
     """Palette tint for a character tag (RGBA 0..1), hash fallback."""
+    import re
     key = (tag or "").lower().strip()
     if key in SPRITE_TINTS:
         rgb = SPRITE_TINTS[key]
         return (rgb[0], rgb[1], rgb[2], 1.0)
-    for token in key.split("_"):
+    for token in re.split(r"[\s_/-]+", key):
         if token in SPRITE_TINTS:
             rgb = SPRITE_TINTS[token]
             return (rgb[0], rgb[1], rgb[2], 1.0)

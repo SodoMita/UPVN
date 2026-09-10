@@ -27,8 +27,15 @@ apt install sway wtype grim xwayland x11-xserver-utils xdotool imagemagick \
    ```
    Expect in the log: `HEADLESS-1` output, `wayland-1` display, XWayland
    lazy-starting `/tmp/.X11-unix/X0` ⇒ **DISPLAY=:0**.
-3. One-time UPBGE userpref prep (BUG-006): audio device valid/None-object +
-   launcher autoexec, else the player segfaults at startup.
+3. One-time UPBGE userpref prep (BUG-006/BUG-016, exact Blender 5.0 API):
+   ```bash
+   LIBGL_ALWAYS_SOFTWARE=1 ./blender --background --python-expr \
+     "import bpy; bpy.context.preferences.system.audio_device='None'; \
+      bpy.context.preferences.filepaths.use_scripts_auto_execute=True; \
+      bpy.ops.wm.save_userpref()"
+   ```
+   (5.0 moved audio prefs to `preferences.system`; without this the player
+   SIGSEGVs in `AUD_Device_setSpeedOfSound` before the first frame.)
 4. Play:
    ```bash
    DISPLAY=:0 LIBGL_ALWAYS_SOFTWARE=1 \
@@ -85,3 +92,20 @@ quits on Esc at engine level, modal or not (BUG-011).
 - Keep the UPBGE tarball mirror inside the workspace (`tmp/upbge.tar.xz`):
   sandbox reprovisions wipe installed packages and big binaries between
   sessions; the 408 MB download is the slowest recovery step.
+
+## UPBGE 0.50 runtime API findings (M26, all verified live)
+
+- `KX_GameObject.rayCast` does NOT see `physics_type='SENSOR'` objects —
+  ray-target plates must be `STATIC` (+ BOX collision bounds).
+- `Camera.getScreenRay` returns None on orthographic cameras.
+- `KX_Scene.rayCast` does not exist — cast from a camera/object.
+- `bge.logic.mouse.position` y is measured from the window TOP.
+- `bge.texture.Texture` cannot bind node-based (Emission) materials —
+  "Texture is not available"; use editor-assigned image planes or object
+  color tints.
+- `blender -w WxH+X+Y` opens the editor windowed (the argument before the
+  blend is still parsed as a file — order matters: `-w 800x450+0+0 file.blend`).
+- Embedded P (editor) needs ~1.6 GB RSS; on 2 GB hosts it gets OOM-killed
+  (~2 s after engine start) — use the standalone blenderplayer there.
+- `tools/desktop_run.sh` wraps the env-correct standalone player run
+  (DISPLAY, LIBGL_ALWAYS_SOFTWARE, SDL dummy audio, heartbeat + debug tee).

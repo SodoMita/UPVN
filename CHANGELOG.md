@@ -1,5 +1,70 @@
 # Changelog
 
+## 0.6.13 — 2026-09-10 M26 Desktop GUI verification + texture-free palette + Ren'Py converter
+
+Goal: "Run this engine in desktop (see docs how), fix all errors until usable
+in the Blender GUI, sample scene without image textures, keep a Ren'Py →
+UPVN path." All verified live on the headless-Wayland desktop (sway +
+XWayland + llvmpipe, UPBGE 0.50 / Blender 5.0.1).
+
+- **Startup segfault (P0) root-caused**: factory userprefs ship
+  `audio_device='PulseAudio'`; `AUD_Device_setSpeedOfSound` in
+  `LA_Launcher::InitEngine` dereferences the unavailable device → SIGSEGV
+  before the first frame. Fix: `bpy.context.preferences.system.audio_device =
+  'None'` once (recipe in docs/SANDBOX_UPBGE.md; Blender 5.0 moved audio
+  prefs from `preferences.audio` to `preferences.system`).
+- **Texture-free palette (sample scene + template play with zero PNGs)**:
+  materials are now `Output ← Emission ← Object Info.Color`, so
+  `KX_GameObject.color` paints everything at runtime. `contract.py` gains
+  COLOR_STAGES / SPRITE_TINTS / hash fallback, `stage_color()`,
+  `sprite_color()`, `apply_object_color()`. Renderers log decisions.
+  Deterministic (`hashlib`, not `hash()`).
+- **image_mode policy**: env `UPVN_IMAGES` > VNController game property
+  `image_mode` > default `color`. `color` never touches image files; `auto`
+  (written by the converter) uses converted-project art with palette
+  fallback. Setup Scene writes the property (dual representation).
+- **BUG-012 (P0)**: `SENSOR` physics is invisible to `KX_GameObject.rayCast`
+  in UPBGE 0.50 — every mouse choice click missed. Plates are now
+  `STATIC + BOX` (addon `_static_ghost`, template, updater tool).
+- **BUG-013 (P1)**: `Camera.getScreenRay` always returns None on ortho
+  cameras in UPBGE 0.50; `KX_Scene.rayCast` does not exist. Frontend now
+  shoots a manual frustum ray via `cam.rayCast` (mouse y is measured from the
+  window TOP — verified in-field). Mouse choice selection works end-to-end.
+- **BUG-014 (P1)**: `_hide_idle_sprites()` ran after `ctrl.load()` and hid
+  the opening `show` sprite (stage color changed, sprite never appeared,
+  zero errors). It now keeps planes claimed by `sprite_mgr`.
+- **BUG-015 (P1)**: Setup Scene clobbered a configured `script_path` with the
+  panel default `//game/script.rpy`; panel + `build_vn_scene` now adopt the
+  blend's existing value when the caller passes the default.
+- **Diagnostics**: `UPVN_DEBUG_TEE` env mirrors Python stdout/stderr to a
+  file (player stdout is block-buffered and lost on kill -9); pointer ticks
+  log hover/click changes; `UPVN_POINTER_PROBE=1` prints a physics ray probe;
+  addon version banner v0.6.13.
+- **Ren'Py → UPVN converter**: `tools/renpy_convert.py` (uses
+  `tools/check_renpy_project.find_script_dir`/`check_project`) builds a
+  self-contained project: `game/` scripts (dir-merged at runtime),
+  `assets/{backgrounds,sprites}` from `game/images`, audio, runtime snapshot,
+  wired template (`script_path=//../game`, `image_mode=auto`), parse report +
+  `README_PLAY.txt`. `tools/wire_converted_blend.py` bakes an **image bank**
+  (one plane per asset, UV-mapped, packed textures — `bge.texture` cannot
+  bind node materials in 0.50: "Texture is not available"). Frontend accepts
+  **directories** as script sources. Verified end-to-end in the GUI with a
+  fake Ren'Py project (images, branching, mouse choices).
+- **Desktop tooling**: `tools/desktop_run.sh` (env-correct player launcher);
+  `tools/update_template_materials.py` (in-place template upgrade, logic
+  bricks preserved — `make_template.py` cannot add bricks in
+  `--background`).
+- **Addon v0.6.13**: object tints seeded per object, `image_mode` prop,
+  STATIC physics for ray targets, script_path preservation. Zipped to
+  `dist/upvn_editor_addon_v0.6.13.zip` (v0.6.12 zip also rebuilt).
+- Evidence: `examples/20_smoke_game/evidence/m26_*.png`,
+  `screenshots/m26/*` (palette stages, choice plates, converted Ren'Py game
+  with real images, editor panel + Setup Scene status).
+- Tests: **290 passed, 16 skipped** (`tests/test_m26_desktop_gui.py` adds 14).
+- Known environment limits (not engine bugs, measured): embedded P in the
+  editor needs ~1.6 GB RSS — OOM-killed below that in the 2 GB sandbox;
+  llvmpipe at 1024×576 renders 13–19 fps on 2 vCPUs.
+
 ## 0.6.12 — 2026-09-10 M25 Usability Stabilization Freeze
 
 - **BUG-009 (P0)**: UPBGE 0.50 `KX_GameObject` exposes only
