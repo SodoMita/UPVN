@@ -45,7 +45,7 @@ Headless fallback: when bpy unavailable (CI), the module still imports and expos
 bl_info = {
     "name": "UPVN — Visual Novel Editor",
     "author": "UPVN",
-    "version": (0, 6, 13),
+    "version": (0, 6, 14),
     "blender": (4, 2, 0),
     "location": "View3D > Sidebar > UPVN, Text Editor > Sidebar > UPVN",
     "description": "Create Ren'Py-like visual novel inside UPBGE with minimal coding — self-contained engine, one-click scene setup, characters, scenes, dialogue, menus, arbitrary saves, preview",
@@ -874,10 +874,15 @@ except Exception:
     def _rewrite_unlit(mat, color):
         """Emission-only — VN planes must not pick up scene lights.
 
-        Desktop path: no image textures at all (software GL llvmpipe/lavapipe
-        friendly). Material is pure emission; BGE side tints via object.color
-        (palette in engine/render/contract.py). This avoids the vt.Texture
-        / TexImage mismatch that made plates black on some drivers.
+        Textures are essential: material carries an Image Texture node so
+        bge.texture (VideoTexture) can bind at runtime. The node is left
+        unlinked when no image is assigned — that avoids the black-plate
+        bug (BUG-005) where an unassigned TexImage linked to Emission
+        forces black. At runtime SceneManager/SpriteRenderer will either
+        bind a real PNG via vt.Texture or fall back to object.color
+        palette (contract.py) when no file exists — works on both
+        llvmpipe (GL) and lavapipe (Vulkan) because palette is solid
+        emission, no decoding needed.
         """
         mat.use_nodes = True
         nt = mat.node_tree
@@ -887,11 +892,20 @@ except Exception:
             pass
         out = nt.nodes.new("ShaderNodeOutputMaterial")
         em = nt.nodes.new("ShaderNodeEmission")
+        tex = nt.nodes.new("ShaderNodeTexImage")
+        tex.location = (-280, 0)
         try:
             em.inputs["Color"].default_value = color
             em.inputs["Strength"].default_value = 1.0
         except Exception:
             pass
+        # Only link TexImage -> Emission when an image is already assigned;
+        # otherwise the unassigned node evaluates to black.
+        if getattr(tex, "image", None) is not None:
+            try:
+                nt.links.new(tex.outputs["Color"], em.inputs["Color"])
+            except Exception:
+                pass
         nt.links.new(em.outputs[0], out.inputs[0])
         for attr, val in (("blend_method", "OPAQUE"), ("shadow_method", "NONE"),
                           ("use_backface_culling", False)):
@@ -919,10 +933,17 @@ except Exception:
         try:
             g = obj.game
             try:
-                g.physics_type = "SENSOR"
-            except Exception:
                 g.physics_type = "STATIC"
-                g.use_ghost = True
+                g.use_ghost = False
+            except Exception:
+                try:
+                    g.physics_type = "STATIC"
+                except Exception:
+                    pass
+                try:
+                    g.use_ghost = False
+                except Exception:
+                    pass
             try:
                 g.use_collision_bounds = True
                 g.collision_bounds_type = "BOX"
@@ -930,6 +951,11 @@ except Exception:
                 pass
         except Exception:
             pass
+
+    def _clickable_ghost(obj):
+        # identical to _static_ghost — kept as alias for choice plates; they
+        # must be STATIC non-ghost so cam.rayCast (xray=False) hits them.
+        return _static_ghost(obj)
 
     def _link_ob(scene, ob, col=None):
         try:
@@ -1891,6 +1917,77 @@ except Exception:
             return {'FINISHED'}
 
 
+
+    class UPVN_OT_OpenProject(bpy.types.Operator):
+        bl_idname = "upvn.open_project"
+        bl_label = "Open UPVN Project"
+        bl_description = "Pick a UPVN game script (game/script.rpy) — sets project_path and validates"
+        filepath: bpy.props.StringProperty(subtype='FILE_PATH', options={'HIDDEN'})
+        directory: bpy.props.StringProperty(subtype='DIR_PATH', options={'HIDDEN'})
+        def invoke(self, context, event):
+            context.window_manager.fileselect_add(self)
+            return {'RUNNING_MODAL'}
+        def execute(self, context):
+            import pathlib
+            # filepath may be a file, directory may be folder
+            raw = self.filepath or self.directory
+            if not raw:
+                raw = getattr(context.scene.upvn_props, "project_path", "")
+            try:
+                sel = pathlib.Path(bpy.path.abspath(raw)) if raw else None
+            except Exception:
+                sel = None
+            if sel and sel.is_file() and sel.suffix in (".rpy", ".urpy"):
+                # set project_path to the selected file (keeps // relative if possible)
+                try:
+                    # try to make // relative to blend file
+                    blend_dir = pathlib.Path(bpy.path.abspath("//")).resolve()
+                    rel = sel.resolve().relative_to(blend_dir)
+                    context.scene.upvn_props.project_path = "//" + str(rel).replace("\\", "/")
+                except Exception:
+                    context.scene.upvn_props.project_path = str(sel)
+                # also set VNController property for immediate play
+                try:
+                    from blend.upvn_editor_addon import _set_runtime_prop
+                    ctrl = context.scene.objects.get("VNController")
+                    if ctrl:
+                        _set_runtime_prop(bpy, ctrl, "script_path", context.scene.upvn_props.project_path)
+                except Exception:
+                    pass
+                self.report({'INFO'}, f"Project set to {context.scene.upvn_props.project_path}")
+            elif sel and sel.is_dir():
+                # directory: look for game/script.rpy inside
+                cand = sel / "game" / "script.rpy"
+                if cand.exists():
+                    try:
+                        blend_dir = pathlib.Path(bpy.path.abspath("//")).resolve()
+                        rel = cand.resolve().relative_to(blend_dir)
+                        context.scene.upvn_props.project_path = "//" + str(rel).replace("\\", "/")
+                    except Exception:
+                        context.scene.upvn_props.project_path = str(cand)
+                    self.report({'INFO'}, f"Project set to {context.scene.upvn_props.project_path}")
+                else:
+                    # just set to the directory's game/script.rpy
+                    context.scene.upvn_props.project_path = str(cand) if str(cand).startswith("//") else "//game/script.rpy"
+                    self.report({'WARNING'}, f"Set to {context.scene.upvn_props.project_path} — file not yet found")
+            else:
+                self.report({'ERROR'}, f"Select a .rpy file or UPVN project folder: {raw}")
+                return {'CANCELLED'}
+            # auto-validate
+            try:
+                ok, info = ensure_engine(retry=True)
+                if ok:
+                    from blend.upvn_editor_addon import _engine_api
+                    _p, _, _ = _engine_api
+                    text = pathlib.Path(bpy.path.abspath(context.scene.upvn_props.project_path)).read_text(encoding="utf-8") if pathlib.Path(bpy.path.abspath(context.scene.upvn_props.project_path)).exists() else ""
+                    if text:
+                        _p.parse_string(text, filename=context.scene.upvn_props.project_path)
+                        self.report({'INFO'}, "Validate OK")
+            except Exception as e:
+                self.report({'WARNING'}, f"Project set but validate: {e}")
+            return {'FINISHED'}
+
+
     def _builder_from_file(path: str) -> UPVN_GameBuilder:
         """Load existing script.rpy into builder preserving labels (v0.5 fix)."""
         # Use UPVN_GameBuilder's own preservation logic (it loads _existing_text)
@@ -1936,7 +2033,9 @@ except Exception:
             layout.separator()
             layout.label(text="Project", icon='FILE_FOLDER')
             layout.prop(props, "project_path")
-            layout.operator("upvn.create_project", icon='ADD')
+            row = layout.row(align=True)
+            row.operator("upvn.create_project", icon='ADD', text="Create")
+            row.operator("upvn.open_project", icon='FILE_FOLDER', text="Open…")
             layout.separator()
             if _has_game_support():
                 box = layout.box()
@@ -1951,37 +2050,10 @@ except Exception:
             else:
                 layout.label(text="Run inside UPBGE for play (Setup Scene)", icon='INFO')
                 layout.separator()
-            layout.label(text="Characters (no coding)", icon='USER')
-            layout.prop(props, "char_id")
-            layout.prop(props, "char_name")
-            layout.prop(props, "char_color")
-            layout.operator("upvn.add_character", icon='ADD')
-            layout.separator()
-            layout.label(text="Scene & Sprites (asset browser)", icon='IMAGE_DATA')
-            layout.prop(props, "bg_name")
-            layout.prop(props, "bg_image")
-            layout.operator("upvn.add_scene", icon='SCENE_DATA')
-            layout.prop(props, "show_asset")
-            layout.prop(props, "show_pos")
-            layout.prop(props, "show_trans")
-            layout.prop(props, "sprite_image")
-            layout.prop(props, "side_image")
-            layout.operator("upvn.add_show", icon='OBJECT_DATA')
-            layout.operator("upvn.add_stage", icon='MESH_CUBE')
-            layout.prop(props, "stage_name")
-            layout.separator()
-            layout.label(text="Dialogue", icon='SPEAKER')
-            layout.prop(props, "speaker")
-            layout.prop(props, "dialogue")
-            layout.operator("upvn.add_dialogue", icon='ADD')
-            layout.separator()
-            layout.label(text="Menu (branching)", icon='QUESTION')
-            layout.prop(props, "menu_caption")
-            layout.prop(props, "menu_choice1")
-            layout.prop(props, "menu_jump1")
-            layout.prop(props, "menu_choice2")
-            layout.prop(props, "menu_jump2")
-            layout.operator("upvn.add_menu", icon='ADD')
+            box = layout.box()
+            box.label(text="Script-only workflow", icon='TEXT')
+            box.label(text="Edit game/script.rpy directly", icon='INFO')
+            box.label(text="in Text Editor → UPVN → Validate / Preview", icon='INFO')
             layout.separator()
             layout.label(text="Tools", icon='TOOL_SETTINGS')
             row = layout.row(align=True)

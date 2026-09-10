@@ -223,7 +223,11 @@ def _object_under_cursor():
                 vect = cam.getScreenVect(x, y)
                 origin = cam.worldPosition
                 target = origin + vect * 80.0
-                hit, _p, _n = cam.rayCast(target, origin, 80.0)
+                # xray=True so ghost plates still hit; property filter none.
+                try:
+                    hit, _p, _n = cam.rayCast(target, origin, 80.0, "", 0, 1, 0)
+                except TypeError:
+                    hit, _p, _n = cam.rayCast(target, origin, 80.0)
             except Exception:
                 hit = None
         if hit is None:

@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.6.14 — 2026-09-10 Textures essential + script-only, click fix
+
+- **Textures are essential again** (reverts palette-only 0.6.13): `blend/upvn_editor_addon.py`
+  `_rewrite_unlit` now keeps an **Image Texture** node (unlinked when no image)
+  so `bge.texture` (`vt.Texture`/`ImageFFmpeg`) can bind at runtime.
+  `engine/render/scene_manager.py` + `sprite_renderer.py` try **real PNG**
+  first (`//assets/backgrounds`, `//game/assets/backgrounds`, `//assets/sprites` …);
+  on miss or bind failure they fall back to `object.color` palette
+  (`engine/render/contract.py` `BG_PALETTE`/`SPRITE_PALETTE`) — works on
+  **llvmpipe** (GL, what UPBGE uses) and **lavapipe** (Vulkan) without assets,
+  but shows true art when present. Fixes black Eileen texture.
+
+- **Script-only workflow** (per report helpers made no sense):
+  Blender panel now has **only** Project row (**Create Project** + **Open Project**
+  file-browser that sets `project_path` `//` relative and syncs `VNController`
+  `script_path` game prop) + **Blender Setup** (Setup Scene / Check Wiring /
+  Validate / Preview) + Engine status + Ren'Py → UPVN. Removed
+  Add Character / Add Scene / Add Show / Dialogue / Menu branching blocks —
+  `game/script.rpy` edited in Text Editor is the source of truth; converter kept.
+
+- **Clicking choices fixed**: `blend/upvn_editor_addon.py` `_static_ghost` now
+  `STATIC` non-ghost `BOX` (so `cam.rayCast` with `xray=False` hits), and
+  `bge_frontend/frontend.py` `_object_under_cursor` uses `rayCast(..., xray=1)`
+  fallback — LMB on `choice_N` planes now reaches `VNController.choose`.
+
+- **Setup Scene easy open**: `UPVN_OT_OpenProject` (`INVOKE_DEFAULT` fileselect,
+  `FILE_PATH` sets directory, `//` relative, auto-Validate). Project row is
+  two buttons; template white emission (1,1,1) base so texture shows true colours
+  and palette fallback is faithful.
+
 ## 0.6.13 — 2026-09-10 Desktop no-texture palette + Ren'Py converter (llvmpipe/lavapipe)
 
 - **Palette instead of textures**: `engine/render/contract.py` `BG_PALETTE`/`SPRITE_PALETTE`

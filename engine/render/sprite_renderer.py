@@ -2,10 +2,9 @@
 Sprite Renderer — 2D planes for characters (Tier2+)
 Hybrid support: sprites can coexist with 3D stage (Option C).
 
-UPBGE: planes at POSITIONS (world coords), colour tint via object.color on
-       white emission materials — NO image textures (desktop-friendly, works on
-       llvmpipe and lavapipe software GL without bge.texture).
-Headless: state.shown_actors is source of truth; renderer just validates.
+UPBGE: tries bge.texture (real PNG) first; falls back to palette colour
+       (object.color) when no file — textures essential but palette keeps
+       desktop usable without assets, works on llvmpipe/lavapipe.
 
 Accepted positions (SCRIPT_LANGUAGE_SPEC): left/center/right/far_left/far_right
 and optional 'at' offset — e.g. show eileen happy at center
@@ -19,10 +18,9 @@ except ImportError:
 
 from ..core.vn_state import VNState
 from .contract import (POSITIONS, SPRITE_MATERIAL, SPRITE_FALLBACK_TAG,
-                       SPRITE_TAG_PREFIX, BG_PLANE, sprite_color_for)
+                       SPRITE_TAG_PREFIX, BG_PLANE, ASSET_SPRITES, sprite_color_for)
 import time
 
-# transition durations (seconds)
 TRANS_DUR = {"dissolve": 0.4, "fade": 0.5, None: 0.0}
 
 class SpriteRenderer:
@@ -59,10 +57,10 @@ class SpriteRenderer:
             self._bge_hide(tag, transition)
         self.planes.pop(tag, None)
 
-    # ---------------- BGE implementation (no textures)
     def _bge_show(self, tag: str, asset: str, position: str, transition: str | None):
         try:
-            scene = bge.logic.getCurrentScene()  # type: ignore
+            import bge.logic as logic
+            scene = logic.getCurrentScene()  # type: ignore
             plane_name = f"{SPRITE_TAG_PREFIX}{position}"
             plane = (scene.objects.get(plane_name)
                      or scene.objects.get(f"{SPRITE_TAG_PREFIX}{tag}")
@@ -76,7 +74,77 @@ class SpriteRenderer:
                     return
             plane.worldPosition = POSITIONS[position]  # type: ignore
             plane.visible = True
-            # colour from palette / character registry
+            # try texture first
+            if self._try_texture(plane, tag, asset, position, transition):
+                return
+            # fallback to palette colour
+            self._apply_color(plane, tag, asset, position, transition)
+        except Exception as e:
+            print(f"[SpriteRenderer] show {tag} {asset} failed: {e}")
+
+    def _try_texture(self, plane, tag: str, asset: str, position: str, transition: str | None) -> bool:
+        try:
+            import bge.texture as vt
+            import os, bge
+            stem = asset.replace(" ", "_")
+            slash = asset.replace(" ", "/")
+            last = asset.split()[-1] if " " in asset else "neutral"
+            candidates = [
+                bge.logic.expandPath(f"//{ASSET_SPRITES}/{slash}.png"),
+                bge.logic.expandPath(f"//{ASSET_SPRITES}/{stem}.png"),
+                bge.logic.expandPath(f"//{ASSET_SPRITES}/{tag}.png"),
+                bge.logic.expandPath(f"//game/{ASSET_SPRITES}/{slash}.png"),
+                bge.logic.expandPath(f"//game/{ASSET_SPRITES}/{stem}.png"),
+                bge.logic.expandPath(f"//assets/characters/{tag}/{last}.png"),
+                bge.logic.expandPath(f"//assets/sprites/{tag}.png"),
+            ]
+            for ext in (".png", ".jpg", ".webp"):
+                candidates.append(bge.logic.expandPath(f"//{ASSET_SPRITES}/{stem}{ext}"))
+            tex_path = None
+            for p in candidates:
+                if os.path.exists(p):
+                    tex_path = p
+                    break
+            if not tex_path:
+                return False
+            try:
+                mat_id = vt.materialID(plane, SPRITE_MATERIAL)
+            except Exception:
+                mat_id = -1
+            if mat_id < 0:
+                mat_id = 0
+            img = vt.ImageFFmpeg(tex_path)
+            img.scale = False
+            tex = vt.Texture(plane, mat_id)
+            tex.source = img
+            # store
+            try:
+                plane["upvn_tag"] = tag
+                plane["upvn_asset"] = asset
+                plane["upvn_tex_path"] = tex_path
+                plane.color = (1,1,1,1)
+            except Exception:
+                pass
+            self.planes[tag] = {"obj": plane, "tex": tex, "asset": asset, "position": position, "t0": time.time(), "transition": transition, "target_color": (1,1,1,1)}
+            if transition in ("dissolve", "fade"):
+                try:
+                    plane.color = (1,1,1,0.0)
+                except Exception:
+                    pass
+            return True
+        except Exception as e:
+            # don't spam, but log once
+            try:
+                import bge
+                if not getattr(bge.logic, "_upvn_sprite_tex_err", False):
+                    bge.logic._upvn_sprite_tex_err = True
+                    print(f"[SpriteRenderer] texture bind failed for {asset}: {e}")
+            except Exception:
+                pass
+            return False
+
+    def _apply_color(self, plane, tag: str, asset: str, position: str, transition: str | None):
+        try:
             ch_color = None
             try:
                 ch = self.state.characters.get(tag)
@@ -85,30 +153,26 @@ class SpriteRenderer:
             except Exception:
                 pass
             col = sprite_color_for(tag, asset, ch_color)
-            # store for debug
             try:
                 plane["upvn_tag"] = tag
                 plane["upvn_asset"] = asset
                 plane["upvn_color"] = col
             except Exception:
                 pass
-            # apply colour with alpha tween for dissolve/fade
             if transition in ("dissolve", "fade"):
                 try:
                     plane.color = (col[0], col[1], col[2], 0.0)
                 except Exception:
                     pass
-                self.planes[tag] = {"obj": plane, "asset": asset, "position": position,
-                                    "t0": time.time(), "transition": transition, "target_color": col}
+                self.planes[tag] = {"obj": plane, "asset": asset, "position": position, "t0": time.time(), "transition": transition, "target_color": col}
             else:
                 try:
                     plane.color = col
                 except Exception:
                     pass
-                self.planes[tag] = {"obj": plane, "asset": asset, "position": position,
-                                    "target_color": col, "t0": time.time(), "transition": None}
+                self.planes[tag] = {"obj": plane, "asset": asset, "position": position, "target_color": col, "t0": time.time(), "transition": None}
         except Exception as e:
-            print(f"[SpriteRenderer] show {tag} {asset} failed: {e}")
+            print(f"[SpriteRenderer] color fallback failed {tag} {asset}: {e}")
 
     def _bge_hide(self, tag: str, transition: str | None):
         try:
@@ -173,12 +237,16 @@ class SpriteRenderer:
             trans = info.get("transition")
             t0 = info.get("t0")
             target = info.get("target_color") or (1,1,1,1)
+            # only do alpha fade for colour fallback; texture path already handled via plane.color
             if trans in ("dissolve","fade") and t0:
                 dur = TRANS_DUR.get(trans, 0.4)
                 t = min(1.0, (now - t0)/dur) if dur>0 else 1.0
                 try:
-                    # fade in: alpha 0->1, keep RGB at target
-                    obj.color = (target[0], target[1], target[2], t)
+                    # if this was a texture, keep white; if colour, use target rgb
+                    if target == (1,1,1,1):
+                        obj.color = (1,1,1,t)
+                    else:
+                        obj.color = (target[0], target[1], target[2], t)
                 except Exception:
                     pass
                 if t >= 1.0:
