@@ -283,6 +283,49 @@ def _bind_camera():
         pass
 
 
+def _install_debug_tee(logic):
+    """Mirror Python stdout/stderr into a file when UPVN_DEBUG_TEE is set.
+
+    The standalone player's stdout is block-buffered and lost on kill -9, so
+    field diagnostics printed with print() were unobservable (M26). With the
+    tee set — UPVN_DEBUG_TEE=/tmp/upvn_debug.log — every engine print (script
+    load, asset decisions, errors) lands in the file line-buffered, next to
+    the UPVN_HEARTBEAT state file."""
+    if getattr(logic, "_upvn_tee_installed", False):
+        return
+    logic._upvn_tee_installed = True
+    path = os.environ.get("UPVN_DEBUG_TEE")
+    if not path:
+        return
+    try:
+        f = open(path, "a", buffering=1)
+
+        class _Tee:
+            def __init__(self, *streams):
+                self._streams = streams
+
+            def write(self, data):
+                for s in self._streams:
+                    try:
+                        s.write(data)
+                    except Exception:
+                        pass
+                return len(data)
+
+            def flush(self):
+                for s in self._streams:
+                    try:
+                        s.flush()
+                    except Exception:
+                        pass
+
+        sys.stdout = _Tee(sys.stdout, f)
+        sys.stderr = _Tee(sys.stderr, f)
+        print(f"[UPVN] debug tee active → {path}")
+    except Exception as e:
+        print(f"[UPVN] debug tee failed ({path}): {e}")
+
+
 def main(cont=None):
     """Entry for UPBGE Python controller. Called every frame."""
     if not HAS_BGE:
@@ -291,6 +334,7 @@ def main(cont=None):
     import bge as _bge
     logic = _bge.logic
     ensure_engine_syspath()
+    _install_debug_tee(logic)
     _bind_camera()
     _show_mouse()
 

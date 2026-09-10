@@ -18,8 +18,18 @@ except ImportError:
 
 from ..core.vn_state import VNState
 from .contract import (POSITIONS, SPRITE_MATERIAL, SPRITE_FALLBACK_TAG,
-                       SPRITE_TAG_PREFIX, BG_PLANE, ASSET_SPRITES)
+                       SPRITE_TAG_PREFIX, BG_PLANE, ASSET_SPRITES,
+                       image_mode_from, sprite_color, SPRITE_FALLBACK_COLOR,
+                       apply_object_color)
 import time
+
+# Relative search prefixes for sprite images, relative to the .blend
+# (repo layout <repo>/blend + <repo>/assets, packaged <pkg>/blend + <pkg>/assets).
+SPRITE_PATH_PREFIXES = ("//", "//game/", "//../", "//../game/",
+                        "//../../", "//../../game/")
+
+def _dbg(msg: str):
+    print(f"[SpriteRenderer] {msg}")
 
 # transition durations (seconds)
 TRANS_DUR = {"dissolve": 0.4, "fade": 0.5, None: 0.0}
@@ -56,7 +66,7 @@ class SpriteRenderer:
         else:
             # headless validation: ensure no duplicate tag with different asset without replacement
             # interpreter already replaces; we just track
-            self.planes[tag] = {"asset": asset, "position": pos, "transition": transition, "t0": time.time()}
+            self.planes[tag] = {"asset": asset, "position": pos, "transition": transition, "t0": time.time(), "tint": sprite_color(tag)}
 
     def hide(self, tag: str, transition: str | None):
         if HAS_BGE:
@@ -82,60 +92,78 @@ class SpriteRenderer:
                     plane = scene.addObject(tmpl, tmpl)
                     plane.name = plane_name
                 else:
+                    _dbg(f"show {tag}: no plane object in scene — skipped")
                     return
             # place at correct world position
             plane.worldPosition = POSITIONS[position]  # type: ignore
             plane.visible = True
-            # texture swap
-            import bge.texture as vt
-            import os
-            stem = asset.replace(" ", "_")
-            slash = asset.replace(" ", "/")
-            last = asset.split()[-1] if " " in asset else "neutral"
-            candidates = [
-                bge.logic.expandPath(f"//{ASSET_SPRITES}/{slash}.png"),
-                bge.logic.expandPath(f"//{ASSET_SPRITES}/{stem}.png"),
-                bge.logic.expandPath(f"//{ASSET_SPRITES}/{tag}.png"),
-                bge.logic.expandPath(f"//game/{ASSET_SPRITES}/{slash}.png"),
-                bge.logic.expandPath(f"//game/{ASSET_SPRITES}/{stem}.png"),
-                bge.logic.expandPath(f"//assets/characters/{tag}/{last}.png"),
-                bge.logic.expandPath(f"//assets/sprites/{tag}.png"),
-            ]
-            for ext in (".png", ".jpg", ".webp"):
-                candidates.append(bge.logic.expandPath(f"//{ASSET_SPRITES}/{stem}{ext}"))
+            plane["upvn_asset"] = asset
+            # M26 policy: "color" never touches image files; "auto" tries
+            # PNG/JPG/WebP first and falls back to the palette tint.
+            mode = image_mode_from(plane)
             tex_path = None
-            for p in candidates:
-                if os.path.exists(p):
-                    tex_path = p
-                    break
+            if mode == "auto":
+                import bge.texture as vt
+                import os
+                stem = asset.replace(" ", "_")
+                slash = asset.replace(" ", "/")
+                last = asset.split()[-1] if " " in asset else "neutral"
+                candidates = []
+                for prefix in SPRITE_PATH_PREFIXES:
+                    candidates.extend([
+                        bge.logic.expandPath(f"{prefix}{ASSET_SPRITES}/{slash}.png"),
+                        bge.logic.expandPath(f"{prefix}{ASSET_SPRITES}/{stem}.png"),
+                        bge.logic.expandPath(f"{prefix}{ASSET_SPRITES}/{tag}.png"),
+                    ])
+                candidates.append(
+                    bge.logic.expandPath(f"//assets/characters/{tag}/{last}.png"))
+                for ext in (".png", ".jpg", ".webp"):
+                    for prefix in SPRITE_PATH_PREFIXES:
+                        candidates.append(
+                            bge.logic.expandPath(f"{prefix}{ASSET_SPRITES}/{stem}{ext}"))
+                for p in candidates:
+                    try:
+                        if os.path.exists(p):
+                            tex_path = p
+                            break
+                    except Exception:
+                        continue
+            tint = sprite_color(tag)
             if tex_path:
-                img = vt.ImageFFmpeg(tex_path)
-                img.scale = False
                 try:
-                    mat_id = vt.materialID(plane, SPRITE_MATERIAL)
-                except Exception:
-                    mat_id = -1
-                if mat_id < 0:
-                    # fallback plane may carry only a generic material — use the
-                    # first slot (note: shared datablocks are a known limitation)
-                    mat_id = 0
-                tex = vt.Texture(plane, mat_id)
-                tex.source = img
-                self.planes[tag] = {"obj": plane, "tex": tex, "asset": asset, "position": position, "t0": time.time(), "transition": transition}
-                # start alpha fade for dissolve
-                if transition in ("dissolve", "fade"):
-                    plane.color = (1,1,1,0.0)
-                else:
-                    plane.color = (1,1,1,1.0)
+                    img = vt.ImageFFmpeg(tex_path)
+                    img.scale = False
+                    try:
+                        mat_id = vt.materialID(plane, SPRITE_MATERIAL)
+                    except Exception:
+                        mat_id = -1
+                    if mat_id < 0:
+                        # fallback plane may carry only a generic material — use the
+                        # first slot (note: shared datablocks are a known limitation)
+                        mat_id = 0
+                    tex = vt.Texture(plane, mat_id)
+                    tex.source = img
+                    self.planes[tag] = {"obj": plane, "tex": tex, "asset": asset, "position": position, "t0": time.time(), "transition": transition, "tint": tint}
+                    _dbg(f"show {tag} '{asset}' → image {tex_path}")
+                    # start alpha fade for dissolve
+                    if transition in ("dissolve", "fade"):
+                        plane.color = (1,1,1,0.0)
+                    else:
+                        plane.color = (1,1,1,1.0)
+                    return
+                except Exception as e:
+                    _dbg(f"show {tag} '{asset}' image bind failed ({e}) → palette tint")
+            # no image (or bind failed) — paint the silhouette with the palette
+            # tint so a missing texture must not equal "no sprite".
+            painted = apply_object_color(plane, tint)
+            _dbg(f"show {tag} '{asset}' at {position} → palette tint "
+                 f"(mode={mode}, painted={painted})")
+            self.planes[tag] = {"obj": plane, "asset": asset, "position": position, "tint": tint}
+            # start alpha fade for dissolve
+            if transition in ("dissolve", "fade"):
+                plane.color = (tint[0], tint[1], tint[2], 0.0)
             else:
-                # no PNG — still show the plane (unlit silhouette). Overlay is gone,
-                # so a missing texture must not equal "no sprite".
-                plane["upvn_asset"] = asset
-                try:
-                    plane.color = (0.75, 0.7, 0.9, 1.0)
-                except Exception:
-                    pass
-                self.planes[tag] = {"obj": plane, "asset": asset, "position": position}
+                plane.color = (tint[0], tint[1], tint[2], 1.0)
         except Exception as e:
             print(f"[SpriteRenderer] show {tag} {asset} failed: {e}")
 
@@ -211,10 +239,11 @@ class SpriteRenderer:
             if trans in ("dissolve","fade") and t0:
                 dur = TRANS_DUR.get(trans, 0.4)
                 t = min(1.0, (now - t0)/dur) if dur>0 else 1.0
-                # ease in-out
+                # ease in-out; keep the palette tint, only ramp alpha
+                tint = info.get("tint") or (1.0, 1.0, 1.0)
                 alpha = t  # 0->1 fade in
                 try:
-                    obj.color = (1,1,1, alpha)
+                    obj.color = (tint[0], tint[1], tint[2], alpha)
                 except Exception:
                     pass
                 if t >= 1.0:
