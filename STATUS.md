@@ -1,3 +1,18 @@
+# Current Status — 2026-09-10 (M26b: sprite textures work at runtime, branch feat/desktop-gui)
+
+## Last completed
+- **M26b (branch `feat/desktop-gui`, v0.6.14)**: runtime sprite/background
+  textures via a texture-capable material graph (TexImage packed-white ×
+  MixRGBA(ObjectInfo, Tex, Factor)) — palette at Factor 0, texture at 1;
+  UV quads on all VN planes; per-position sprite materials; renderers try
+  bank → node swap → bge.texture → palette. Cross-reviewed
+  `feat/desktop-no-textures`: AABB pick rejected (3D-object contract → ray
+  pick kept and live-verified), fileless generated white images SEGFAULT the
+  player (bisected; packed is safe), their regenerated template lost logic
+  bricks + game properties. Live-verified in the player on llvmpipe:
+  auto mode renders PNG sprites with transparency + full-width backgrounds;
+  color mode unchanged; converted Ren'Py project still plays. 295 tests.
+
 # Current Status — 2026-09-10 (M26 Desktop GUI verification DONE, branch feat/desktop-gui)
 
 ## Last completed
