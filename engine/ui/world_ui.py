@@ -47,7 +47,9 @@ HISTORY_WRAP = 44           # chars per backlog row before wrapping
 #              -> 0.51 em, with margin for digits and "Name: " prefixes
 #   FIT_SLACK  the game window aspect and the engine's render aspect differ by
 #              ~9% under XWayland, so the fit keeps that much slack
-HISTORY_PITCH_EM = 1.2
+# PITCH_EM is 0.99 measured (History_Text `dimensions.y` 2.207 over 8 rows at
+# em 0.2789); 1.0 is used so the reserved band always covers what is drawn.
+HISTORY_PITCH_EM = 1.0
 HISTORY_ADVANCE_EM = 0.62
 HISTORY_FIT_SLACK = 0.85
 # The block lives in the upper band: the panel is a full-screen backdrop, but
