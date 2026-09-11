@@ -195,6 +195,14 @@ def aspect_wh() -> float:
 
 HOVER_SCALE = 1.08   # M26c: choice plate grows 8% under the cursor
 
+# Camera-space margins (world units, Camera_UI ortho is 15 wide). The player
+# draws every VN plane as a flat quad, so "who is in front" is decided by Y
+# alone and coplanar-ish quads lose text to depth precision (measured with the
+# backlog). Kept as named constants so the dialogue box and the overlay share
+# one rule.
+UI_DEPTH = 0.12      # panel in front of the story planes
+TEXT_FRONT = 0.45    # text in front of its own panel
+
 
 _font_scale_cache: dict = {}
 
@@ -280,15 +288,23 @@ def layout_screen_ui(get_obj: Callable[[str], Any], payload: dict, ortho: float 
     set_font_size(sp, half * 0.055)
     set_font_size(dt, half * 0.048)
     # --- backlog + rewind indicator (M26d) ---
+    # The overlay panel and its text are both flat quads. At the tiny front
+    # offset the dialogue box happens to use, the backlog text vanished in the
+    # player (correct body, correct scale, visible=True — nothing drawn), so
+    # panels get UI_DEPTH and text gets TEXT_FRONT in front of its own panel:
+    # one explicit rule instead of a coincidence of numbers.
     hbox = get_obj(HISTORY_BOX)
     htext = get_obj(HISTORY_TEXT)
     rtext = get_obj(REWIND_TEXT)
-    _set_pos(hbox, (0.0, y_ui + 0.12, half_v * 0.10))
-    _set_scale(hbox, (half * 0.94, half_v * 0.78, 1.0))
-    # FONT text grows downward from its origin, so anchor it at the panel top
-    _set_pos(htext, (-half * 0.88, y_ui + 0.05, half_v * 0.78))
+    panel_h = half_v * 0.80
+    _set_pos(hbox, (0.0, y_ui + UI_DEPTH, 0.0))
+    _set_scale(hbox, (half * 0.94, panel_h, 1.0))
+    # FONT text grows down from its origin (align_y TOP) → anchor just inside
+    # the panel's top edge with one line of padding
+    _set_pos(htext, (-half * 0.86, y_ui + UI_DEPTH - TEXT_FRONT, panel_h - 0.30))
     set_font_size(htext, half * 0.036)
-    _set_pos(rtext, (-half * 0.88, y_ui + 0.02, half_v * 0.92))
+    # rewind marker sits outside the panel so it reads without the backlog open
+    _set_pos(rtext, (-half * 0.86, y_ui - TEXT_FRONT, half_v * 0.92))
     set_font_size(rtext, half * 0.030)
     vis_n = sum(1 for c in payload.get("choices", []) if c.get("visible"))
     for i, ch in enumerate(payload.get("choices", [])):

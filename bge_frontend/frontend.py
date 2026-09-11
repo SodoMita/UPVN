@@ -635,7 +635,9 @@ def main(cont=None):
                 _sc = logic.getCurrentScene()
                 for _n, _k in (("Dialogue_Text", "font_body"),
                                ("Speaker_Text", "font_speaker"),
-                               ("History_Text", "history_body")):
+                               ("History_Text", "history_body"),
+                               ("History_Box", "history_box"),
+                               ("Rewind_Text", "rewind_body")):
                     try:
                         _o = _sc.objects.get(_n)
                         _bo = getattr(_o, "blenderObject", None) if _o is not None else None
@@ -646,9 +648,16 @@ def main(cont=None):
                         # transform (it silently creates a python property).
                         if _bo is not None:
                             _hb_data[_k + "_scale"] = [round(float(v), 4) for v in _bo.scale]
-                            _hb_data[_k + "_font"] = round(float(getattr(_d, "font_size", 1.0)), 4) if _d is not None else None
+                            _hb_data[_k + "_font"] = round(float(getattr(_d, "size", 1.0)), 4) if _d is not None else None
+                            _hb_data[_k + "_wpos"] = [round(float(v), 3) for v in _bo.location]
+                            # dims==0 with a non-empty body = the curve produced
+                            # no geometry (invisible text, no error anywhere)
+                            _hb_data[_k + "_dim"] = [round(float(v), 3) for v in _bo.dimensions]
+                            _hb_data[_k + "_hide"] = bool(getattr(_bo, "hide_viewport", False)) or bool(getattr(_bo, "hide_render", False))
                         elif _o is not None:
                             _hb_data[_k + "_scale"] = [round(float(v), 4) for v in _o.worldScale]
+                        if _o is not None:
+                            _hb_data[_k + "_vis"] = bool(getattr(_o, "visible", False))
                     except Exception:
                         pass
             except Exception:
