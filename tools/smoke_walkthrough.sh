@@ -16,7 +16,10 @@
 # docs/SANDBOX_UPBGE.md (audio_device None + launcher autoexec userprefs).
 set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-BLEND="${1:-$ROOT/blend/UPVN_Template.blend}"
+# Resolve to an ABSOLUTE path before the `cd "$UPBGE"` below — a relative
+# blend argument used to resolve against the player dir instead of the
+# caller's cwd and the player aborted with "loading ... failed".
+BLEND="$(realpath -m "${1:-$ROOT/blend/UPVN_Template.blend}")"
 UPBGE="${UPBGE_DIR:-/home/user/upbge/upbge-0.50-linux-x64}"
 BACKEND="${SMOKE_BACKEND:-auto}"
 OUT="${SMOKE_OUT:-/tmp/smoke_shots}"

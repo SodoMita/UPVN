@@ -12,14 +12,32 @@ apt install sway wtype grim xwayland x11-xserver-utils xdotool imagemagick \
             mesa-utils libgl1-mesa-dri libpulse0 libsndfile1 libjack-jackd2-0
 ```
 
-1. Runtime dir + minimal config (`default_border none`, headless output mode):
+0. **Swap first (OOM guard).** `blenderplayer` needs **~0.9–1.2 GB RSS**
+   (llvmpipe buffers). On a ~2 GB sandbox that also runs platform services
+   (~0.3 GB) the OOM killer murders the player **5–15 s in, often before the
+   window even maps** — the symptom triad is: black desktop, a *stale*
+   `UPVN_HEARTBEAT` json (written by the already-dead process, content never
+   changes) and `dmesg` saying `Out of memory: Killed process … blenderplayer`.
+   Do not chase ghosts in the render stack before checking `dmesg`:
+   ```bash
+   sudo fallocate -l 3G /swapfile && sudo chmod 600 /swapfile \
+     && sudo mkswap /swapfile >/dev/null && sudo swapon /swapfile
+   ```
+
+1. Runtime dir + minimal config (`default_border none`, headless output mode).
+   **Mode syntax varies between sway/wlroots builds** (both seen on "Debian 13
+   + sway 1.10.1"): some builds only accept `output HEADLESS-1 model 1280x720`
+   (headless outputs expose no mode list), others reject `model` as *"Invalid
+   output subcommand"* and want `mode --custom 1280x720`. A bad line aborts
+   startup or parks a swaynag banner over the desktop — keep the file
+   mode-free and set the mode at runtime (non-fatal if it fails):
    ```bash
    mkdir -p /tmp/xdg && chmod 700 /tmp/xdg
-   cat > /tmp/sway_upvn.conf <<'EOF'
-   default_border none
-   output HEADLESS-1 mode 1280x720
+   printf 'default_border none\n' > /tmp/sway_upvn.conf
+   # then after sway is up:
+   swaymsg output HEADLESS-1 mode --custom 1280x720 \
+     || swaymsg output HEADLESS-1 model 1280x720 || true
    # xwayland stays enabled: UPBGE 0.50 is an X11 client (BUG-009 era finding)
-   EOF
    ```
 2. Start the compositor (pixman renderer auto-falls-back when no DRM/GPU):
    ```bash
