@@ -202,7 +202,15 @@ def test_layout_positions_history_panel_and_scales_text():
     assert box.worldPosition is not None
     assert htext.worldPosition[2] > 0, \
         "backlog text anchors above centre so it grows downward"
-    assert htext.worldScale[0] == pytest.approx(0.27)
+    # the backlog em is derived from the space available, not a magic number
+    hist_em = (half_v * (world_ui.BACKLOG_TOP + 0.70)) / (
+        world_ui.HISTORY_MAX_LINES * world_ui.HISTORY_LINE_ADVANCE)
+    assert htext.worldScale[0] == pytest.approx(hist_em, abs=1e-4), \
+        "set_font_size rounds to 5 dp before caching"
+    # 12 rows at that size still fit above the dialogue box (the old fixed em
+    # size overran the panel and drew over the dialogue)
+    assert htext.worldPosition[2] - world_ui.HISTORY_MAX_LINES * hist_em * \
+        world_ui.HISTORY_LINE_ADVANCE > -half_v * 0.70
     # the depth rule IS the bug fix: the panel must clear the story planes and
     # the text must clear the panel, or the glyphs are silently not drawn
     assert box.worldPosition[1] - htext.worldPosition[1] == pytest.approx(world_ui.TEXT_FRONT)
@@ -395,32 +403,44 @@ def _entries(n):
     return [{"who_name": "Eileen", "text": f"line {i}"} for i in range(1, n + 1)]
 
 
-def test_format_history_pages_by_entries_and_shows_position():
+def test_format_history_pages_by_rows_and_shows_position():
     body = world_ui.format_history(_entries(20))
     lines = body.split("\n")
-    # 12 rows, one spent on the footer -> 11 entries per page, newest last
+    # 12 rows, one spent on the footer -> 11 rows per page, newest last
     assert len(lines) == 12
     assert lines[0] == "Eileen: line 10" and lines[-2] == "Eileen: line 20"
-    assert lines[-1] == "\u2014 lines 10-20 of 20  (wheel to scroll) \u2014"
+    assert "rows 10-20 of 20" in lines[-1] and "page 1/2" in lines[-1]
     older = world_ui.format_history(_entries(20), scroll=1)
-    assert older.split("\n")[0] == "Eileen: line 9" and "line 19" in older
-    # clamped: the oldest page starts at the first entry, nothing before it
-    top = world_ui.format_history(_entries(20), scroll=999)
-    assert top.split("\n")[0] == "Eileen: line 1"
-    assert "lines 1-11 of 20" in top
+    assert older.split("\n")[0] == "Eileen: line 1" and "line 9" in older
+    assert "page 2/2" in older
+    # clamped: past the oldest page the newest page stays put
+    assert world_ui.format_history(_entries(20), scroll=99).split("\n")[0] \
+        == "Eileen: line 1"
     # a short script needs no pager at all
     short = world_ui.format_history(_entries(3))
-    assert "wheel" not in short and len(short.split("\n")) == 3
-    assert world_ui.history_max_scroll(12) == 0 and world_ui.history_max_scroll(13) == 2
+    assert "page" not in short and len(short.split("\n")) == 3
+    assert world_ui.history_max_scroll(_entries(12)) == 0
+
+
+def test_wrapping_counts_towards_the_row_budget():
+    """The bug this guards: 11 *entries* became 20+ drawn rows and ran off the
+    panel, because paging counted entries."""
+    long_entries = [{"who_name": "", "text": "word " * 30} for _ in range(8)]
+    rows = world_ui.history_lines(long_entries)
+    assert len(rows) > 20, "each entry wraps to several rows"
+    body = world_ui.format_history(long_entries)
+    assert len(body.split("\n")) <= world_ui.HISTORY_MAX_LINES
+    budget, pages = world_ui.history_pages(long_entries)
+    assert pages == -(-len(rows) // budget)
 
 
 @pytest.fixture()
 def long_ctrl():
-    """A 16-line script: long enough that the backlog has to page."""
+    """A 40-line script: several backlog pages long."""
     c = VNController(script_dict=parse_string("\n".join(
-        ["label start:"] + [f'    "line {i}"' for i in range(1, 17)] + ["    return"])))
+        ["label start:"] + [f'    "line {i}"' for i in range(1, 41)] + ["    return"])))
     c.load()
-    for _ in range(16):
+    for _ in range(40):
         c._advance()
     return c
 
@@ -429,19 +449,19 @@ def test_backlog_wheel_pages_instead_of_rewinding(monkeypatch, long_ctrl):
     """While the overlay is open the wheel scrolls the backlog; the very same
     gesture rewinds the story once it is closed."""
     ctrl = long_ctrl
-    assert len(ctrl.state.history) >= 13, "fixture must be pageable"
+    lim = ctrl._history_max_scroll()
+    assert lim >= 2, "fixture must span several pages"
     logic = _install_fake_bge(monkeypatch, mouse_just=[107])   # WHEELUPMOUSE
     assert ctrl.toggle_history() is True
     assert ctrl._history_scroll == 0
     ctrl.update(dt=0.016)
-    assert ctrl._history_scroll == 1, "wheel up pages to older entries"
+    assert ctrl._history_scroll == 1, "wheel up pages to older rows"
     ctrl.update(dt=0.016)
     assert ctrl._history_scroll == 2
-    lim = ctrl._history_max_scroll()
     for _ in range(lim + 4):
         logic.mouse = _FakeDevice([107])
         ctrl.update(dt=0.016)
-    assert ctrl._history_scroll == lim, "paged clamps at the oldest window"
+    assert ctrl._history_scroll == lim, "paged clamps at the oldest page"
     logic.mouse = _FakeDevice([108])                            # WHEELDOWNMOUSE
     ctrl.update(dt=0.016)
     assert ctrl._history_scroll == lim - 1
@@ -453,11 +473,13 @@ def test_backlog_wheel_pages_instead_of_rewinding(monkeypatch, long_ctrl):
 
 def test_scroll_offset_reaches_the_payload(long_ctrl):
     ctrl = long_ctrl
-    n = len(ctrl.state.history)
+    rows = len(world_ui.history_lines(ctrl.state.history))
+    budget, pages = world_ui.history_pages(ctrl.state.history)
+    assert pages >= 2
     payload = world_ui.build_world_ui(ctrl.current_event, None,
                                       history_entries=ctrl.state.history,
                                       history_open=True, history_scroll=1)
-    # 11 entries + 1 footer = the 12 rows the panel can hold
-    assert f"lines {n - 11}-{n - 1} of {n}" in payload["history"]
+    assert f"page 2/{pages}" in payload["history"]
+    assert f"of {rows}" in payload["history"]
     assert world_ui.build_world_ui(ctrl.current_event, None, history_entries=[],
                                    history_open=False)["history"] == ""

@@ -684,16 +684,22 @@ class VNController:
             return False
 
     def _history_max_scroll(self) -> int:
-        """How far back (in entries) the open backlog can page."""
+        """Highest page index the open backlog can show (0 when it all fits).
+
+        The view owns the row maths (wrapping decides how many pages there are),
+        so the controller asks it instead of guessing from the entry count — a
+        mismatch here would let the wheel page past the end and show a blank
+        panel.
+        """
         try:
-            total = len(self.state.history or [])
+            entries = list(self.state.history or [])
         except Exception:
-            total = 0
+            entries = []
         try:
             from ..ui.world_ui import history_max_scroll
         except Exception:                       # standalone add-on copy
-            return max(0, total - 11) if total > 12 else 0
-        return history_max_scroll(total)
+            return max(0, -(-len(entries) // 11) - 1)
+        return history_max_scroll(entries)
 
     _HISTORY_SCROLL_UP = ("WHEELUPMOUSE", "UPARROWKEY")
     _HISTORY_SCROLL_DOWN = ("WHEELDOWNMOUSE", "DOWNARROWKEY")
@@ -705,6 +711,8 @@ class VNController:
         down = self._any_just(self._HISTORY_SCROLL_DOWN)
         if not (up or down):
             return
+        # one notch = one page (a screen of backlog), which is what the wheel
+        # means in every other VN's history overlay
         cur = int(getattr(self, "_history_scroll", 0) or 0)
         cur = cur + 1 if up else cur - 1
         self._history_scroll = max(0, min(self._history_max_scroll(), cur))
