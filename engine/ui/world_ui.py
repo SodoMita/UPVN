@@ -172,14 +172,29 @@ def set_font_text(obj: Any, text: str) -> None:
     if bo is not None:
         data = getattr(bo, "data", None)
         if data is not None and hasattr(data, "body"):
+            # M26d: assign only on change. The layout runs every tick, and
+            # writing `body` rebuilds the curve's glyph mesh — a backlog that
+            # is merely being *shown* was rebuilt 15-60×/s, and a frame caught
+            # mid-rebuild drew the previous page's lines on top of the new
+            # ones (visible as doubled, half-torn rows after a wheel page).
+            if getattr(data, "body", None) == text:
+                return
             try:
                 data.body = text
                 return
             except Exception:
                 pass
+    # fallback paths also skip redundant writes (obj["Text"] style bindings)
+    _cached = getattr(obj, "_upvn_text", None)
+    if _cached is not None and _cached == text:
+        return
     for attr in ("text", "Text"):
         try:
             setattr(obj, attr, text)
+            try:
+                obj._upvn_text = text
+            except Exception:
+                pass
             return
         except Exception:
             pass
