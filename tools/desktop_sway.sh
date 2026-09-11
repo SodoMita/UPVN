@@ -2,10 +2,57 @@
 # Bootstrap the headless Wayland desktop + UPBGE for UPVN (Debian 13, no GPU,
 # no root needed beyond apt sudo). Idempotent — safe to re-run.
 # See docs/how agent can run desktop.md and docs/SANDBOX_UPBGE.md.
+#
+#   tools/desktop_sway.sh          # bootstrap (apt + UPBGE + sway + userpref)
+#   tools/desktop_sway.sh status   # is the desktop up? what does the tree look like?
+#   tools/desktop_sway.sh stop     # kill sway
+#   source /tmp/wl-upvn/env.sh     # after bootstrap: get WAYLAND_DISPLAY/SWAYSOCK/DISPLAY
 set -e
 
+RUNDIR="${UPVN_WL_DIR:-/tmp/wl-upvn}"
+UPBGE="${UPBGE_DIR:-/opt/upbge/upbge-0.50-linux-x64}"
+
+stop_desktop() {
+    pkill -x sway 2>/dev/null || true
+    echo "sway stopped"
+}
+
+status_desktop() {
+    export XDG_RUNTIME_DIR="$RUNDIR"
+    local sock
+    sock="$(ls "$RUNDIR"/sway-ipc.*.sock 2>/dev/null | head -1 || true)"
+    if [ -z "$sock" ]; then
+        echo "NOT RUNNING (no sway-ipc socket in $RUNDIR)"
+        [ -f "$RUNDIR/sway.log" ] && { echo "--- sway.log ---"; tail -20 "$RUNDIR/sway.log"; }
+        return 1
+    fi
+    export SWAYSOCK="$sock"
+    swaymsg -t get_outputs
+    swaymsg -t get_tree | tr ',' '\n' | grep -E '"(app_id|name)":' | sort -u | head -30
+    return 0
+}
+
+case "${1:-up}" in
+    stop)   stop_desktop;   exit 0 ;;
+    status) status_desktop; exit $? ;;
+esac
+
+# 0) swap: this class of sandbox ships 2 GB RAM and no swap, and UPBGE's
+#    player+editor peak at ~1.2-1.6 GB RSS. Without swap the kernel OOM-kills
+#    the player a few seconds after the first frame, which looks like a black
+#    screen rather than an out-of-memory error. Idempotent.
+if [ "$(swapon --show=SIZE --noheadings --bytes 2>/dev/null | head -1 || true)" = "" ] \
+        && ! swapon --show --noheadings 2>/dev/null | grep -q .; then
+    if [ -w / ] || sudo -n true 2>/dev/null; then
+        { sudo fallocate -l "${UPVN_SWAP_MB:-3072}M" /swapfile \
+          && sudo chmod 600 /swapfile && sudo mkswap /swapfile >/dev/null \
+          && sudo swapon /swapfile; } 2>/dev/null \
+            || echo "note: could not add swap (needs CAP_SYS_ADMIN); run with more RAM"
+    fi
+fi
+
 # 1) packages
-if ! command -v sway >/dev/null 2>&1 || [ ! -d /opt/upbge/upbge-0.50-linux-x64 ]; then
+if ! command -v sway >/dev/null 2>&1 || [ ! -d "$UPBGE" ]; then
     sudo apt-get update -qq
     sudo apt-get install -y -qq sway grim foot wtype wayvnc jq \
         libgl1-mesa-dri libegl-mesa0 fonts-dejavu-core xwayland \
@@ -14,13 +61,13 @@ if ! command -v sway >/dev/null 2>&1 || [ ! -d /opt/upbge/upbge-0.50-linux-x64 ]
 fi
 
 # 2) UPBGE 0.50 tarball → /opt (kept out of the repo workspace: 408 MB)
-if [ ! -x /opt/upbge/upbge-0.50-linux-x64/blenderplayer ]; then
-    sudo mkdir -p /opt/upbge && sudo chown "$USER" /opt/upbge
-    curl -sL -o /tmp/upbge.tar.xz \
+if [ ! -x "$UPBGE/blenderplayer" ]; then
+    sudo mkdir -p /opt/upbge && sudo chown "$(id -un)" /opt/upbge
+    [ -f /tmp/upbge.tar.xz ] || \
+        curl -L --retry 3 -o /tmp/upbge.tar.xz \
         https://github.com/UPBGE/upbge/releases/download/v0.50/upbge-0.50-linux-x64.tar.xz
     tar -xJf /tmp/upbge.tar.xz -C /opt/upbge
 fi
-UPBGE=/opt/upbge/upbge-0.50-linux-x64
 
 # 2b) swap — blenderplayer needs ~0.9–1.2 GB RSS (llvmpipe buffers). On a
 # ~2 GB sandbox that also runs platform services (~0.3 GB) the OOM killer
@@ -40,10 +87,12 @@ if [ "$(awk '/SwapTotal/{print $2}' /proc/meminfo)" -lt 1048576 ]; then
 fi
 
 # 3) headless sway (XWayland hosts the X11-only player)
-# M26e fix: this MUST be exported — a bare assignment is invisible to the
-# sway child, which aborted with "XDG_RUNTIME_DIR is not set in the
-# environment" (the whole "in-script sway start broken" mystery).
-export XDG_RUNTIME_DIR=/tmp/wl-upvn
+#
+# XDG_RUNTIME_DIR must be EXPORTED, not merely prefixed: sway validates the
+# env var itself and aborts with "XDG_RUNTIME_DIR is not set in the
+# environment" when it is only used for the mkdir (this silently killed the
+# desktop for a whole QA cycle).
+export XDG_RUNTIME_DIR="${RUNDIR:-/tmp/wl-upvn}"
 mkdir -m 700 -p "$XDG_RUNTIME_DIR"
 if ! pgrep -x sway >/dev/null 2>&1; then
     # M26g fix: the output-mode syntax differs between sway/wlroots builds:
@@ -54,9 +103,16 @@ if ! pgrep -x sway >/dev/null 2>&1; then
     # keep the file mode-free and set the mode at RUNTIME (failures there
     # are non-fatal and we can try both words).
     printf 'default_border none\n' > "$XDG_RUNTIME_DIR/cfg"
+    # setsid: survive the calling shell's process-group kill (agents/CI run
+    # this through a wrapper that reaps children the moment it returns).
     WLR_BACKENDS=headless WLR_LIBINPUT_NO_DEVICES=1 WLR_RENDERER=pixman \
-        nohup sway -c "$XDG_RUNTIME_DIR/cfg" >"$XDG_RUNTIME_DIR/sway.log" 2>&1 &
-    sleep 1.5
+        setsid sway -c "$XDG_RUNTIME_DIR/cfg" >"$XDG_RUNTIME_DIR/sway.log" 2>&1 < /dev/null &
+    # poll instead of guessing: wlroots picks its own socket name (wayland-1,
+    # wayland-2 ... after stale sockets), so wait for it to appear.
+    for _ in $(seq 1 60); do
+        [ -n "$(ls "$XDG_RUNTIME_DIR" 2>/dev/null | grep '^wayland-' | grep -v lock || true)" ] && break
+        sleep 0.25
+    done
     SWAYSOCK_SETUP="$(ls "$XDG_RUNTIME_DIR"/sway-ipc.*.sock 2>/dev/null | head -1)"
     if [ -n "$SWAYSOCK_SETUP" ]; then
         SWAYSOCK="$SWAYSOCK_SETUP" swaymsg output HEADLESS-1 mode --custom 1280x800 \
@@ -66,7 +122,23 @@ if ! pgrep -x sway >/dev/null 2>&1; then
     fi
 fi
 WAYLAND_DISPLAY="$(ls "$XDG_RUNTIME_DIR" | grep '^wayland-' | grep -v lock | head -1)"
-export WAYLAND_DISPLAY SWAYSOCK="$(ls "$XDG_RUNTIME_DIR"/sway-ipc.*.sock | head -1)"
+SWAYSOCK="$(ls "$XDG_RUNTIME_DIR"/sway-ipc.*.sock 2>/dev/null | head -1)"
+[ -n "$WAYLAND_DISPLAY" ] || { echo "FATAL: sway did not create a wayland socket; see $XDG_RUNTIME_DIR/sway.log"; tail -20 "$XDG_RUNTIME_DIR/sway.log"; exit 1; }
+export WAYLAND_DISPLAY SWAYSOCK
+
+# XWayland is lazy: sway only spawns it when a client first connects. Nudge it
+# (xdpyinfo against the default display) so DISPLAY=:0 really answers before
+# any tool/harness relies on it; that first connect is what boots XWayland.
+DISPLAY_NO=":0"
+for i in 0 1 2 3 4 5; do
+    if timeout 15 env DISPLAY=":$i" xdpyinfo >/dev/null 2>&1; then
+        DISPLAY_NO=":$i"; break
+    fi
+done
+if ! timeout 5 env DISPLAY="$DISPLAY_NO" xdpyinfo >/dev/null 2>&1; then
+    echo "WARN: XWayland did not answer (no :0). Player can still start -- sway"
+    echo "      launches XWayland on its first connect; treat this as informational."
+fi
 
 # 4) userpref prep (BUG-016: audio device — without it the player segfaults)
 if [ ! -f "$HOME/.config/upbge/5.0/config/userpref.blend" ]; then
@@ -76,7 +148,17 @@ if [ ! -f "$HOME/.config/upbge/5.0/config/userpref.blend" ]; then
          bpy.ops.wm.save_userpref()"
 fi
 
-echo "desktop ready: WAYLAND_DISPLAY=$WAYLAND_DISPLAY SWAYSOCK=$SWAYSOCK"
-echo "player:        DISPLAY=:0 LIBGL_ALWAYS_SOFTWARE=1 \\"
+cat > "$RUNDIR/env.sh" <<EOF
+export XDG_RUNTIME_DIR=$RUNDIR
+export WAYLAND_DISPLAY=$WAYLAND_DISPLAY
+export SWAYSOCK=$SWAYSOCK
+export DISPLAY=$DISPLAY_NO
+export LIBGL_ALWAYS_SOFTWARE=1
+export UPBGE_DIR=$UPBGE
+EOF
+
+echo "desktop ready: WAYLAND_DISPLAY=$WAYLAND_DISPLAY SWAYSOCK=$SWAYSOCK DISPLAY=$DISPLAY_NO"
+echo "source it with:  source $RUNDIR/env.sh"
+echo "player:        DISPLAY=$DISPLAY_NO LIBGL_ALWAYS_SOFTWARE=1 \\"
 echo "               $UPBGE/blenderplayer -w 1024 576 0 0 <game>.blend"
 echo "or:            tools/desktop_run.sh <game>.blend"

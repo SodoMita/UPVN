@@ -45,7 +45,7 @@ Headless fallback: when bpy unavailable (CI), the module still imports and expos
 bl_info = {
     "name": "UPVN — Visual Novel Editor",
     "author": "UPVN",
-    "version": (0, 6, 14),
+    "version": (0, 6, 15),
     "blender": (4, 2, 0),
     "location": "View3D > Sidebar > UPVN, Text Editor > Sidebar > UPVN",
     "description": "Create Ren'Py-like visual novel inside UPBGE with minimal coding — self-contained engine, one-click scene setup, characters, scenes, dialogue, menus, arbitrary saves, preview",
@@ -466,10 +466,9 @@ class UPVN_GameBuilder:
                 out.append("    return")
             else:
                 out.extend(lines)
-                # ensure return if no jump/return at end
                 last = lines[-1].strip()
-                if not last.startswith("jump ") and last != "return" and "menu:" not in "\n".join(lines[-3:]):
-                    pass
+                if not last.startswith("jump ") and last != "return" and not last.startswith("return"):
+                    out.append("    return")
             out.append("")
         return "\n".join(out)
 
@@ -514,7 +513,7 @@ class UPVN_GameBuilder:
         for bi, (name, start) in enumerate(starts):
             bounds[name] = (start, starts[bi + 1][1] if bi + 1 < len(starts) else len(lines))
 
-        insertions = []          # (line index, [new lines])
+        insertions = []          # (line index, [new lines], [placeholder idxs to drop])
         new_label_blocks = []    # full blocks for labels not in the file
         for label, new_lines in self.labels.items():
             wanted = [l for l in new_lines if l.strip()]
@@ -535,7 +534,13 @@ class UPVN_GameBuilder:
                         if s == "return":
                             at = j
                         break
-                insertions.append((at, to_insert))
+                # M27 (e16c666) behaviour, folded in: when real content
+                # enters a block, drop its `"Empty label."` placeholder
+                # lines (written by build_rpy for empty labels)
+                placeholder_idx = [j for j in range(start + 1, end)
+                                   if lines[j].strip() in ('"Empty label."',
+                                                           "'Empty label.'")]
+                insertions.append((at, to_insert, placeholder_idx))
             else:
                 body = [f"label {label}:"] + wanted
                 last = wanted[-1].strip()
@@ -546,9 +551,14 @@ class UPVN_GameBuilder:
         if not new_defines and not insertions and not new_label_blocks:
             return self.script_path   # nothing to do — leave the file alone
 
-        # apply label insertions bottom-up so indices stay valid
-        for at, to_insert in sorted(insertions, key=lambda t: -t[0]):
-            lines[at:at] = to_insert
+        # apply label insertions bottom-up so indices stay valid; within a
+        # plan, drop the placeholder lines first (they sit below `at`, so
+        # the insertion point shifts by how many were removed)
+        for at, to_insert, placeholder_idx in sorted(insertions, key=lambda t: -t[0]):
+            for d in sorted(placeholder_idx, reverse=True):
+                del lines[d]
+            shift = sum(1 for d in placeholder_idx if d < at)
+            lines[at - shift:at - shift] = to_insert
 
         if new_label_blocks:
             while lines and not lines[-1].strip():
@@ -906,10 +916,30 @@ except Exception:
         obj.data.materials.append(mat)
         return obj
 
+    # Material/image node names. These three have to live HERE, not only in
+    # build_vn_scene's local `from engine.render.contract import ...`:
+    # _rewrite_unlit and _ensure_white_image are separate module-level
+    # functions (both inside `if HAS_BPY:`), so a *local* import in the caller
+    # is invisible to them — which made every tex_capable=True material raise
+    # `NameError: TEX_NODE_NAME` and killed tools/make_template.py (and
+    # "Setup Scene") outright. build_vn_scene keeps its own import for the rest
+    # of its names; the values are identical because both come from contract.
+    try:
+        from engine.render.contract import (TEX_NODE_NAME, MIX_NODE_NAME,
+                                            WHITE_IMAGE_NAME)
+    except Exception:                                    # standalone add-on copy
+        TEX_NODE_NAME = "UPVN Tex Image"
+        MIX_NODE_NAME = "UPVN Tex Mix"
+        WHITE_IMAGE_NAME = "UPVN_White1px"
+
     def _ensure_white_image(_b):
         """1×1 white PNG, packed into the blend. NEVER ship a fileless
         generated image in a TexImage node: the player segfaults at startup
         on those (M26b field-verified; packed/file-backed are safe)."""
+        try:
+            from engine.render.contract import WHITE_IMAGE_NAME
+        except Exception:
+            WHITE_IMAGE_NAME = "UPVN_White1px"
         img = _b.data.images.get(WHITE_IMAGE_NAME)
         if img is None:
             img = _b.data.images.new(WHITE_IMAGE_NAME, 1, 1, alpha=True)
@@ -939,6 +969,10 @@ except Exception:
         cannot bind node materials ("Texture is not available"), an unassigned
         TexImage evaluated black (BUG-005), and the palette makes images
         optional (image_mode="color" for the template and all samples)."""
+        try:
+            from engine.render.contract import TEX_NODE_NAME, MIX_NODE_NAME
+        except Exception:
+            TEX_NODE_NAME, MIX_NODE_NAME = "UPVN Tex Image", "UPVN Tex Mix"
         mat.use_nodes = True
         nt = mat.node_tree
         try:
@@ -1304,6 +1338,36 @@ except Exception:
         _ensure_font(SPEAKER_TEXT, SPEAKER_LOCATION, size=0.28)
         _ensure_font(DIALOGUE_TEXT, DIALOGUE_TEXT_LOCATION, size=0.26)
 
+        # --- backlog + rewind objects (M26d) ---------------------------------
+        # engine/ui/world_ui.py writes these when H is pressed / the player is
+        # rolled back. Without them the overlay existed only in headless traces.
+        try:
+            from engine.render.contract import (HISTORY_PLANE, HISTORY_TEXT,
+                                                REWIND_TEXT)
+        except Exception:
+            HISTORY_PLANE, HISTORY_TEXT, REWIND_TEXT = ("History_Box", "History_Text",
+                                                         "Rewind_Text")
+        hb = scene.objects.get(HISTORY_PLANE)
+        if hb is None:
+            def _mk_hist():
+                return _data_plane(HISTORY_PLANE, size=10.0,
+                                   color=(0.03, 0.04, 0.09, 1.0), rot=PLANE_ROTATION)
+            hb = _get_or_create(scene, HISTORY_PLANE, _mk_hist)
+            _link_ob(scene, hb, collections["VN_UI"])
+            _apply_2d_layout(hb, (0.0, -0.45, 0.9), (6.6, 3.0, 1.0))
+            _single_material(hb, mat_ui)
+            _tint(hb, (0.03, 0.04, 0.09, 1.0))
+            _static_ghost(hb)
+            # NB: stays *visible* in the .blend like Dialogue_Box / choice_N —
+            # the runtime hides it every tick while the backlog is closed. A
+            # hide_viewport/hide_render default here would leave the overlay
+            # permanently invisible in the player (the game object starts
+            # hidden and `visible = True` on a hidden-by-default object is a
+            # no-op in UPBGE 0.50).
+        # FONT text grows down from its origin → anchor at the panel top
+        _ensure_font(HISTORY_TEXT, (-6.0, -0.5, 3.4), size=0.20)
+        _ensure_font(REWIND_TEXT, (-6.0, -0.5, 4.4), size=0.17)
+
         for i in range(CHOICE_COUNT):
             z = 2.4 - i * 0.7
             loc = (0.0, -0.5, z)
@@ -1392,6 +1456,15 @@ except Exception:
         # M26: image policy for the renderers — "color" (texture-free palette,
         # template + samples) or "auto" (converted Ren'Py projects).
         _set_runtime_prop(_b, ctrl, "image_mode", IMAGE_MODE_DEFAULT)
+        # Parse tier (M26d): "safe" = the declarative subset the samples use,
+        # "full" = drop-in Ren'Py. Only seeded when absent, so Setup Scene on an
+        # already-converted project does not silently downgrade it to safe and
+        # break its script.
+        try:
+            if "parse_mode" not in ctrl:
+                _set_runtime_prop(_b, ctrl, "parse_mode", "safe")
+        except Exception:
+            pass
         # relative root to the folder that contains engine/ (launcher falls back
         # to the blend dir + parents when this is empty/stale)
         try:
@@ -1773,8 +1846,7 @@ except Exception:
                 try:
                     src = pathlib.Path(bpy.path.abspath(p.bg_image))
                     if src.exists():
-                        dest_dir = pathlib.Path(path).parent.parent / "assets" / "backgrounds"
-                        dest_dir.mkdir(parents=True, exist_ok=True)
+                        dest_dir = _get_project_asset_dir(path, "backgrounds")
                         dest = dest_dir / src.name
                         shutil.copy2(src, dest)
                         bg = f"bg {src.stem}"
@@ -1812,8 +1884,7 @@ except Exception:
                 try:
                     src = pathlib.Path(bpy.path.abspath(p.sprite_image))
                     if src.exists():
-                        dest_dir = pathlib.Path(path).parent.parent / "assets" / "sprites"
-                        dest_dir.mkdir(parents=True, exist_ok=True)
+                        dest_dir = _get_project_asset_dir(path, "sprites")
                         dest = dest_dir / src.name
                         shutil.copy2(src, dest)
                         asset = src.stem
@@ -1864,7 +1935,7 @@ except Exception:
                 print("[UPVN] " + engine_diag_text())
                 self.report({'ERROR'}, "Engine not found. " + str(ENGINE_INFO.get("message", ""))[:200])
                 return {'FINISHED'}
-            text = pathlib.Path(path).read_text(encoding="utf-8") if pathlib.Path(path).exists() else ""
+            text = _get_script_text(context, path)
             try:
                 _p, _vc, _sm = _engine_api
                 _p.parse_string(text, filename=path)
@@ -1973,6 +2044,25 @@ except Exception:
                 self.report({'ERROR'}, f"Arbitrary preview failed {e}")
             return {'FINISHED'}
 
+    def _get_project_asset_dir(script_path: str, category: str) -> pathlib.Path:
+        p = pathlib.Path(script_path)
+        root = p.parent.parent if p.parent.name == "game" else p.parent
+        dest = root / "assets" / category
+        dest.mkdir(parents=True, exist_ok=True)
+        return dest
+
+    def _get_script_text(context, path: str) -> str:
+        if hasattr(context, "edit_text") and context.edit_text:
+            return context.edit_text.as_string()
+        fname = pathlib.Path(path).name
+        tb = bpy.data.texts.get(fname)
+        if tb is not None:
+            return tb.as_string()
+        p = pathlib.Path(path)
+        if p.exists():
+            return p.read_text(encoding="utf-8")
+        return ""
+
     def _builder_from_file(path: str) -> UPVN_GameBuilder:
         """Load existing script.rpy into builder preserving labels (v0.5 fix)."""
         # Use UPVN_GameBuilder's own preservation logic (it loads _existing_text)
@@ -2016,6 +2106,8 @@ except Exception:
                 box.operator("upvn.check_engine", text="Re-check", icon='FILE_REFRESH')
                 box.operator("upvn.locate_engine", text="Locate engine folder…", icon='FILE_FOLDER')
             layout.separator()
+            layout.operator("upvn.reload_addon", icon='FILE_REFRESH')
+            layout.separator()
             layout.label(text="Project", icon='FILE_FOLDER')
             layout.prop(props, "project_path")
             layout.operator("upvn.create_project", icon='ADD')
@@ -2049,8 +2141,8 @@ except Exception:
             layout.prop(props, "sprite_image")
             layout.prop(props, "side_image")
             layout.operator("upvn.add_show", icon='OBJECT_DATA')
-            layout.operator("upvn.add_stage", icon='MESH_CUBE')
             layout.prop(props, "stage_name")
+            layout.operator("upvn.add_stage", icon='MESH_CUBE')
             layout.separator()
             layout.label(text="Dialogue", icon='SPEAKER')
             layout.prop(props, "speaker")
@@ -2076,8 +2168,11 @@ except Exception:
             if not _has_game_support():
                 row.operator("upvn.check_wiring", icon='VIEWZOOM')
             layout.operator("upvn.save_demo", icon='FILE_TICK')
-            layout.operator("upvn.install_pillow", icon='CONSOLE',
-                            text="Install Pillow (for Preview)")
+            if pil_live_available():
+                layout.label(text="✓ Pillow installed (Preview active)", icon='CHECKMARK')
+            else:
+                layout.operator("upvn.install_pillow", icon='CONSOLE',
+                                text="Install Pillow (for Preview)")
             layout.prop(props, "arbitrary_slot")
             layout.operator("upvn.preview_arbitrary", icon='IMAGE_REFERENCE')
             layout.label(text="Saves: arbitrary slots 1..∞ (←→ pagination)", icon='INFO')
@@ -2102,24 +2197,111 @@ except Exception:
             layout.operator("upvn.validate", icon='CHECKMARK')
             layout.operator("upvn.preview", icon='RENDER_RESULT')
 
-    # M26g bugfix: UPVN_Prefs was defined but NEVER registered — the add-on
-    # Preferences page (engine folder picker + Locate/Check/Copy buttons +
-    # the persisted engine_path preference) silently never appeared, and
-    # "Locate Engine" could not save its choice.
+    class UPVN_OT_ReloadAddon(bpy.types.Operator):
+        """Apply an add-on update WITHOUT restarting UPBGE: install the new
+        zip / replace the add-on file, then click this — it re-imports the
+        file from disk and re-registers everything cleanly."""
+        bl_idname = "upvn.reload_addon"
+        bl_label = "Apply Update (reload add-on)"
+        bl_options = {'REGISTER'}
+
+        def execute(self, context):
+            import sys
+            import importlib
+            mod = sys.modules.get(__name__)
+
+            def _do_reload():
+                try:
+                    new = importlib.reload(mod)
+                    reg = getattr(new, "register", None)
+                    if reg is not None:
+                        reg()
+                    scn = getattr(bpy.context, "scene", None)
+                    ver = getattr(scn, "upvn_addon_version", "?") if scn else "?"
+                    print(f"[UPVN] add-on reloaded live — now v{ver} "
+                          "(no restart needed)")
+                except Exception as e:
+                    print(f"[UPVN] add-on reload failed: {e}")
+                    try:
+                        import traceback
+                        traceback.print_exc()
+                    except Exception:
+                        pass
+                return None
+
+            if bpy.app.background:
+                # no UI/timer pump in background sessions (also the path the
+                # automated live-update tests take)
+                _do_reload()
+            else:
+                # reload from a timer: doing it mid-invoke would replace the
+                # very class running this operator
+                bpy.app.timers.register(_do_reload, first_interval=0.1)
+                self.report({'INFO'}, "Reloading UPVN add-on…")
+            return {'FINISHED'}
+
+    # M26g bugfix (agent/desktop-gui-run-fixes): UPVN_Prefs was defined but
+    # NEVER registered — the add-on Preferences page (engine folder picker +
+    # Locate/Check/Copy buttons + the persisted engine_path preference)
+    # silently never appeared, and "Locate Engine" could not save its choice.
+    # UPVN_OT_ReloadAddon comes from feat/desktop-gui M26g (live updates).
     classes = (UPVN_Prefs,
                UPVN_SceneProps, UPVN_OT_LocateEngine, UPVN_OT_CheckEngine, UPVN_OT_BundleEngine,
-               UPVN_OT_InstallPillow,
+               UPVN_OT_InstallPillow, UPVN_OT_ReloadAddon,
                UPVN_OT_CreateProject, UPVN_OT_AddCharacter, UPVN_OT_AddScene,
                UPVN_OT_AddDialogue, UPVN_OT_AddShow, UPVN_OT_AddMenu, UPVN_OT_AddStage,
                UPVN_OT_SetupScene, UPVN_OT_CheckWiring, UPVN_OT_Validate,
                UPVN_OT_Preview, UPVN_OT_SaveSlotDemo, UPVN_OT_QuickPreviewArbitrary,
                UPVN_PT_MainPanel, UPVN_PT_TextPanel)
 
+    def _purge_stale_registrations():
+        """M26g: make UPDATE-over-running work (no uninstall/restart needed).
+
+        Two things break a live update in this file's old form:
+        - register() aborted on the first already-registered class, so the
+          NEW code never bound and the Scene pointer stayed stale;
+        - unregister() needed the OLD module's class objects, which are gone
+          once the module is re-imported — so unregister BY NAME from
+          bpy.types (which always holds the live registration).
+        """
+        for cls in classes:
+            # panels/menus register under bl_idname ("UPVN_PT_main"), while
+            # operator classes register under the class name (their bl_idname
+            # with a dot is the bpy.ops key, not the RNA type name) — try the
+            # valid candidates so a stale registration is always found
+            for nm in (getattr(cls, "bl_idname", None),
+                       getattr(cls, "__name__", None)):
+                if not nm or "." in nm:
+                    continue
+                live = getattr(bpy.types, nm, None)
+                if live is not None:
+                    try:
+                        bpy.utils.unregister_class(live)
+                    except Exception:
+                        pass
+        for prop in ("upvn_props", "upvn_addon_version"):
+            if hasattr(bpy.types.Scene, prop):
+                try:
+                    delattr(bpy.types.Scene, prop)
+                except Exception:
+                    pass
+
     def register():
+        # M26g: an update installed OVER a running UPBGE must just work —
+        # purge whatever the previous version left registered, then bind the
+        # new code. (Before: "already registered" on the first class killed
+        # the whole block; the only fix was uninstall + restart.)
+        _purge_stale_registrations()
         try:
             for cls in classes:
                 bpy.utils.register_class(cls)
             bpy.types.Scene.upvn_props = bpy.props.PointerProperty(type=UPVN_SceneProps)
+            bpy.types.Scene.upvn_addon_version = bpy.props.StringProperty(
+                name="UPVN addon version",
+                description="Version of the UPVN editor add-on currently registered "
+                            "(live-updated; compare against the zip you installed)",
+                default=".".join(str(x) for x in bl_info.get("version", ())),
+            )
             ok, info = ensure_engine(retry=True)
             ver = ".".join(str(x) for x in bl_info.get("version", ()))
             print(f"[UPVN] Editor addon v{ver} registered — engine: {'OK via ' + str(info['source']) if ok else 'NOT FOUND (' + str(info['message'])[:120] + ')'}")
@@ -2133,15 +2315,10 @@ except Exception:
                 pass
 
     def unregister():
-        for cls in reversed(classes):
-            try:
-                bpy.utils.unregister_class(cls)
-            except Exception:
-                pass
-        try:
-            del bpy.types.Scene.upvn_props
-        except Exception:
-            pass
+        # M26g: purge by name — after an over-install the module object can
+        # be stale, and class objects from a previous import would be
+        # unreachable from here.
+        _purge_stale_registrations()
         print("[UPVN] Editor addon unregistered")
 
     if __name__ == "__main__":
