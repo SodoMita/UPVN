@@ -415,7 +415,7 @@ def test_format_history_pages_by_rows_and_shows_position():
     assert lines[-1].startswith("\u2014 rows") and f"of 20" in lines[-1]
     assert lines[0] == f"Eileen: line {20 - budget + 1}" and lines[-2] == "Eileen: line 20"
     assert "page 1/" in lines[-1]
-    pages = int(lines[-1].split("page ")[1].split("/")[1])
+    pages = int(lines[-1].split("page ")[1].split("/")[1].split()[0])
     assert pages == -(-20 // budget)
     oldest = world_ui.format_history(_entries(20), scroll=pages - 1)
     assert oldest.split("\n")[0] == "Eileen: line 1"
