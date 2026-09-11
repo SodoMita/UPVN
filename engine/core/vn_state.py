@@ -105,6 +105,10 @@ class VNState:
     # history / backlog / skip / auto (M07)
     history: List[Dict[str, Any]] = field(default_factory=list)
     seen_history: List[str] = field(default_factory=list)  # hashes of seen lines for skip
+    # True while the player is looking at a rewound (rolled-back) line, i.e.
+    # roll_forward() has frames to replay. M26d: drives the on-screen « rewind
+    # indicator in the player — headless traces and saves carry it too.
+    rollback_mode: bool = False
     skip: bool = False
     auto: bool = False
     auto_delay: float = 0.7  # seconds per line in auto mode

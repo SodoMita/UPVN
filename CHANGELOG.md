@@ -1,5 +1,361 @@
 # Changelog
 
+## 0.6.15 (cont.) — desktop-gui lineage consolidated into one branch
+
+`agent/desktop-gui-run-fixes` now carries the whole desktop-gui lineage —
+feat/desktop-gui@7995acd + desktop-gui-fixed@730c316 +
+agent/desktop-gui-fixes@940912c + the M26g run-fixes work — so a single PR
+to main contains everything. Resolution highlights and follow-up fixes:
+
+- write() keeps the strictly non-destructive M26g form and now also drops
+  the `"Empty label."` placeholder when real content enters a block
+  (e16c666 behaviour folded in; regression test added).
+- classes tuple is the union: UPVN_Prefs + UPVN_OT_ReloadAddon both
+  registered; _purge_stale_registrations covers AddonPreferences
+  (bl_idname without a dot) — live reload over a running session works.
+- M27 operator test now loads the repo addon file explicitly: a bare
+  `import upvn_editor_addon` silently returns a stale same-named module
+  from ~/.config when one is enabled, so the test used to exercise OLD
+  code. Also skips (not fails) without /opt/upbge, like every other
+  binary test.
+- Install Pillow operator: the UPBGE 0.50 official tarball ships Python
+  as a LIB ONLY (no bin/python3.11) — the bundled-pip route was
+  impossible and the error suggested a nonexistent path. Fallback: host
+  python3 cross-installs into the running interpreter's purelib with
+  `--python-version 3.11 --only-binary=:all:` (a plain `--target` ships
+  host-ABI wheels: `import PIL` works, `_imaging` fails to load).
+  Verified live: installs + becomes visible in-session, no restart.
+- tools/smoke_walkthrough.sh keeps both fixes (absolute blend path +
+  UPBGE probe); desktop_sway.sh = runtime output-mode (both sway syntaxes)
+  + setsid + socket polling.
+- Full suite: 366 passed / 16 skipped (binary tests need /opt/upbge —
+  else skip). Live re-verified after the merges: standalone smoke
+  walkthrough all states green incl. M26d backlog/rewind; editor round:
+  all operators FINISHED, Wiring 29/29, P → start → menu → "Ask her
+  chosen." → Esc → editor alive (screenshots/consolidation/).
+- QA driver note: in the UPBGE 0.50 GUI, bpy.app.timers registered from a
+  --python startup script never pump (window does not exist yet) and
+  load_post does not fire for the CLI file argument — a SpaceView3D
+  POST_PIXEL draw handler is the reliable queue pump (force redraws with
+  numpad view keys). While the embedded game runs, the editor does not
+  redraw (the game owns the window) — expected, not a hang.
+
+## 0.6.15 — M26g: plugin updates apply LIVE (no uninstall, no UPBGE restart)
+
+Installing a new addon version over a running UPBGE now just works. What was
+broken: `register()` aborted on the first already-registered class ("already
+registered"), so the NEW code never bound and the only fix was uninstall +
+restart.
+
+- **Self-cleaning register/unregister** (`_purge_stale_registrations`):
+  unregisters stale classes BY NAME from `bpy.types` (survives module
+  identity loss across re-imports) before binding the new code. Learned the
+  hard way and encoded: panels/menus register under `bl_idname`
+  (`UPVN_PT_main`), operator classes under their lowercase RNA key
+  (`UPVN_OT_reload_addon`) — the class __name__ alone misses both.
+- **Live version property**: `Scene.upvn_addon_version` always reports the
+  currently REGISTERED version (read the scene INSTANCE, not the type — the
+  type attr is the PropertyDeferred definition).
+- **New `upvn.reload_addon` operator** ("Apply Update (reload add-on)" in the
+  panel): applies a file-replaced update in one click — importlib.reload +
+  clean re-register; synchronous in background sessions, timer-deferred in
+  the UI (reloading mid-invoke would replace the running operator's class).
+- **Proven in ONE blender session** (tests/test_m26g_addon_live_update.py,
+  real binary; skips without /opt): enable 0.6.14 → install the 0.6.15 zip
+  via the REAL `preferences.addon_install` operator (no fallback needed) →
+  WITHOUT restart the new code is live (version prop 0.6.15, reload op
+  registered, `upvn.check_engine` still `{'FINISHED'}`) → then
+  `upvn.reload_addon` applies an on-disk 0.6.99 bump in-session. Note:
+  same-second mtime can keep a stale .pyc alive — the test sleeps 1.1s
+  before the reload; real installs are minutes apart (non-issue).
+- **Install-path findings (UPBGE 0.50 / Blender 5.0.1)**: `scripts/addons/`
+  is NOT on sys.path at startup (only `addons/modules` is) — imports only
+  work after `bpy.utils.refresh_script_paths()`, which the real install
+  operator calls; discovery (`addon_utils.modules`) works regardless. This
+  build's `addon_utils.enable` returns the module or None (older builds
+  returned an `(ok, err)` tuple) and RAISES TypeError on unpack — code that
+  does `ok, err = addon_utils.enable(...)` breaks.
+- **tools/package_addon.py**: a missing out-dir now is created — previously
+  the archive was written into a regular FILE named `dist` (found after a
+  sandbox reset removed dist/). Addon zip rebuilt: dist/
+  upvn_editor_addon_v0.6.15.zip (0.6.14 zip was untracked and lost in a
+  reset).
+## 0.6.14 — 2026-09-11 M26g: live GUI button sweep — engine usable in the UPBGE editor, four showstoppers fixed
+
+Every UPVN panel button was executed in the real UPBGE 0.50 GUI on the
+headless-Wayland stack (blind-agent QA: pixel diffs, OCR of the panel,
+heartbeat files, disk side-effects), and the game was played to a branch
+**inside the editor** (P → Space×2 → menu → digit 1 → "You chose left." →
+Esc back to the editor). Fixes found by that sweep:
+
+- **BUG-017 (P0)** Setup Scene crashed with `NameError: TEX_NODE_NAME` on
+  every tex_capable sprite material — contract names were locals of
+  `build_vn_scene`, invisible to `_rewrite_unlit`/`_ensure_white_image`.
+  Hoisted to module scope; symtable scope-regression tests.
+- **BUG-018 (P0)** `UPVN_GameBuilder.write()` could silently replace every
+  label body of an existing script with "Empty label." (live-verified data
+  loss on the M25 smoke game). write() is now strictly non-destructive and
+  inserts additions BEFORE the label's `return` (was dead code after it).
+- **BUG-019 (P0)** Create Project now refuses to overwrite an existing
+  non-empty script (clear ERROR report, file untouched).
+- **BUG-020 (P1)** UPVN_Prefs (AddonPreferences) was never registered —
+  the add-on Preferences page (engine status, engine_path picker,
+  Locate/Check/Copy buttons) never appeared. Registered; AST test pins
+  every bpy class ↔ registration tuple.
+- Panel redundancy: Check Wiring no longer appears twice in UPBGE (Play box
+  + Tools); the Tools copy stays only for plain-Blender installs.
+- Tooling/sandbox: package_addon.py fresh-clone `dist` file bug (BUG-021),
+  smoke_walkthrough relative-path bug (BUG-022), OOM/swap guard in
+  desktop_sway.sh (BUG-023 — player needs ~1 GB RSS; without swap it died
+  before the window mapped), sway output-mode syntax made
+  runtime-and-tolerant (BUG-024).
+- Verified in the GUI this round: all 17 operators (create/setup/wiring/
+  add_character/scene/show/stage/dialogue/menu/validate/preview/save_demo/
+  preview_arbitrary/install_pillow/check_engine/locate_engine/
+  bundle_engine), the add-on Preferences page, the embedded game (P) with
+  click/space/digit input, Esc-return to the editor, and the standalone
+  player smoke walkthrough (9/9 states green).
+- Tests: 335 passed / 16 skipped (+13 new: scope, builder-write, prefs
+  registration).
+## 0.6.14 — 2026-09-10 (cont.) M26f: packaged build verified live — script_path baked, zero manual steps
+
+- **tools/package_game.py executed end-to-end** for the first time since the
+  M26d tree-copy change: sample game → `dist/10_full_sample_game/`
+  (+1740 KB zip), validation OK, in-packager headless playable check 59
+  events, zip healthy.
+- **script_path is baked into the packaged blend** (`//game/script.rpy`):
+  the README's hand-edit step 3 is gone. Binary-optional — clear NOTE +
+  manual fallback when no blender binary exists. Flip drops the .blend1
+  backup so packaged builds stay clean.
+- **Packaged game verified LIVE** (player on build/blend/
+  UPVN_Template.blend, no manual steps): start → library zoom section → book
+  menu → classroom 3D lines (`classroom_3d.blend` correctly FOUND in
+  `game/stages/` with the LibLoad-DISABLED message) → ending menu →
+  good_ending → `end`, ALIVE. Audio resolves `theme` (device-less sandbox
+  warns once, silent continue).
+- Hygiene: `blend/sample_test.blend` (accidentally committed probe file)
+  removed from the repo — it even shipped inside packaged zips;
+  SceneManager's load_stage log no longer claims "no stage file" (it cannot
+  know; wording now defers to StageManager).
+- New tests `tests/test_m26f_package_game.py` (4; flip assertion
+  binary-skipped): packager exit/logs, whole-tree shipping (assets/ +
+  stages/), baked property read back from the blend + no .blend1, zip
+  contents (ships game+stages, no bytecode).
+
+## 0.6.14 — 2026-09-10 (cont.) M26e: bootstrap script fixed; bake tool executed end-to-end
+
+- **tools/desktop_sway.sh sway-start FIXED** (standing bug for many rounds,
+  found by reading it with the working manual recipe side by side): TWO
+  defects — (1) `XDG_RUNTIME_DIR=/tmp/wl-upvn` was assigned WITHOUT `export`,
+  so the sway child aborted with "XDG_RUNTIME_DIR is not set in the
+  environment"; (2) the headless output line used `mode 1280x800`, but
+  headless outputs have no mode list — the config word is `model`. Verified
+  by killing a live session and letting the script rebuild the desktop
+  (sway up, HEADLESS-1 present, ready lines printed). Test-pinned.
+- **tools/bake_stage_into_template.py actually executed** (shipped M26d
+  unexecuted — lesson: run what you ship): first run hit `NameError:
+  EXCLUDE_SUFFIX` (the generated blender-side script never received the
+  constant — now interpolated); second issue: the baked blend's embedded
+  launcher imports engine/bge_frontend relative to the blend (//), so baking
+  outside the repo tree died with "No module named 'bge_frontend'" — the
+  tool now copies the runtime tree next to --out, making the output
+  immediately playable standalone.
+- **Baked game verified LIVE from /tmp/bakedgame**: 3D spawns
+  (repositioned templates), `play_anim eileen wave`, preset skipped safely,
+  menu over the 3D scene, `hover=choice_1 clicked=True` selected it, story
+  reached `end`, player alive. Structural checks: all stage objects present,
+  eileen parked at (30,−3,−30), `wave` action fake-user'd, script_path
+  flipped, scene.camera = Camera_UI, no stage cameras merged.
+- New tests `tests/test_m26e_bake_tool.py` (4; skipped when /opt is wiped):
+  run the tool into tmp_path, assert clean exit + runtime tree copied (no
+  __pycache__) + baked contents (stage in, template parked, script flipped)
+  + the sway script fixes.
+
+## 0.6.14 — 2026-09-10 (cont.) M26d: 3D-stage tier verified live; LibLoad segfault contained
+
+Driven with a stage probe script over a baked stage (probe script + merged
+blend): `show3d` ×2 → `[StageManager] spawn ... (repositioned template)`;
+`anim eileen wave` → `playAction` success-logged (failure-only logging hid
+working animations before); `camera preset` → safely skipped; the choice menu
+RENDERED OVER THE 3D SCENE and hover/click closed the loop: plate measured
+560 → 604 px wide on hover (= HOVER_SCALE 1.08, ±22 px symmetric growth,
+previously-hovered plate returns to base) and clicking the hovered plate
+selected it — story advanced to `end`, player alive. Live findings, all
+fixed or contained:
+
+- **LibLoad segfaults this build, period.** Bisected: Scene/Collection/
+  Library types, load_actions on/off, minimal cube scene, and even re-loading
+  a COPY of the running template — kernel `sig=11` every time, before any
+  Python `except`. LibLoad is now opt-in (`UPVN_ENABLE_LIBLOAD=1`); the
+  supported tier for 0.50.0 is BAKED stages — new `tools/
+  bake_stage_into_template.py` (geometry only: every stage CAMERA excluded —
+  a second camera coincided with the viewport rendering from it instead of
+  Camera_UI; character templates parked at (30,−3,−30) outside the UI
+  frustum; markers/presets/actions linked).
+- **spawn() reposition fallback**: `addObject()` rejects active objects
+  ("must be in an inactive layer") and collection-excluded objects do not
+  exist in the runtime AT ALL (neither `objects` nor `objectsInactive`) —
+  spawn now clones an inactive master when present, else repositions the
+  active template onto the marker (idempotent for VN staging).
+- **camera_preset guard order**: the Camera_UI guard ran AFTER resolving
+  `Camera_3D`, so the preset MOVED the dormant template camera — live result
+  was the viewport rendering perspective stage view with all ortho UI gone.
+  Guard now runs first (test-pinned).
+- **_bind_camera re-asserts every tick** (was once+sticky): a stage camera in
+  the scene coincided with losing the viewport even with `active_camera`
+  still reading Camera_UI; the per-tick write is a no-op when correct.
+- **package_game.py ships the whole project tree** (assets/, stages/,
+  audio/) — it copied only *.rpy, so packaged builds lost every runtime-
+  resolved asset; StageManager stage candidates gained `//../game/stages/`
+  and `//game/stages/` (mirrors the audio resolver for packaged layouts).
+- Sample 3D stage shipped: `examples/10_full_sample_game/stages/
+  classroom_3d.blend` (floor/desks geometry, markers, preset empty, parked
+  character templates, `wave` action; axis-aligned floor — the first build's
+  rotX90 slab stood up as a 12-unit wall that filled the whole frame).
+- Evidence: `examples/10_full_sample_game/evidence/m26d_hover_scale_live.png`
+  (baseline / hover-A / hover-B frames; widths measured in-frame).
+
+## 0.6.14 — 2026-09-10 (cont.) M26c: play-by-script made real — audio, camera zoom, crash fix
+
+Full-sample game played END-TO-END in the player (start → branch menu → library
+zoom section → book menu → classroom 3D lines → 3-choice ending menu →
+good_ending → `end`), heartbeat-driven (xdo clicks, per-event JSON with
+label/idx/ortho), alive throughout. Found and fixed on the way:
+
+- **Segfault**: `SceneManager` LibLoad'ed `//stages/<name>.blend` with NO
+  os.path.exists check — a missing stage file SIGSEGVs blenderplayer before
+  the Python `except` can run (kernel log: `sig=11`). The full-sample game
+  died at `label classroom → load_stage classroom_3d`. Fix: SceneManager no
+  longer loads stages at all (log-and-continue); **StageManager owns stage
+  loading** and existence-checks every candidate path. Regression-guarded by
+  AST tests (scene_manager must not call LibLoad; StageManager LibLoad sites
+  must sit behind an exists check).
+- **Audio was `pass` stubs** — `play music/sound/voice` now really play via
+  aud: lazy `aud.Device()` (this build has NO `aud.device()`; `aud.Factory`
+  is gone too — `aud.Sound.file()` it is, with a Factory fallback for older
+  builds), `//`-relative prefix×ext resolver, warn-once on missing files
+  (story continues), music `loop_count=-1`, fade-in volume ramp in
+  `update(dt)`, per-channel handle stop. When no audio backend is reachable
+  (this sandbox: no PulseAudio) it warns ONCE — "running silent" — instead of
+  raising per play. Live: both `theme` and `knock.ogg` RESOLVE (sample wavs
+  in `blend/`), single device warning, end reached.
+- **Camera zoom now applies**: `camera zoom 1.2 duration 1.0 with ease` used
+  to set state only. `bge_frontend._apply_camera_state` tweens
+  `Camera_UI.ortho_scale = CAMERA_UI_ORTHO_SCALE / zoom` with the interpreter's
+  easing, driven per tick; UI layout re-reads ortho each frame so the M24
+  zoom-stable framing holds. Live-verified via an ortho field in the
+  heartbeat: 15.0 → 13.017 (mid-tween) → **12.5** (=15/1.2) → **10.0**
+  (=15/1.5) → back to 15.0. Two live-measured traps with "capture the current
+  ortho" base schemes (interpreter sets zoom before the frontend's first tick
+  → base ×1.2; calm ticks BETWEEN tweens carry the previous zoom's ortho →
+  compounding, authored 1.5× played as 1.8×): the contract constant is the
+  single base, the frontend the single ortho writer (StageManager's duplicate
+  lerp disabled). Math extracted to pure `zoom_ortho_scale()` (unit tests:
+  exact endpoints, linear midpoint, clamps, unknown-easing fallback).
+- `anim`/`show3d`/`camera preset` remain 3D-stage tier: state applied, safe
+  log-and-continue in template-only projects (needs a project with
+  `stages/*.blend` / a VN_3DStage collection to show geometry).
+
+## 0.6.14 — 2026-09-10 M26b: sprite/background textures work at runtime (node swap)
+
+The "textures essential" gap closed, keeping the palette as the fallback.
+Cross-review of `feat/desktop-no-textures` + field experiments established:
+
+- `bge.texture` is dead for node materials in UPBGE 0.50, BUT an
+  editor/runtime-assigned `TexImage` node renders fine **if** the mesh has
+  UVs and the image is file-backed. A **fileless** generated 1×1 image
+  segfaults the player at startup (measured — bisected); **packed** is safe.
+- Template/addon upgrade (v0.6.14): every VN plane gets a full 0..1 UV quad;
+  `MABackground` + per-position `MASprite_<pos>` materials carry the graph
+  `Output ← Emission ← MixRGBA(A=ObjectInfo.Color, B=TexImage(packed 1×1
+  white), Factor=0)`. Factor 0 → palette exactly as before; the runtime
+  flips Factor to 1.0 when it assigns a real PNG (`contract.
+  apply_material_image` / `reset_material_palette`). One material per sprite
+  plane so sprites texture independently. BG plane widened 10 → 18 units
+  (10 left black bars on 16:9 — visible in every earlier screenshot).
+- Renderers (auto mode) now try: image-bank plane → **material node swap**
+  (new; works for any project with assets/, no conversion needed) → legacy
+  bge.texture → palette. `color` mode untouched (verified live).
+- Sprite palette tint honours an explicit `Character(color="#…")`; the
+  `#ffffff` default is ignored (would wash silhouettes white).
+- Cross-review notes on `feat/desktop-no-textures` (faf1414): its AABB mouse
+  pick contradicts the 3D-object contract (rejected — ray pick kept); its
+  regenerated template lost the logic bricks AND game properties (pressing P
+  does nothing until a UI Setup Scene run) and shipped fileless white images
+  in TexImage nodes (player startup segfault; bisected in this branch).
+- Live-verified in the player (llvmpipe): template + `UPVN_IMAGES=auto`
+  renders `assets/sprites/eileen_happy.png` on Sprite_center and the
+  classroom PNG across the full background; converted Ren'Py project still
+  plays via the image bank. Evidence:
+  `examples/20_smoke_game/evidence/m26b_*.png`, `screenshots/m26/*`.
+- Tests: **295 passed, 16 skipped** (template-graph assertions run the real
+  blender binary when present).
+
+## 0.6.13 — 2026-09-10 M26 Desktop GUI verification + texture-free palette + Ren'Py converter
+
+Goal: "Run this engine in desktop (see docs how), fix all errors until usable
+in the Blender GUI, sample scene without image textures, keep a Ren'Py →
+UPVN path." All verified live on the headless-Wayland desktop (sway +
+XWayland + llvmpipe, UPBGE 0.50 / Blender 5.0.1).
+
+- **Startup segfault (P0) root-caused**: factory userprefs ship
+  `audio_device='PulseAudio'`; `AUD_Device_setSpeedOfSound` in
+  `LA_Launcher::InitEngine` dereferences the unavailable device → SIGSEGV
+  before the first frame. Fix: `bpy.context.preferences.system.audio_device =
+  'None'` once (recipe in docs/SANDBOX_UPBGE.md; Blender 5.0 moved audio
+  prefs from `preferences.audio` to `preferences.system`).
+- **Texture-free palette (sample scene + template play with zero PNGs)**:
+  materials are now `Output ← Emission ← Object Info.Color`, so
+  `KX_GameObject.color` paints everything at runtime. `contract.py` gains
+  COLOR_STAGES / SPRITE_TINTS / hash fallback, `stage_color()`,
+  `sprite_color()`, `apply_object_color()`. Renderers log decisions.
+  Deterministic (`hashlib`, not `hash()`).
+- **image_mode policy**: env `UPVN_IMAGES` > VNController game property
+  `image_mode` > default `color`. `color` never touches image files; `auto`
+  (written by the converter) uses converted-project art with palette
+  fallback. Setup Scene writes the property (dual representation).
+- **BUG-012 (P0)**: `SENSOR` physics is invisible to `KX_GameObject.rayCast`
+  in UPBGE 0.50 — every mouse choice click missed. Plates are now
+  `STATIC + BOX` (addon `_static_ghost`, template, updater tool).
+- **BUG-013 (P1)**: `Camera.getScreenRay` always returns None on ortho
+  cameras in UPBGE 0.50; `KX_Scene.rayCast` does not exist. Frontend now
+  shoots a manual frustum ray via `cam.rayCast` (mouse y is measured from the
+  window TOP — verified in-field). Mouse choice selection works end-to-end.
+- **BUG-014 (P1)**: `_hide_idle_sprites()` ran after `ctrl.load()` and hid
+  the opening `show` sprite (stage color changed, sprite never appeared,
+  zero errors). It now keeps planes claimed by `sprite_mgr`.
+- **BUG-015 (P1)**: Setup Scene clobbered a configured `script_path` with the
+  panel default `//game/script.rpy`; panel + `build_vn_scene` now adopt the
+  blend's existing value when the caller passes the default.
+- **Diagnostics**: `UPVN_DEBUG_TEE` env mirrors Python stdout/stderr to a
+  file (player stdout is block-buffered and lost on kill -9); pointer ticks
+  log hover/click changes; `UPVN_POINTER_PROBE=1` prints a physics ray probe;
+  addon version banner v0.6.13.
+- **Ren'Py → UPVN converter**: `tools/renpy_convert.py` (uses
+  `tools/check_renpy_project.find_script_dir`/`check_project`) builds a
+  self-contained project: `game/` scripts (dir-merged at runtime),
+  `assets/{backgrounds,sprites}` from `game/images`, audio, runtime snapshot,
+  wired template (`script_path=//../game`, `image_mode=auto`), parse report +
+  `README_PLAY.txt`. `tools/wire_converted_blend.py` bakes an **image bank**
+  (one plane per asset, UV-mapped, packed textures — `bge.texture` cannot
+  bind node materials in 0.50: "Texture is not available"). Frontend accepts
+  **directories** as script sources. Verified end-to-end in the GUI with a
+  fake Ren'Py project (images, branching, mouse choices).
+- **Desktop tooling**: `tools/desktop_run.sh` (env-correct player launcher);
+  `tools/update_template_materials.py` (in-place template upgrade, logic
+  bricks preserved — `make_template.py` cannot add bricks in
+  `--background`).
+- **Addon v0.6.13**: object tints seeded per object, `image_mode` prop,
+  STATIC physics for ray targets, script_path preservation. Zipped to
+  `dist/upvn_editor_addon_v0.6.13.zip` (v0.6.12 zip also rebuilt).
+- Evidence: `examples/20_smoke_game/evidence/m26_*.png`,
+  `screenshots/m26/*` (palette stages, choice plates, converted Ren'Py game
+  with real images, editor panel + Setup Scene status).
+- Tests: **290 passed, 16 skipped** (`tests/test_m26_desktop_gui.py` adds 14).
+- Known environment limits (not engine bugs, measured): embedded P in the
+  editor needs ~1.6 GB RSS — OOM-killed below that in the 2 GB sandbox;
+  llvmpipe at 1024×576 renders 13–19 fps on 2 vCPUs.
+
 ## 0.6.12 — 2026-09-10 M25 Usability Stabilization Freeze
 
 - **BUG-009 (P0)**: UPBGE 0.50 `KX_GameObject` exposes only

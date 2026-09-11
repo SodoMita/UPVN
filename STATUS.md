@@ -1,3 +1,54 @@
+# Current Status — 2026-09-11 (M26g: GUI button sweep DONE, branch agent/desktop-gui-run-fixes)
+
+## Last completed
+- **M26g (branch `agent/desktop-gui-run-fixes`, v0.6.14)**: every panel
+  button executed live in the UPBGE 0.50 editor GUI on the headless-Wayland
+  stack; the embedded game (P) played to a branch in-editor; four
+  showstoppers fixed: BUG-017 Setup Scene NameError (tex-capable materials),
+  BUG-018 write() label-wipe data loss, BUG-019 Create Project overwrite,
+  BUG-020 UPVN_Prefs never registered (Preferences page invisible). Plus
+  sandbox/tooling: BUG-021..024 (package_addon fresh-clone, smoke
+  relative path, OOM/swap guard, sway mode syntax). Panel de-duplicated
+  (Check Wiring ×2 in UPBGE). 335 passed / 16 skipped. Evidence:
+  screenshots/m26g/* (editor with game running, Preferences page, text
+  editor area).
+
+# Current Status — 2026-09-10 (M26b: sprite textures work at runtime, branch feat/desktop-gui)
+
+## Last completed
+- **M26b (branch `feat/desktop-gui`, v0.6.14)**: runtime sprite/background
+  textures via a texture-capable material graph (TexImage packed-white ×
+  MixRGBA(ObjectInfo, Tex, Factor)) — palette at Factor 0, texture at 1;
+  UV quads on all VN planes; per-position sprite materials; renderers try
+  bank → node swap → bge.texture → palette. Cross-reviewed
+  `feat/desktop-no-textures`: AABB pick rejected (3D-object contract → ray
+  pick kept and live-verified), fileless generated white images SEGFAULT the
+  player (bisected; packed is safe), their regenerated template lost logic
+  bricks + game properties. Live-verified in the player on llvmpipe:
+  auto mode renders PNG sprites with transparency + full-width backgrounds;
+  color mode unchanged; converted Ren'Py project still plays. 295 tests.
+
+# Current Status — 2026-09-10 (M26 Desktop GUI verification DONE, branch feat/desktop-gui)
+
+## Last completed
+- **M26 Desktop GUI + texture-free palette + Ren'Py converter (branch
+  `feat/desktop-gui`)**: engine verified live in UPBGE 0.50 (Blender 5.0.1)
+  on the headless-Wayland desktop (docs/how agent can run desktop.md).
+  Startup segfault root-caused (audio_device userpref, see CHANGELOG 0.6.13);
+  template + sample scenes play with ZERO image textures (Object Info →
+  Emission palette, image_mode policy); mouse choices fixed (SENSOR is not
+  rayCast-hittable in 0.50 → STATIC+BOX; ortho getScreenRay dead → manual
+  frustum rayCast; mouse y from window top); opening sprite hidden-after-load
+  fixed; Setup Scene no longer clobbers script_path; UPVN panel verified in
+  the editor GUI (Engine OK, Setup Scene status, game properties show
+  image_mode); Ctrl+S/Ctrl+L round-trip re-verified in GUI;
+  **tools/renpy_convert.py** converts a Ren'Py project to a playable UPVN
+  project (image bank bake, palette fallback) — verified end-to-end with a
+  fake Ren'Py game. Addon v0.6.13 (dist zip). Tests: 290 passed / 16 skipped.
+  Evidence: examples/20_smoke_game/evidence/m26_*.png, screenshots/m26/*.
+  Embedded P in-editor works but needs ~1.6 GB RSS (OOM below that in the
+  2 GB sandbox; standalone player is the lean path here).
+
 # Current Status — 2026-09-10 (M25 Usability Stabilization Freeze DONE)
 
 ## Last completed
@@ -120,3 +171,119 @@ Four jobs, all verified: `tests` (pytest), `examples` (every example validated i
 - Audit 0.5.2: safe_eval AST whitelist (no Attribute/Subscript/ListComp), SaveManager _sanitize_slot/_slot_path + is_relative_to, load schema validation, tests skip when the_question missing, zip hygiene no pyc, MIT LICENSE, requirements dev black
 - Declarative language (M15): `state:` → defaults+types (VNState.declared_types), `character e:` block, `image/audio/stage` → VNState.assets (+resolve_asset), `set` canonical assign (typed-checked), `choice` keyword + optional `end`; expr_eval.py AST whitelist (no eval escapes); pointer.py hotspot hover/click for editor UI; menu choices carry stable `id`s
 - Three tiers (M16): `.urpy` (urpy_parser, required `end`, no Python), `.rpy` safe (default; full-tier constructs → ParseError 'mode=full' hint), `.rpy` full (Parser(full=True), parse_string_full, VNController(mode='full'), tools --mode). Full tier adds label_params/defines/init_python/transforms/screens/styles/translations + `"full": true` to IR; interpreter runs python:/init via exec with renpy/store compat (renpy_compat.py) and syncs JSON-safe vars back; while-loop body is spliced per-iteration with loop-id tail markers for break/continue; label params bound/restored on call/return. Expression sandbox: container subscripts allowed, attribute access only on injected renpy/store (dunders blocked)
+
+## M26c — play-by-script: audio real, camera zoom real, segfault fixed (2026-09-10)
+
+Full-sample game (`examples/10_full_sample_game`, template + flipped
+`script_path`) played start→end in the player with a per-event heartbeat
+(label/idx/event/choices/ortho). Evidence in this session's logs; repro:
+`UPVN_HEARTBEAT=/tmp/upvn_hb.json UPVN_DEBUG_TEE=/tmp/upvn_debug.log
+blenderplayer -w 800 450 blend/UPVN_Template.blend` (+VNController.script_path
+flipped to the sample script), xdotool clicks/keys to advance.
+
+- **Fixed segfault** (was killing the player at `load_stage classroom_3d`):
+  SceneManager LibLoad without exists-check → sig=11. StageManager owns stage
+  loading now; SceneManager logs-and-continues. AST regression tests.
+- **Audio**: play music/sound/voice are real aud playback (Sound.file API —
+  this build has no aud.device()/Factory), prefix×ext resolver, warn-once
+  missing-file, loop=-1 music, fade ramp in update(dt), single "no audio
+  device — running silent" warning when no backend exists (sandbox), per-
+  channel stop. Sample wavs committed in blend/ (theme.wav, knock.ogg.wav).
+- **Camera zoom** applies to ortho with the authored easing; heartbeat
+  measured 15→12.5→10→15 exactly. Contract constant = base (single writer;
+  two live traps with measured-base schemes documented in code).
+- `anim`/`show3d`/`camera preset`: state-only 3D tier, safe continue without
+  a stage project (LibLoad logs when stages/ files absent).
+- Hover (M26c, previous commit): HOVER_SCALE 1.08, single scale writer in
+  layout_screen_ui, zoom-proof; 5 headless tests.
+
+Status: 307 passed / 16 skipped. `feat/desktop-gui`.
+
+## M26d — 3D stage tier + hover proven live (2026-09-10)
+
+- LibLoad SEGFAULTS UPBGE 0.50.0 on any file (bisected incl. template-copy
+  control) → opt-in via UPVN_ENABLE_LIBLOAD=1; baked stages are the tier:
+  tools/bake_stage_into_template.py (no stage cameras; templates parked at
+  30,-3,-30 — excluded collections don't exist at runtime, addObject rejects
+  active objects → spawn() repositions the master).
+- camera_preset guards Camera_UI BEFORE resolving Camera_3D (moving the
+  dormant template camera stole the viewport: perspective render, no UI).
+- _bind_camera re-asserts every tick (stage camera present ⇒ viewport could
+  drift despite active_camera reading Camera_UI).
+- Hover LIVE-MEASURED over a 3D scene menu: plate 560 → 604 px (×1.08),
+  symmetric ±22 px, previously-hovered plate returns to base; click selects
+  and the story advances (probe script reached `end`, player alive).
+- package_game.py ships the whole project tree now (was *.rpy only — assets/
+  stages/ were lost in packaged builds); stage path candidates include
+  //../game/stages/ (packaged layout).
+- Sample stage: examples/10_full_sample_game/stages/classroom_3d.blend
+  (+evidence m26d_hover_scale_live.png). Tests: 314 passed / 16 skipped
+  (7 new M26d regressions).
+
+## M26e — bootstrap script fixed, bake tool executed + standalone-verified (2026-09-10)
+
+- desktop_sway.sh: export XDG_RUNTIME_DIR (was bare assignment → sway abort)
+  + `model` not `mode` for headless output config. Verified by kill-and-
+  rebuild via the script itself. Both pinned in tests.
+- bake_stage_into_template.py: EXCLUDE_SUFFIX interpolation NameError fixed
+  (first real run); copies engine/ + bge_frontend/ next to --out (launcher
+  resolves //; otherwise ModuleNotFoundError). Baked game live-verified from
+  /tmp/bakedgame: spawns/anim/preset-skip/menu/hover-click-select → end,
+  ALIVE.
+- Tests: 318 passed / 16 skipped (4 new M26e; bake tests skip without /opt).
+
+## M26f — package_game verified live, script_path baked (2026-09-10)
+
+- Packager runs clean on the sample game (zip 1740 KB; in-packager playable
+  check 59 events). Packaged blend has VNController.script_path =
+  //game/script.rpy pre-baked (binary-optional with manual fallback; .blend1
+  removed post-flip). README_PLAY updated — "press P" with no manual step.
+- Packaged build live-verified start→end in the player: assets palette OK,
+  game/stages/classroom_3d.blend FOUND (LibLoad-gated message correct), theme
+  resolves, endings menu, ALIVE.
+- Removed accidentally-tracked blend/sample_test.blend; SceneManager
+  load_stage log wording fixed (deferred-to-StageManager, no false "no stage
+  file").
+- Tests: 322 passed / 16 skipped (4 new M26f).
+
+## M26g (v0.6.15) — plugin update works live, no uninstall/restart (2026-09-11)
+
+- register() purges stale registrations by RNA name (panels via bl_idname
+  UPVN_PT_main; operators via lowercase keys like UPVN_OT_reload_addon)
+  before binding — install-over-a-running-UPBGE applies immediately.
+- Scene.upvn_addon_version live property + upvn.reload_addon operator
+  ("Apply Update") for file-replaced updates; synchronous in background,
+  timer-deferred in UI.
+- Proven in one blender session (test_m26g_addon_live_update.py, 5 tests):
+  real addon_install of the 0.6.15 zip over live 0.6.14 → new code live with
+  no restart; reload op applies an on-disk 0.6.99 bump in-session.
+- Blender 5.0.1 findings: addons/ not on sys.path until
+  refresh_script_paths() (the install operator calls it);
+  addon_utils.enable returns module-or-None (unpacking it as (ok, err)
+  raises).
+- package_addon.py mkdir fix (missing dist/ wrote a FILE named dist).
+  Tests: 327 passed / 16 skipped.
+
+
+## M26h — branch consolidation (2026-09-11)
+
+`agent/desktop-gui-run-fixes` = the whole desktop-gui lineage in ONE branch
+(target: a single PR to main):
+
+- merged `origin/desktop-gui-fixed` (730c316: desktop-gui@7995acd +
+  agent/desktop-gui-fixes era + ReloadAddon/_get_script_text/panel tweaks)
+- merged `origin/agent/desktop-gui-fixes` (940912c: M26d backlog/rewind
+  GUI, history panel, desktop_qa.py, template bake tools, docs)
+- NOT merged, deliberately: `feat/desktop-no-textures` (forked from main,
+  not desktop-gui; cross-review-rejected approaches — AABB pick, fileless
+  white images -> player segfault, template brick loss).
+- already ancestors (nothing to do): agent/desktop-gui-stable,
+  feat/declarative-rpy, feat/renpy-corpus-compat.
+
+State: 366 passed / 16 skipped; zip rebuilt (dist/
+upvn_editor_addon_v0.6.15.zip = merged code); smoke walkthrough green
+incl. M26d backlog+rewind; live editor round green (all ops, wiring
+29/29, embedded game P->menu->branch->Esc, editor alive; evidence in
+screenshots/consolidation/). See CHANGELOG 0.6.15 (cont.) for the merge
+decisions and the three follow-up fixes (test import, skip guard,
+Pillow-on-lib-only-tarball).

@@ -97,11 +97,26 @@ def resolve_script_path(logic, owner=None, extra_candidates=None):
             p = c
         tried.append(p)
         try:
-            if os.path.isfile(p):
+            # M26: directories are valid script sources — VNController.load()
+            # merges every *.rpy/*.urpy inside (multi-file Ren'Py projects,
+            # which is what tools/renpy_convert.py points at: '//../game').
+            if os.path.isfile(p) or os.path.isdir(p):
                 return os.path.abspath(p), tried
         except Exception:
             pass
     return None, tried
+
+
+def _prop(owner, name):
+    """Read a game property from either representation (dict or KX object)."""
+    if owner is None:
+        return None
+    try:
+        if isinstance(owner, dict):
+            return owner.get(name)
+        return owner[name] if name in owner else None
+    except Exception:
+        return None
 
 
 def _owner_script_prop(cont):
@@ -134,14 +149,30 @@ def _unregister_overlay():
         pass
 
 
-def _hide_idle_sprites():
+def _hide_idle_sprites(ctrl=None):
+    """Hide Sprite_* planes no story actor currently claims.
+
+    M26 bugfix: this used to hide *every* Sprite_* unconditionally right
+    after ctrl.load() — but the load already applied the story's opening
+    `show` events, so the opening sprite was made visible and immediately
+    hidden again (the field symptom: stage color changed, sprite never
+    appeared, no error anywhere). Planes claimed by ctrl.sprite_mgr are kept."""
     if not HAS_BGE:
         return
+    keep = set()
+    try:
+        mgr = getattr(ctrl, "sprite_mgr", None)
+        for info in (getattr(mgr, "planes", None) or {}).values():
+            ob = info.get("obj")
+            if ob is not None:
+                keep.add(str(getattr(ob, "name", "")))
+    except Exception:
+        pass
     try:
         import bge as _bge
         sc = _bge.logic.getCurrentScene()
         for ob in sc.objects:
-            if str(ob.name).startswith("Sprite_"):
+            if str(ob.name).startswith("Sprite_") and str(ob.name) not in keep:
                 ob.visible = False
     except Exception:
         pass
@@ -172,17 +203,39 @@ def _show_mouse():
         pass
 
 
-def _sync_world_ui(ctrl):
+def _sync_world_ui(ctrl, hovered=None):
     if not HAS_BGE or ctrl is None:
         return
     try:
         from engine.ui.world_ui import build_world_ui, apply_world_ui
         from engine.render.contract import CAMERA_UI_ORTHO_SCALE
+        # backlog + rewind state come from the screen manager / controller so the
+        # player draws the same history the headless traces already had (M26d).
+        _sm = getattr(ctrl, "screen_mgr", None)
+        history_open = False
+        history_entries = None
+        if _sm is not None:
+            try:
+                history_open = bool(_sm.is_overlay_visible("history"))
+            except Exception:
+                history_open = False
+            try:
+                history_entries = _sm.get_history_entries(strip=True)
+            except Exception:
+                history_entries = None
+        if history_entries is None:
+            history_entries = getattr(getattr(ctrl, "state", None), "history", [])
         payload = build_world_ui(
             getattr(ctrl, "current_event", None),
             ui_mgr=getattr(ctrl, "ui_mgr", None),
             diag=getattr(ctrl, "_load_diag", None),
+            history_entries=history_entries,
+            history_open=history_open,
+            rewind_depth=getattr(ctrl, "rewind_depth", lambda: 0)(),
+            history_scroll=int(getattr(ctrl, "_history_scroll", 0) or 0),
         )
+        # hovered comes in as a parameter (set by _tick_pointer) — this
+        # function has no `logic` in scope
         ortho = CAMERA_UI_ORTHO_SCALE
         try:
             import bge as _bge
@@ -190,7 +243,14 @@ def _sync_world_ui(ctrl):
             ortho = float(getattr(cam, "ortho_scale", ortho) or ortho)
         except Exception:
             pass
-        apply_world_ui(_get_obj, payload, ortho=ortho)
+        apply_world_ui(_get_obj, payload, ortho=ortho, hovered=hovered)
+        # expose the last payload so the QA heartbeat can report what the UI
+        # actually decided (text, visibility) — not just the story position.
+        try:
+            import bge as _bge
+            _bge.logic._upvn_last_payload = payload
+        except Exception:
+            pass
     except Exception as e:
         # M25 BUG-002: this used to be a bare `except: pass`, which silently
         # swallowed every UI failure every tick (the player also discards
@@ -203,6 +263,25 @@ def _sync_world_ui(ctrl):
                 print(f"[UPVN] world UI sync error (shown once): {e}")
         except Exception:
             pass
+
+
+def _pointer_probe(sc, cam):
+    """Env-gated (UPVN_POINTER_PROBE=1) once-per-30-ticks physics probe:
+    what does a scene rayCast see along key columns? Answers ray-vs-SENSOR
+    questions in the field without touching game code."""
+    import bge as _bge
+    logic = _bge.logic
+    logic._upvn_probe_n = getattr(logic, "_upvn_probe_n", 0) + 1
+    if logic._upvn_probe_n % 30 != 1:
+        return
+    try:
+        for label, pz in (("choice0col", 1.97), ("choice1col", 1.41),
+                          ("spritecol", 0.0), ("high", 4.0), ("low", -4.0)):
+            hit, p, n = cam.rayCast((0.0, cam.worldPosition.y + 5.0, pz),
+                                    (0.0, cam.worldPosition.y - 5.0, pz), 20.0)
+            print(f"[probe] {label} z={pz}: hit={getattr(hit,'name',None)} at={p}")
+    except Exception as e:
+        print(f"[probe] failed: {e}")
 
 
 def _object_under_cursor():
@@ -218,6 +297,35 @@ def _object_under_cursor():
             hit = cam.getScreenRay(x, y, 80.0)
         except Exception:
             hit = None
+        if hit is None:
+            # M26: getScreenRay is unreliable on orthographic cameras in
+            # UPBGE 0.50 (measured in-field: always None on Camera_UI), so
+            # shoot an explicit ray straight along the camera's view axis
+            # through the frustum point the mouse selects. UPBGE 0.50's
+            # mouse.position y is measured from the TOP of the window.
+            try:
+                w = float(_bge.render.getWindowWidth()) or 1280.0
+                h = float(_bge.render.getWindowHeight()) or 800.0
+            except Exception:
+                w, h = 1280.0, 800.0
+            try:
+                ortho = float(getattr(cam, "ortho_scale", 0.0) or 0.0)
+            except Exception:
+                ortho = 0.0
+            if ortho <= 0.0:
+                ortho = 15.0  # contract CAMERA_UI_ORTHO_SCALE
+            nx = float(x) - 0.5
+            ny = 0.5 - float(y)                       # top-origin → up-positive
+            px = cam.worldPosition.x + nx * ortho
+            pz = cam.worldPosition.z + ny * ortho * (h / w)
+            py = cam.worldPosition.y
+            try:
+                # KX_Scene has no rayCast in UPBGE 0.50 — cast from the
+                # camera object (KX_GameObject.rayCast, ignores self).
+                hit, _p, _n = cam.rayCast((px, py + 5.0, pz),
+                                          (px, py - 5.0, pz), 20.0)
+            except Exception:
+                hit = None
         if hit is None:
             try:
                 vect = cam.getScreenVect(x, y)
@@ -238,10 +346,20 @@ def _tick_pointer(ctrl):
     if not HAS_BGE or ctrl is None:
         return
     ev = getattr(ctrl, "current_event", None) or {}
+    try:
+        import bge as _bge
+        if ev.get("type") != "menu":
+            _bge.logic._upvn_hover = None
+    except Exception:
+        pass
     if ev.get("type") != "menu":
         return
     try:
         import bge as _bge
+        import os as _os
+        if _os.environ.get("UPVN_POINTER_PROBE"):
+            _pointer_probe(_bge.logic.getCurrentScene(),
+                           _bge.logic.getCurrentScene().active_camera)
         from engine.core.vn_controller import _bge_just
         from engine.ui.pointer import HotspotMap, PointerTracker
         from engine.ui.world_ui import normalize_hit_name
@@ -253,34 +371,173 @@ def _tick_pointer(ctrl):
             logic._upvn_ptr_key = key
         tr = logic._upvn_ptr
         name = normalize_hit_name(_object_under_cursor())
+        logic._upvn_hover = name if name and str(name).startswith("choice_") \
+            else None
         clicked = _bge_just("mouse", _bge.events.LEFTMOUSE)
+        # M26 field diagnostics (visible via UPVN_DEBUG_TEE): log whenever the
+        # ray's hover target or the click flag changes — a dropped synthetic
+        # click or a ray miss is otherwise invisible in the player.
+        sig = (name, bool(clicked))
+        if getattr(logic, "_upvn_ptr_sig", None) != sig:
+            logic._upvn_ptr_sig = sig
+            mx, my = (getattr(_bge.logic, "mouse").position or (0.0, 0.0))
+            print(f"[pointer] hover={name} clicked={clicked} mouse=({mx:.3f},{my:.3f})")
         for pe in tr.update(name, clicked=clicked):
             idx = tr.choose(pe)
             if idx is not None:
+                print(f"[pointer] click → choice {idx}")
                 ctrl.choose(idx)
                 return
+    except Exception as e:
+        import traceback
+        print(f"[pointer] tick failed: {e}")
+        traceback.print_exc()
+
+
+def zoom_ortho_scale(base, zoom_from, zoom_to, duration, easing, t_raw):
+    """M26c pure zoom math (unit-tested without bge): eased zoom factor →
+    ortho scale. Ortho = base / zoom, clamped to ≥1.0; zoom factor clamped
+    to ≥0.05 so a 0/1.0 zoom can't divide by zero. Returns the scale only;
+    the caller decides tween completion from the same t_raw.
+    `easing` is an engine.atl name resolved lazily (e.g. "ease", "linear").
+    """
+    zoom_from = float(zoom_from)
+    zoom_to = float(zoom_to)
+    t = min(1.0, max(0.0, float(t_raw)))
+    try:
+        from engine.atl.easing import get_easing
+        ease = get_easing(easing or "ease")
     except Exception:
-        pass
+        ease = lambda x: x
+    zoom = zoom_from + (zoom_to - zoom_from) * ease(t)
+    return max(1.0, float(base) / max(0.05, zoom))
+
+
+def _apply_camera_state(logic, ctrl):
+    """M26c: apply the interpreter's camera_zoom tween to the ortho game
+    camera. `camera zoom 1.2 duration 1.0 with ease` used to set state only —
+    nothing in the player applied it. Ortho scale = base / zoom, so zoom>1
+    moves closer. UI layout re-reads ortho each frame, so dialogue/choices
+    stay framed (M24 zoom-stable UI holds)."""
+    try:
+        cam_state = getattr(ctrl.state, "camera", None) or {}
+        zoom_to = cam_state.get("_zoom_to")
+        if zoom_to is None:
+            return
+        import time as _t
+        t0 = cam_state.get("_zoom_t0")
+        dur = float(cam_state.get("_zoom_dur", 0.0) or 0.0)
+        t_raw = 1.0
+        if t0 is not None and dur > 0:
+            t_raw = (_t.time() - t0) / dur
+        if t_raw >= 1.0:
+            # tween finished — drop the transient keys so this stays cheap
+            for k in ("_zoom_from", "_zoom_to", "_zoom_dur",
+                      "_zoom_ease", "_zoom_t0"):
+                cam_state.pop(k, None)
+        cam = logic.getCurrentScene().active_camera
+        if cam is not None and getattr(cam, "ortho_scale", None) is not None:
+            # M26c: the contract constant is the single source of truth for
+            # the un-zoomed base. Two live-measured traps with "capture the
+            # current ortho" schemes: the interpreter sets zoom before this
+            # function's first tick (inflated base ×1.2 → zoom-in ended
+            # unchanged), and calm ticks BETWEEN tweens carry the previous
+            # zoom's ortho (compounding base 12.5 → authored 1.5× played as
+            # 1.8×). Setup Scene enforces CAMERA_UI_ORTHO_SCALE;
+            # upvn_camera_custom cameras accept zooms relative to it.
+            cam.ortho_scale = zoom_ortho_scale(
+                CAMERA_UI_ORTHO_SCALE,
+                cam_state.get("_zoom_from", cam_state.get("zoom", zoom_to)),
+                zoom_to,
+                dur,
+                cam_state.get("_zoom_ease"),
+                t_raw,
+            )
+    except Exception as e:
+        try:
+            if not logic._upvn_cam_err:
+                logic._upvn_cam_err = True
+                print(f"[UPVN] camera zoom apply failed: {e}")
+        except Exception:
+            pass
 
 
 def _bind_camera():
-    """Force scene.active_camera = Camera_UI once (editor camera is not the game camera)."""
+    """Force scene.active_camera = Camera_UI. M26d: this ran ONCE with a
+    sticky guard, but a live-verified run proved that is not enough — a
+    merged 3D stage brought its own Camera_3D and the viewport rendered from
+    it (perspective, no UI planes, pointer rays hit stage geometry) even
+    though the boot bind had printed. Re-assert every tick; the check is one
+    attribute compare."""
     if not HAS_BGE:
         return
     try:
         import bge as _bge
         logic = _bge.logic
-        if getattr(logic, "_upvn_cam_bound", False):
-            return
         sc = logic.getCurrentScene()
-        cam = sc.objects.get("Camera_UI")
-        if cam is None:
+        cam = sc.active_camera
+        want = sc.objects.get("Camera_UI")
+        if want is None:
             return
-        sc.active_camera = cam
-        logic._upvn_cam_bound = True
-        print("[UPVN] active_camera bound to Camera_UI")
+        # force-set every tick: this build's viewport camera selection is not
+        # fully explained by active_camera read-back, and one extra camera in
+        # the scene (dormant template Camera_3D) coincided with perspective
+        # rendering. The write is a no-op when already correct.
+        sc.active_camera = want
+        if cam is not None and getattr(cam, "name", "") == "Camera_UI":
+            logic._upvn_cam_bound = True
+            return
+        if not getattr(logic, "_upvn_cam_bound", False):
+            logic._upvn_cam_bound = True
+            print("[UPVN] active_camera bound to Camera_UI")
+        else:
+            print("[UPVN] active_camera re-bound to Camera_UI "
+                  f"(was {getattr(cam, 'name', '?')})")
     except Exception:
         pass
+
+
+def _install_debug_tee(logic):
+    """Mirror Python stdout/stderr into a file when UPVN_DEBUG_TEE is set.
+
+    The standalone player's stdout is block-buffered and lost on kill -9, so
+    field diagnostics printed with print() were unobservable (M26). With the
+    tee set — UPVN_DEBUG_TEE=/tmp/upvn_debug.log — every engine print (script
+    load, asset decisions, errors) lands in the file line-buffered, next to
+    the UPVN_HEARTBEAT state file."""
+    if getattr(logic, "_upvn_tee_installed", False):
+        return
+    logic._upvn_tee_installed = True
+    path = os.environ.get("UPVN_DEBUG_TEE")
+    if not path:
+        return
+    try:
+        f = open(path, "a", buffering=1)
+
+        class _Tee:
+            def __init__(self, *streams):
+                self._streams = streams
+
+            def write(self, data):
+                for s in self._streams:
+                    try:
+                        s.write(data)
+                    except Exception:
+                        pass
+                return len(data)
+
+            def flush(self):
+                for s in self._streams:
+                    try:
+                        s.flush()
+                    except Exception:
+                        pass
+
+        sys.stdout = _Tee(sys.stdout, f)
+        sys.stderr = _Tee(sys.stderr, f)
+        print(f"[UPVN] debug tee active → {path}")
+    except Exception as e:
+        print(f"[UPVN] debug tee failed ({path}): {e}")
 
 
 def main(cont=None):
@@ -291,6 +548,7 @@ def main(cont=None):
     import bge as _bge
     logic = _bge.logic
     ensure_engine_syspath()
+    _install_debug_tee(logic)
     _bind_camera()
     _show_mouse()
 
@@ -301,17 +559,40 @@ def main(cont=None):
         # 1) explicit property on the controller object (add-on's project path)
         path, tried = resolve_script_path(logic, owner=owner)
         logic._upvn_tried = tried
+        # M26d: the parse tier is a project property, because a converted
+        # Ren'Py project is real .rpy source ("full" tier: init offset, extend,
+        # screen …) while the declarative samples stay on "safe".  Before this,
+        # every tool-converted game failed to load and the player showed the
+        # "script not found" screen even though the .rpy files were there.
+        parse_mode = _prop(owner, "parse_mode") or "safe"
+
+        def _load_with(mode):
+            ctrl = VNController(script_path=path, mode=mode)
+            ctrl.load()
+            logic._upvn_ctrl = ctrl
+            _unregister_overlay()
+            _hide_idle_sprites(ctrl)
+            print(f"[UPVN] Loaded script {path} (mode={mode}, from "
+                  f"{'VNController.script_path' if owner is not None else 'candidate'})")
+
         if path:
             try:
-                ctrl = VNController(script_path=path)
-                ctrl.load()
-                logic._upvn_ctrl = ctrl
-                _unregister_overlay()
-                _hide_idle_sprites()
-                print(f"[UPVN] Loaded script {path} (from {'VNController.script_path' if owner is not None else 'candidate'})")
+                _load_with(parse_mode)
             except Exception as e:
-                print(f"[UPVN] failed to load {path}: {e}")
-                logic._last_upvn_error = f"{path}: {e}"
+                # One automatic retry at the full tier: it is a superset, so a
+                # blend whose property was never wired still plays instead of
+                # showing a diagnostic screen.
+                if parse_mode != "full":
+                    print(f"[UPVN] load with mode={parse_mode} failed ({e}); "
+                          f"retrying with mode=full")
+                    try:
+                        _load_with("full")
+                    except Exception as e2:
+                        print(f"[UPVN] failed to load {path}: {e2}")
+                        logic._last_upvn_error = f"{path}: {e2}"
+                else:
+                    print(f"[UPVN] failed to load {path}: {e}")
+                    logic._last_upvn_error = f"{path}: {e}"
         if not hasattr(logic, "_upvn_ctrl"):
             # 2) fallback: embedded minimal script that explains itself on the
             #    screen (a console-only warning is invisible to players)
@@ -332,7 +613,7 @@ def main(cont=None):
             ctrl._load_diag = diag
             logic._upvn_ctrl = ctrl
             _unregister_overlay()
-            _hide_idle_sprites()
+            _hide_idle_sprites(ctrl)
 
     # per-frame tick with dt
     global _last_time
@@ -356,6 +637,8 @@ def main(cont=None):
                 pass
     # also tick sub-managers for transitions
     try:
+        if ctrl.audio_mgr is not None and hasattr(ctrl.audio_mgr, "update"):
+            ctrl.audio_mgr.update(dt)
         if ctrl.sprite_mgr:
             ctrl.sprite_mgr.update(dt)
         if ctrl.scene_mgr and hasattr(ctrl.scene_mgr, "transition_alpha"):
@@ -364,8 +647,11 @@ def main(cont=None):
     except Exception:
         pass
     try:
-        _sync_world_ui(ctrl)
+        import bge as _bge
+        _sync_world_ui(ctrl,
+                       hovered=getattr(_bge.logic, "_upvn_hover", None))
         _tick_pointer(ctrl)
+        _apply_camera_state(logic, ctrl)
     except Exception:
         pass
     try:
@@ -389,15 +675,72 @@ def main(cont=None):
             _st = ctrl.state
             _evt = ctrl.current_event or {}
             _sm = getattr(ctrl, "screen_mgr", None)
+            _ortho = None
+            try:
+                _cam = _bge.logic.getCurrentScene().active_camera
+                _ortho = (round(float(_cam.ortho_scale), 3)
+                          if getattr(_cam, "ortho_scale", None) is not None
+                          else None)
+            except Exception:
+                pass
+            _payload = getattr(logic, "_upvn_last_payload", None) or {}
+            _interp = getattr(ctrl, "interp", None)
+            _hb_data = {
+                "label": _st.current_label,
+                "idx": _st.instruction_index,
+                "event": _evt.get("type"),
+                "choices": len(_evt.get("choices") or []),
+                "modal": (None if _sm is None or _sm.active_modal is None
+                          else _sm.active_modal.name),
+                "ortho": _ortho,
+                # --- M26d: what the UI layer actually decided this tick, plus
+                # the rewind/history counters a harness needs to assert on.
+                "speaker": _payload.get("speaker"),
+                "dialogue": _payload.get("dialogue"),
+                "dialogue_visible": bool(_payload.get("dialogue_visible")),
+                "history": len(getattr(_st, "history", []) or []),
+                "history_open": bool(_sm and _sm.is_overlay_visible("history"))
+                if _sm is not None else False,
+                "history_scroll": int(getattr(ctrl, "_history_scroll", 0) or 0),
+                "rollback_depth": len(getattr(_interp, "rollback_stack", []) or [])
+                if _interp is not None else 0,
+                "rollforward_depth": len(getattr(ctrl, "_forward_stack", []) or []),
+                "skipping": bool(getattr(_st, "skip", False)),
+                "auto": bool(getattr(_st, "auto", False)),
+            }
+            try:
+                _sc = logic.getCurrentScene()
+                for _n, _k in (("Dialogue_Text", "font_body"),
+                               ("Speaker_Text", "font_speaker"),
+                               ("History_Text", "history_body"),
+                               ("History_Box", "history_box"),
+                               ("Rewind_Text", "rewind_body")):
+                    try:
+                        _o = _sc.objects.get(_n)
+                        _bo = getattr(_o, "blenderObject", None) if _o is not None else None
+                        _d = getattr(_bo, "data", None) if _bo is not None else None
+                        _hb_data[_k] = getattr(_d, "body", None) if _d is not None else None
+                        # world scale + curve font size decide how big the text
+                        # actually draws; `.size` on a KX object is not the
+                        # transform (it silently creates a python property).
+                        if _bo is not None:
+                            _hb_data[_k + "_scale"] = [round(float(v), 4) for v in _bo.scale]
+                            _hb_data[_k + "_font"] = round(float(getattr(_d, "size", 1.0)), 4) if _d is not None else None
+                            _hb_data[_k + "_wpos"] = [round(float(v), 3) for v in _bo.location]
+                            # dims==0 with a non-empty body = the curve produced
+                            # no geometry (invisible text, no error anywhere)
+                            _hb_data[_k + "_dim"] = [round(float(v), 3) for v in _bo.dimensions]
+                            _hb_data[_k + "_hide"] = bool(getattr(_bo, "hide_viewport", False)) or bool(getattr(_bo, "hide_render", False))
+                        elif _o is not None:
+                            _hb_data[_k + "_scale"] = [round(float(v), 4) for v in _o.worldScale]
+                        if _o is not None:
+                            _hb_data[_k + "_vis"] = bool(getattr(_o, "visible", False))
+                    except Exception:
+                        pass
+            except Exception:
+                pass
             with open(_hb, "w") as _f:
-                _f.write(_json.dumps({
-                    "label": _st.current_label,
-                    "idx": _st.instruction_index,
-                    "event": _evt.get("type"),
-                    "choices": len(_evt.get("choices") or []),
-                    "modal": (None if _sm is None or _sm.active_modal is None
-                              else _sm.active_modal.name),
-                }))
+                _f.write(_json.dumps(_hb_data))
     except Exception:
         pass
 

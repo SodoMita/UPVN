@@ -40,7 +40,7 @@ Expected: all 4 examples + *The Question* parse and trace cleanly. No YAML.
 1. Extract `~/upbge-0.50-linux-x64.tar.xz`
 2. **Install the add-on (v0.6.8+, one file — engine is bundled):**
    Edit → Preferences → Add-ons → **Install from Disk…** (older UI: Install…) → select
-   `dist/upvn_editor_addon_v0.6.7.zip` (or the raw `blend/upvn_editor_addon.py` when
+   `dist/upvn_editor_addon_v0.6.13.zip` (or the raw `blend/upvn_editor_addon.py` when
    working from the repo) → enable **"UPVN — Visual Novel Editor"**.
    The UPVN tab (3D View or Text Editor sidebar, `N`) shows **✓ Engine: OK** when ready —
    if it ever shows ✗, press *Locate Engine…* / *Re-check* (or *Copy engine next to add-on*).
@@ -65,7 +65,35 @@ Expected: all 4 examples + *The Question* parse and trace cleanly. No YAML.
 6. The frontend reads **`script_path` from the `VNController` object** — exactly what the
    panel's `project_path` writes — so the game you build is the game that plays
    (legacy `//game/script.rpy`, `//script.rpy`, `//examples/…` are fallbacks).
-7. Press `P` to play. **Controls (v0.6.8):** click / Space / Enter advance; **`1`–`9` pick a menu choice** (in-engine input, no extra wiring); `H` history, `Q` quick menu, `Ctrl+S` save, `Ctrl+L` load (arbitrary slots 1..∞, `←`/`→` page, `Esc` close), `S` skip, `A` auto, mouse wheel rollback, **`F1` console state dump, `F12` in-game screenshot** to `//screenshots/upvn_ingame_*.png` (QA/debug helpers).
+7. Press `P` to play. **Controls:** click / Space / Enter advance; **`1`–`9` pick a menu choice** (in-engine input, no extra wiring); `H` history, `Q` quick menu, `Ctrl+S` save, `Ctrl+L` load (arbitrary slots 1..∞, `←`/`→` page, `Esc` close), `S` skip, `A` auto, mouse wheel rollback, **`F1` console state dump, `F12` in-game screenshot** to `//screenshots/upvn_ingame_*.png` (QA/debug helpers).
+
+## Texture-free by default; images opt-in (M26)
+
+The template and every sample scene play **without image textures**: stages
+and sprites are painted at runtime (`KX_GameObject.color` → Object Info →
+Emission), curated colors for the sample worlds plus a deterministic hash
+palette for anything else. The `image_mode` game property on VNController
+(or env `UPVN_IMAGES`) switches policy:
+
+- `color` (default) — never touches image files; missing art cannot break a scene.
+- `auto` — used by converted Ren'Py projects: PNG/JPG/WebP from
+  `assets/backgrounds` + `assets/sprites` (or the baked image bank) is shown
+  when present, palette otherwise.
+
+## Ren'Py project → UPVN project (M26)
+
+```bash
+python tools/renpy_convert.py /path/to/renpy_project --out /path/to/converted     --blender /path/to/upbge-0.50-linux-x64/blender
+# then play:
+/path/to/upbge-0.50-linux-x64/blenderplayer -w 1024 576 0 0 /path/to/converted/blend/UPVN_Template.blend
+```
+
+The converter copies `game/*.rpy` (the runtime merges the directory), moves
+`game/images` art to `assets/{backgrounds,sprites}`, snapshots the runtime,
+wires the blend (`script_path=//../game`, `image_mode=auto`) and bakes an
+image bank (one plane per asset, editor-assigned texture — `bge.texture`
+cannot bind node materials in UPBGE 0.50). `conversion_report.json` carries
+the parse report. Missing images fall back to the palette automatically.
 
 ## Troubleshooting (was: "Engine not available")
 
@@ -83,6 +111,8 @@ button died with a bare **"Engine not available"**. Since v0.6:
 | Setup Scene in `--background` | Logic-brick operators need the UPBGE UI context — run Setup Scene from the panel, not headless. |
 | `blf.color() takes exactly 5 arguments` in the game console | Fixed in 0.6.5 — reinstall the add-on zip so the updated `bge_frontend` is used. |
 | `Preview failed: … Pillow (PIL) is not installed…` | UPBGE uses its own bundled Python, where Pillow may be missing even if the system has it. Press **Install Pillow** in the UPVN panel (installs into the running interpreter's site-packages; works without restarting Blender since 0.6.6). |
+| Player segfaults instantly on any blend (Linux) | Audio userpref requests PulseAudio with no sound server (BUG-016). Once: `blender --background --python-expr "import bpy; bpy.context.preferences.system.audio_device='None'; bpy.ops.wm.save_userpref()"` (Blender 5.0 keeps audio prefs in `preferences.system`). |
+| Mouse click on a choice does nothing (keys 1-9 work) | Old blend with SENSOR physics (BUG-012) — run Setup Scene again, or `tools/update_template_materials.py` on the blend. |
 | `Setup failed: bpy_prop_collection: attribute "remove" not found` | Fixed in 0.6.6 — Setup Scene reuses the existing `VNController` and only adds missing bricks; it is safe to press repeatedly. |
 
 **Headless minimal coding (without Blender):**
