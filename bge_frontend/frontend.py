@@ -107,6 +107,18 @@ def resolve_script_path(logic, owner=None, extra_candidates=None):
     return None, tried
 
 
+def _prop(owner, name):
+    """Read a game property from either representation (dict or KX object)."""
+    if owner is None:
+        return None
+    try:
+        if isinstance(owner, dict):
+            return owner.get(name)
+        return owner[name] if name in owner else None
+    except Exception:
+        return None
+
+
 def _owner_script_prop(cont):
     """dict-like access to the object's script_path property (no bge import)."""
     if cont is None:
@@ -197,10 +209,30 @@ def _sync_world_ui(ctrl, hovered=None):
     try:
         from engine.ui.world_ui import build_world_ui, apply_world_ui
         from engine.render.contract import CAMERA_UI_ORTHO_SCALE
+        # backlog + rewind state come from the screen manager / controller so the
+        # player draws the same history the headless traces already had (M26d).
+        _sm = getattr(ctrl, "screen_mgr", None)
+        history_open = False
+        history_entries = None
+        if _sm is not None:
+            try:
+                history_open = bool(_sm.is_overlay_visible("history"))
+            except Exception:
+                history_open = False
+            try:
+                history_entries = _sm.get_history_entries(strip=True)
+            except Exception:
+                history_entries = None
+        if history_entries is None:
+            history_entries = getattr(getattr(ctrl, "state", None), "history", [])
         payload = build_world_ui(
             getattr(ctrl, "current_event", None),
             ui_mgr=getattr(ctrl, "ui_mgr", None),
             diag=getattr(ctrl, "_load_diag", None),
+            history_entries=history_entries,
+            history_open=history_open,
+            rewind_depth=getattr(ctrl, "rewind_depth", lambda: 0)(),
+            history_scroll=int(getattr(ctrl, "_history_scroll", 0) or 0),
         )
         # hovered comes in as a parameter (set by _tick_pointer) — this
         # function has no `logic` in scope
@@ -212,6 +244,13 @@ def _sync_world_ui(ctrl, hovered=None):
         except Exception:
             pass
         apply_world_ui(_get_obj, payload, ortho=ortho, hovered=hovered)
+        # expose the last payload so the QA heartbeat can report what the UI
+        # actually decided (text, visibility) — not just the story position.
+        try:
+            import bge as _bge
+            _bge.logic._upvn_last_payload = payload
+        except Exception:
+            pass
     except Exception as e:
         # M25 BUG-002: this used to be a bare `except: pass`, which silently
         # swallowed every UI failure every tick (the player also discards
@@ -520,17 +559,40 @@ def main(cont=None):
         # 1) explicit property on the controller object (add-on's project path)
         path, tried = resolve_script_path(logic, owner=owner)
         logic._upvn_tried = tried
+        # M26d: the parse tier is a project property, because a converted
+        # Ren'Py project is real .rpy source ("full" tier: init offset, extend,
+        # screen …) while the declarative samples stay on "safe".  Before this,
+        # every tool-converted game failed to load and the player showed the
+        # "script not found" screen even though the .rpy files were there.
+        parse_mode = _prop(owner, "parse_mode") or "safe"
+
+        def _load_with(mode):
+            ctrl = VNController(script_path=path, mode=mode)
+            ctrl.load()
+            logic._upvn_ctrl = ctrl
+            _unregister_overlay()
+            _hide_idle_sprites(ctrl)
+            print(f"[UPVN] Loaded script {path} (mode={mode}, from "
+                  f"{'VNController.script_path' if owner is not None else 'candidate'})")
+
         if path:
             try:
-                ctrl = VNController(script_path=path)
-                ctrl.load()
-                logic._upvn_ctrl = ctrl
-                _unregister_overlay()
-                _hide_idle_sprites(ctrl)
-                print(f"[UPVN] Loaded script {path} (from {'VNController.script_path' if owner is not None else 'candidate'})")
+                _load_with(parse_mode)
             except Exception as e:
-                print(f"[UPVN] failed to load {path}: {e}")
-                logic._last_upvn_error = f"{path}: {e}"
+                # One automatic retry at the full tier: it is a superset, so a
+                # blend whose property was never wired still plays instead of
+                # showing a diagnostic screen.
+                if parse_mode != "full":
+                    print(f"[UPVN] load with mode={parse_mode} failed ({e}); "
+                          f"retrying with mode=full")
+                    try:
+                        _load_with("full")
+                    except Exception as e2:
+                        print(f"[UPVN] failed to load {path}: {e2}")
+                        logic._last_upvn_error = f"{path}: {e2}"
+                else:
+                    print(f"[UPVN] failed to load {path}: {e}")
+                    logic._last_upvn_error = f"{path}: {e}"
         if not hasattr(logic, "_upvn_ctrl"):
             # 2) fallback: embedded minimal script that explains itself on the
             #    screen (a console-only warning is invisible to players)
@@ -621,16 +683,64 @@ def main(cont=None):
                           else None)
             except Exception:
                 pass
+            _payload = getattr(logic, "_upvn_last_payload", None) or {}
+            _interp = getattr(ctrl, "interp", None)
+            _hb_data = {
+                "label": _st.current_label,
+                "idx": _st.instruction_index,
+                "event": _evt.get("type"),
+                "choices": len(_evt.get("choices") or []),
+                "modal": (None if _sm is None or _sm.active_modal is None
+                          else _sm.active_modal.name),
+                "ortho": _ortho,
+                # --- M26d: what the UI layer actually decided this tick, plus
+                # the rewind/history counters a harness needs to assert on.
+                "speaker": _payload.get("speaker"),
+                "dialogue": _payload.get("dialogue"),
+                "dialogue_visible": bool(_payload.get("dialogue_visible")),
+                "history": len(getattr(_st, "history", []) or []),
+                "history_open": bool(_sm and _sm.is_overlay_visible("history"))
+                if _sm is not None else False,
+                "history_scroll": int(getattr(ctrl, "_history_scroll", 0) or 0),
+                "rollback_depth": len(getattr(_interp, "rollback_stack", []) or [])
+                if _interp is not None else 0,
+                "rollforward_depth": len(getattr(ctrl, "_forward_stack", []) or []),
+                "skipping": bool(getattr(_st, "skip", False)),
+                "auto": bool(getattr(_st, "auto", False)),
+            }
+            try:
+                _sc = logic.getCurrentScene()
+                for _n, _k in (("Dialogue_Text", "font_body"),
+                               ("Speaker_Text", "font_speaker"),
+                               ("History_Text", "history_body"),
+                               ("History_Box", "history_box"),
+                               ("Rewind_Text", "rewind_body")):
+                    try:
+                        _o = _sc.objects.get(_n)
+                        _bo = getattr(_o, "blenderObject", None) if _o is not None else None
+                        _d = getattr(_bo, "data", None) if _bo is not None else None
+                        _hb_data[_k] = getattr(_d, "body", None) if _d is not None else None
+                        # world scale + curve font size decide how big the text
+                        # actually draws; `.size` on a KX object is not the
+                        # transform (it silently creates a python property).
+                        if _bo is not None:
+                            _hb_data[_k + "_scale"] = [round(float(v), 4) for v in _bo.scale]
+                            _hb_data[_k + "_font"] = round(float(getattr(_d, "size", 1.0)), 4) if _d is not None else None
+                            _hb_data[_k + "_wpos"] = [round(float(v), 3) for v in _bo.location]
+                            # dims==0 with a non-empty body = the curve produced
+                            # no geometry (invisible text, no error anywhere)
+                            _hb_data[_k + "_dim"] = [round(float(v), 3) for v in _bo.dimensions]
+                            _hb_data[_k + "_hide"] = bool(getattr(_bo, "hide_viewport", False)) or bool(getattr(_bo, "hide_render", False))
+                        elif _o is not None:
+                            _hb_data[_k + "_scale"] = [round(float(v), 4) for v in _o.worldScale]
+                        if _o is not None:
+                            _hb_data[_k + "_vis"] = bool(getattr(_o, "visible", False))
+                    except Exception:
+                        pass
+            except Exception:
+                pass
             with open(_hb, "w") as _f:
-                _f.write(_json.dumps({
-                    "label": _st.current_label,
-                    "idx": _st.instruction_index,
-                    "event": _evt.get("type"),
-                    "choices": len(_evt.get("choices") or []),
-                    "modal": (None if _sm is None or _sm.active_modal is None
-                              else _sm.active_modal.name),
-                    "ortho": _ortho,
-                }))
+                _f.write(_json.dumps(_hb_data))
     except Exception:
         pass
 

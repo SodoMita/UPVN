@@ -26,8 +26,91 @@ def wrap_text(text: str, width: int = 42) -> str:
     return "\n".join(lines)
 
 
+# Names come from engine/render/contract.py (single source of truth); the
+# literals are the fallback for a bare-module import (tests, tooling).
+try:                                     # package-relative, like the renderers
+    from ..render.contract import HISTORY_PLANE as HISTORY_BOX, HISTORY_TEXT, REWIND_TEXT
+except Exception:                        # pragma: no cover - direct module load
+    HISTORY_BOX = "History_Box"
+    HISTORY_TEXT = "History_Text"
+    REWIND_TEXT = "Rewind_Text"
+HISTORY_MAX_LINES = 12      # rendered backlog rows the panel can hold
+HISTORY_WRAP = 62           # chars per backlog line before wrapping
+# The player lays FONT curves out ~2.1 em apart for the shipped face (measured
+# from a screenshot: 13 rows spanned 530 px at 70 px/unit while the curve
+# reports 1.0 line spacing), so a fixed em size silently overruns the panel on
+# any aspect change. layout_screen_ui therefore *derives* the size from the
+# room available and HISTORY_MAX_LINES stays an honest row count.
+HISTORY_LINE_ADVANCE = 2.1
+
+
+def history_lines(entries, wrap_at: int = HISTORY_WRAP) -> list[str]:
+    """Every backlog entry as the wrapped rows the panel will actually draw.
+
+    One row per entry is a lie as soon as a line is longer than `wrap_at`, and
+    the row count is what decides both the page budget and the font size — so
+    it is computed here once, for the tests and the player alike.
+    """
+    rows: list[str] = []
+    for e in list(entries or []):
+        if not isinstance(e, dict):
+            continue
+        who = e.get("who_name") or e.get("who") or ""
+        body = (e.get("stripped") or e.get("display_text") or e.get("text") or "").strip()
+        wrapped = wrap_text(body, width=wrap_at)
+        if who:
+            first, *rest = wrapped.split("\n")
+            wrapped = "\n".join([f"{who}: {first}"] + rest)
+        rows.extend(wrapped.split("\n"))
+    return rows
+
+
+def history_pages(entries, max_lines: int = HISTORY_MAX_LINES,
+                  wrap_at: int = HISTORY_WRAP) -> tuple[int, int]:
+    """(rows_per_page, page_count) for this backlog."""
+    rows = history_lines(entries, wrap_at)
+    budget = max(1, max_lines - 1) if len(rows) > max_lines else max_lines
+    return budget, max(1, -(-len(rows) // budget))      # ceil
+
+
+def history_max_scroll(entries, max_lines: int = HISTORY_MAX_LINES,
+                       wrap_at: int = HISTORY_WRAP) -> int:
+    """Highest page index the backlog can scroll to (0 when it all fits)."""
+    return history_pages(entries, max_lines, wrap_at)[1] - 1
+
+
+def format_history(entries, max_lines: int = HISTORY_MAX_LINES,
+                   wrap_at: int = HISTORY_WRAP, scroll: int = 0) -> str:
+    """Backlog body for the 3D font object: newest row last, tags stripped.
+
+    Pure (no bge) so the same text is asserted by the headless tests and drawn
+    by the player. Entries are the dicts recorded in `VNState.history`.
+
+    `scroll` is a PAGE index (0 = the newest page), because the panel is a
+    fixed-capacity viewport over a script that can run to thousands of rows and
+    one wheel notch should move a screen, not a row. The "rows a-b of n" footer
+    only appears when something is above the window and costs one row, which is
+    what `history_pages` accounts for.
+    """
+    rows = history_lines(entries, wrap_at)
+    if not rows:
+        return ""
+    total = len(rows)
+    budget, pages = history_pages(entries, max_lines, wrap_at)
+    page = max(0, min(int(scroll or 0), pages - 1))
+    end = total - page * budget
+    start = max(0, end - budget)
+    body = rows[start:end]
+    if pages > 1:
+        body = body + [f"— rows {start + 1}-{end} of {total}  ·  "
+                       f"page {page + 1}/{pages} (wheel) —"]
+    return "\n".join(body)
+
+
 def build_world_ui(event: Optional[dict], ui_mgr=None, diag=None,
-                   n_choices: int = 9) -> dict:
+                   n_choices: int = 9, history_entries=None,
+                   history_open: bool = False, rewind_depth: int = 0,
+                   history_scroll: int = 0) -> dict:
     """Pure snapshot of what 3D objects should show this frame."""
     speaker = ""
     dialogue = ""
@@ -53,17 +136,27 @@ def build_world_ui(event: Optional[dict], ui_mgr=None, diag=None,
     choices = []
     menu = (event or {}).get("choices") if (event or {}).get("type") == "menu" else None
     menu = menu or []
+    # While the backlog is open it owns the screen: plates are hidden so the
+    # number keys cannot resolve a menu the player cannot see (BUG-007 class).
     for i in range(n_choices):
-        if i < len(menu):
+        if i < len(menu) and not history_open:
             txt = str(menu[i].get("text", ""))
             choices.append({"name": f"choice_{i}", "text": f"{i + 1}. {txt}", "visible": True})
         else:
             choices.append({"name": f"choice_{i}", "text": "", "visible": False})
+    history_body = (format_history(history_entries, scroll=history_scroll)
+                    if history_open else "")
+    rewind_visible = bool(rewind_depth)
     return {
         "speaker": speaker,
         "dialogue": dialogue,
         "dialogue_visible": dialogue_on,
         "choices": choices,
+        "history_visible": bool(history_open),
+        "history": history_body or ("(no backlog yet)" if history_open else ""),
+        "rewind_visible": rewind_visible,
+        "rewind": (f"« rewound {rewind_depth} — Page Down resumes"
+                   if rewind_visible else ""),
     }
 
 
@@ -152,6 +245,75 @@ def aspect_wh() -> float:
 
 HOVER_SCALE = 1.08   # M26c: choice plate grows 8% under the cursor
 
+# Camera-space margins (world units, Camera_UI ortho is 15 wide). The player
+# draws every VN plane as a flat quad, so "who is in front" is decided by Y
+# alone and coplanar-ish quads lose text to depth precision (measured with the
+# backlog). Kept as named constants so the dialogue box and the overlay share
+# one rule.
+BACKLOG_TOP = 0.45   # first backlog line's height / vertical half-extent
+UI_DEPTH = 0.12      # panel in front of the story planes
+TEXT_FRONT = 0.45    # text in front of its own panel
+
+
+_font_scale_cache: dict = {}
+
+
+def set_font_size(obj: Any, em: float) -> None:
+    """Make a FONT object `em` world units tall (one em, cap height ≈ 0.7·em).
+
+    M26d bug: this used to be `obj.size = x`, which on a KX_GameObject only
+    creates a python attribute — the transform never changed, so every text
+    object in the player drew at whatever the authoring file happened to have
+    (dialogue looked tiny inside a huge box).
+
+    The shipped template also bakes a per-object curve size (0.20…0.32) which
+    multiplies the object scale, so the curve em size is normalised to 1.0
+    first: after that the object scale is the single authority and the runtime
+    text size is exactly what `layout_screen_ui` asked for. Cached per object —
+    touching a curve every tick is not free, and the layout writes one value.
+    """
+    if obj is None:
+        return
+    try:
+        target = round(float(em), 5)
+    except Exception:
+        return
+    if target <= 0.0:
+        return
+    key = getattr(obj, "name", None) or id(obj)
+    if _font_scale_cache.get(key) == target:
+        return
+    _font_scale_cache[key] = target
+    s = (target, target, target)
+    bo = getattr(obj, "blenderObject", None)
+    if bo is not None:
+        data = getattr(bo, "data", None)
+        for attr in ("size", "font_size"):      # Curve em size (5.0 renamed it)
+            if data is not None and hasattr(data, attr):
+                try:
+                    setattr(data, attr, 1.0)
+                    break
+                except Exception:
+                    continue
+    applied = False
+    for attr in ("worldScale", "scale"):
+        try:
+            setattr(obj, attr, s)
+            applied = True
+            break
+        except Exception:
+            continue
+    if not applied:
+        try:
+            obj["scale"] = s                    # dict-like test doubles
+        except Exception:
+            pass
+    if bo is not None:
+        try:
+            bo.scale = s                        # keep the editor in sync
+        except Exception:
+            pass
+
 
 def layout_screen_ui(get_obj: Callable[[str], Any], payload: dict, ortho: float = 15.0,
                      hovered: str | None = None) -> None:
@@ -170,18 +332,48 @@ def layout_screen_ui(get_obj: Callable[[str], Any], payload: dict, ortho: float 
     dt = get_obj("Dialogue_Text")
     _set_pos(box, (0.0, y_ui + 0.05, -half_v * 0.72))
     _set_scale(box, (half * 0.92, half * 0.14, 1.0))
-    _set_pos(sp, (-half * 0.85, y_ui, -half_v * 0.62))
-    _set_pos(dt, (-half * 0.85, y_ui, -half_v * 0.70))
-    try:
-        if sp is not None:
-            sp.size = half * 0.045
-    except Exception:
-        pass
-    try:
-        if dt is not None:
-            dt.size = half * 0.040
-    except Exception:
-        pass
+    # text is anchored at its origin and grows right/up, so the block needs the
+    # box's inner margin or the first glyph sits on the border
+    _set_pos(sp, (-half * 0.80, y_ui, -half_v * 0.55))
+    _set_pos(dt, (-half * 0.80, y_ui, -half_v * 0.72))
+    set_font_size(sp, half * 0.055)
+    set_font_size(dt, half * 0.048)
+    # --- backlog + rewind indicator (M26d) ---
+    # Two depth margins matter and they are not the same thing: a panel has to
+    # clear the STORY planes behind it (UI_DEPTH), while text has to clear its
+    # OWN panel (TEXT_FRONT).  A text curve a few hundredths in front of a big
+    # flat quad is not drawn at all - silently, with a correct body, non-zero
+    # dimensions and visible=True; that is how the backlog was invisible for a
+    # whole debug round.  The dialogue box gets away with 0.05 only because
+    # nothing is ever drawn on top of it.
+    #
+    # BACKLOG_TOP is the first line's height above the centre as a fraction of
+    # the vertical half-extent.  The panel is deliberately taller than the
+    # text so the list reads as being inside it; 0.45 is the value confirmed to
+    # draw in the player (0.74 pushed the glyphs onto the panel's own edge).
+    hbox = get_obj(HISTORY_BOX)
+    htext = get_obj(HISTORY_TEXT)
+    rtext = get_obj(REWIND_TEXT)
+    panel_h = half_v * 0.92
+    backlog_top = half_v * BACKLOG_TOP
+    # 12 rows have to fit between the anchor and the dialogue box, so the em
+    # size follows from the room available: an aspect change then shrinks the
+    # text instead of overflowing the panel (it used to do the latter).
+    hist_em = (half_v * (BACKLOG_TOP + 0.70)) / (HISTORY_MAX_LINES * HISTORY_LINE_ADVANCE)
+    if hbox:
+        _set_pos(hbox, (0.0, y_ui + UI_DEPTH, 0.0))
+        _set_scale(hbox, (half * 0.94, panel_h, 1.0))
+    # FONT text grows down from its origin (align_y TOP), so the block is
+    # anchored at the top and the panel's top edge is its padding.
+    if htext:
+        _set_pos(htext, (-half * 0.86, y_ui + UI_DEPTH - TEXT_FRONT, backlog_top))
+    set_font_size(htext, hist_em)
+    # The rewind marker shares the backlog text's depth plane and height on
+    # purpose: the two are never visible at once, so they cannot fight, and the
+    # marker reuses the margin that was measured instead of a second guess.
+    if rtext:
+        _set_pos(rtext, (-half * 0.86, y_ui + UI_DEPTH - TEXT_FRONT, backlog_top))
+    set_font_size(rtext, half * 0.030)
     vis_n = sum(1 for c in payload.get("choices", []) if c.get("visible"))
     for i, ch in enumerate(payload.get("choices", [])):
         plane = get_obj(ch["name"])
@@ -195,12 +387,8 @@ def layout_screen_ui(get_obj: Callable[[str], Any], payload: dict, ortho: float 
         # cannot go stale (a cached base scale would). Re-applied each frame.
         bump = HOVER_SCALE if (hovered and ch["name"] == hovered) else 1.0
         _set_scale(plane, (half * 0.70 * bump, half * 0.045 * bump, 1.0))
-        _set_pos(text_obj, (-half * 0.62, y_ui, z + half_v * 0.01))
-        try:
-            if text_obj is not None:
-                text_obj.size = half * 0.038
-        except Exception:
-            pass
+        _set_pos(text_obj, (-half * 0.60, y_ui, z + half_v * 0.01))
+        set_font_size(text_obj, half * 0.042)
     _ = vis_n
 
 
@@ -216,6 +404,25 @@ def apply_world_ui(get_obj: Callable[[str], Any], payload: dict, ortho: float | 
     _set_visible(speaker_obj, vis)
     _set_visible(dialogue_obj, vis)
     _set_visible(box, vis or any(c.get("visible") for c in payload.get("choices", [])))
+    # backlog overlay (M26d): without these two writes H opened a screen the
+    # player never drew — headless traces had history, the GUI never did.
+    # Order matters twice over: a KX FONT rebuilds its glyph mesh when `body`
+    # changes, and writing while the object is still hidden left an empty mesh
+    # that never refreshed on reveal (measured in the player: dark panel, no
+    # text). So unhide first, then write. And the body is never blanked while
+    # hidden — an invisible stale body costs nothing, while a per-toggle clear
+    # forces a rebuild on the exact tick it must not miss.
+    hist_on = bool(payload.get("history_visible"))
+    hbox = get_obj(HISTORY_BOX)
+    htext = get_obj(HISTORY_TEXT)
+    _set_visible(hbox, hist_on)
+    _set_visible(htext, hist_on)
+    if hist_on:
+        set_font_text(htext, payload.get("history") or "")
+    rtext = get_obj(REWIND_TEXT)
+    _set_visible(rtext, bool(payload.get("rewind_visible")))
+    if payload.get("rewind_visible"):
+        set_font_text(rtext, payload.get("rewind") or "")
     for ch in payload.get("choices", []):
         plane = get_obj(ch["name"])
         text_obj = get_obj(ch["name"] + "_text")

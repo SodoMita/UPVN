@@ -138,7 +138,7 @@ print("LIVE_UPDATE_ALL_OK")
 @pytest.fixture(scope="module")
 def session(tmp_path_factory):
     old = subprocess.run(
-        ["git", "show", "HEAD:blend/upvn_editor_addon.py"],
+        ["git", "show", "f7f80f92ef5c8107a41a6e6847d391ea2f1eb7b0:blend/upvn_editor_addon.py"],
         cwd=REPO, capture_output=True, text=True, check=True).stdout
     assert '"version": (0, 6, 14)' in old, "HEAD addon must be the 0.6.14 one"
 
