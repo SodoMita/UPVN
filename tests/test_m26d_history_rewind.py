@@ -192,8 +192,11 @@ def test_layout_positions_history_panel_and_scales_text():
     names = [contract.SPEAKER_TEXT, contract.DIALOGUE_TEXT, contract.DIALOGUE_PLANE,
              contract.HISTORY_PLANE, contract.HISTORY_TEXT, contract.REWIND_TEXT]
     scene = FakeScene(names)
-    world_ui.layout_screen_ui(scene.get, {"choices": [], "history_visible": True},
-                              ortho=15.0)
+    body = world_ui.format_history(_entries(world_ui.HISTORY_MAX_LINES + 4))
+    n_rows = len(body.split("\n"))
+    assert n_rows == world_ui.HISTORY_MAX_LINES
+    world_ui.layout_screen_ui(scene.get, {"choices": [], "history_visible": True,
+                                          "history": body}, ortho=15.0)
     half = 15.0 / 2.0
     half_v = half / world_ui.aspect_wh()
     box = scene.get(contract.HISTORY_PLANE)
@@ -203,20 +206,33 @@ def test_layout_positions_history_panel_and_scales_text():
     assert htext.worldPosition[2] > 0, \
         "backlog text anchors above centre so it grows downward"
     # the backlog em is derived from the space available, not a magic number
-    hist_em = (half_v * (world_ui.BACKLOG_TOP + 0.70)) / (
-        world_ui.HISTORY_MAX_LINES * world_ui.HISTORY_LINE_ADVANCE)
+    by_height = (half_v * (world_ui.BACKLOG_TOP - world_ui.BACKLOG_BOTTOM)) / (
+        world_ui.HISTORY_MAX_LINES * world_ui.HISTORY_PITCH_EM)
+    by_width = (15.0 / 2 * 1.72) / (world_ui.HISTORY_WRAP * world_ui.HISTORY_ADVANCE_EM)
+    hist_em = min(by_height, by_width) * world_ui.HISTORY_FIT_SLACK
     assert htext.worldScale[0] == pytest.approx(hist_em, abs=1e-4), \
         "set_font_size rounds to 5 dp before caching"
-    # 12 rows at that size still fit above the dialogue box (the old fixed em
-    # size overran the panel and drew over the dialogue)
-    assert htext.worldPosition[2] - world_ui.HISTORY_MAX_LINES * hist_em * \
-        world_ui.HISTORY_LINE_ADVANCE > -half_v * 0.70
+    # the block grows UP from its origin (align_y is ignored at runtime), so a
+    # full page must land with its first row just under the panel's top edge
+    # and its bottom above the dialogue box — the old top-anchor clipped row 1
+    # against the window edge.
+    top = htext.worldPosition[2] + n_rows * hist_em * world_ui.HISTORY_PITCH_EM
+    assert top <= half_v * world_ui.BACKLOG_TOP + 1e-6, "first row inside the band"
+    assert htext.worldPosition[2] >= half_v * world_ui.BACKLOG_BOTTOM - 1e-6, \
+        "last row stays clear of the dialogue box"
+    # ...and a wrapped row still fits between the panel's edges
+    assert world_ui.HISTORY_WRAP * hist_em * world_ui.HISTORY_ADVANCE_EM < 15.0 * 0.94
     # the depth rule IS the bug fix: the panel must clear the story planes and
     # the text must clear the panel, or the glyphs are silently not drawn
     assert box.worldPosition[1] - htext.worldPosition[1] == pytest.approx(world_ui.TEXT_FRONT)
     assert htext.worldPosition[1] - rtext.worldPosition[1] == pytest.approx(0.0)
-    # marker and first line share one height on purpose (never shown together)
-    assert rtext.worldPosition[2] == pytest.approx(htext.worldPosition[2])
+    # marker and backlog share the same TOP row (they are never shown at once):
+    # each origin is its block's bottom, so top = origin + rows * pitch * em
+    row_h = hist_em * world_ui.HISTORY_PITCH_EM
+    assert rtext.worldPosition[2] + row_h == pytest.approx(
+        htext.worldPosition[2] + n_rows * row_h, abs=1e-4)
+    assert htext.worldPosition[2] + n_rows * row_h == pytest.approx(
+        half_v * world_ui.BACKLOG_TOP, abs=1e-4)
     # the panel is taller than the text block so the list reads as inside it
     assert box.worldScale[1] > htext.worldPosition[2]
 
@@ -406,20 +422,24 @@ def _entries(n):
 def test_format_history_pages_by_rows_and_shows_position():
     body = world_ui.format_history(_entries(20))
     lines = body.split("\n")
-    # 12 rows, one spent on the footer -> 11 rows per page, newest last
-    assert len(lines) == 12
-    assert lines[0] == "Eileen: line 10" and lines[-2] == "Eileen: line 20"
-    assert "rows 10-20 of 20" in lines[-1] and "page 1/2" in lines[-1]
-    older = world_ui.format_history(_entries(20), scroll=1)
-    assert older.split("\n")[0] == "Eileen: line 1" and "line 9" in older
-    assert "page 2/2" in older
+    budget = world_ui.HISTORY_MAX_LINES - 1          # footer steals one row
+    assert len(lines) == world_ui.HISTORY_MAX_LINES, "never more rows than fit"
+    assert lines[-1].startswith("\u2014 rows") and f"of 20" in lines[-1]
+    assert lines[0] == f"Eileen: line {20 - budget + 1}" and lines[-2] == "Eileen: line 20"
+    assert "page 1/" in lines[-1]
+    pages = int(lines[-1].split("page ")[1].split("/")[1].split()[0])
+    assert pages == -(-20 // budget)
+    oldest = world_ui.format_history(_entries(20), scroll=pages - 1)
+    assert oldest.split("\n")[0] == "Eileen: line 1"
     # clamped: past the oldest page the newest page stays put
     assert world_ui.format_history(_entries(20), scroll=99).split("\n")[0] \
         == "Eileen: line 1"
     # a short script needs no pager at all
     short = world_ui.format_history(_entries(3))
     assert "page" not in short and len(short.split("\n")) == 3
-    assert world_ui.history_max_scroll(_entries(12)) == 0
+    cap = world_ui.HISTORY_MAX_LINES
+    assert world_ui.history_max_scroll(_entries(cap)) == 0, "what fits has no pager"
+    assert world_ui.history_max_scroll(_entries(cap + 1)) >= 1
 
 
 def test_wrapping_counts_towards_the_row_budget():
@@ -483,3 +503,41 @@ def test_scroll_offset_reaches_the_payload(long_ctrl):
     assert f"of {rows}" in payload["history"]
     assert world_ui.build_world_ui(ctrl.current_event, None, history_entries=[],
                                    history_open=False)["history"] == ""
+
+
+class _CurveObj:
+    """Minimal stand-in for a KX font object (blenderObject.data.body)."""
+
+    def __init__(self):
+        self.writes = 0
+        self._body = ""
+
+        class _D:
+            def __init__(inner, outer):
+                inner._o = outer
+
+            @property
+            def body(inner):
+                return inner._o._body
+
+            @body.setter
+            def body(inner, v):
+                inner._o.writes += 1
+                inner._o._body = v
+
+        self.data = _D(self)
+        self.blenderObject = type("BO", (), {"data": self.data})()
+
+
+def test_set_font_text_is_idempotent():
+    """M26d: the layout runs every tick; re-writing an unchanged body rebuilds
+    the glyph mesh each time and the player drew two pages on top of each other
+    in the frame where a mesh rebuild was still in flight."""
+    ob = _CurveObj()
+    world_ui.set_font_text(ob, "page one")
+    assert ob.writes == 1
+    world_ui.set_font_text(ob, "page one")
+    world_ui.set_font_text(ob, "page one")
+    assert ob.writes == 1, "unchanged text must not touch the curve"
+    world_ui.set_font_text(ob, "page two")
+    assert ob.writes == 2 and ob._body == "page two"
