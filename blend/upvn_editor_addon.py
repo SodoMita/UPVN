@@ -69,6 +69,20 @@ import shutil
 import re
 import zipfile
 
+# --------------------------------------------------- contract names (module scope)
+# M26g BUGFIX: these three names used to be imported (with hardcoded
+# fallbacks) as LOCALS inside build_vn_scene — but _rewrite_unlit() and
+# _ensure_white_image() are defined at this scope level and reference them,
+# so EVERY tex_capable=True material (all sprite planes, M26b texture graph)
+# crashed with `NameError: name 'TEX_NODE_NAME' is not defined` the first
+# time Setup Scene ran in the real UPBGE GUI. Bind them once here; the
+# fallback values mirror engine/render/contract.py exactly.
+try:
+    from engine.render.contract import TEX_NODE_NAME, MIX_NODE_NAME, WHITE_IMAGE_NAME
+except Exception:                      # engine not on sys.path yet — fallback
+    TEX_NODE_NAME, MIX_NODE_NAME = "UPVN Tex Image", "UPVN Tex Mix"
+    WHITE_IMAGE_NAME = "UPVN_White1px"
+
 # ---------------------------------------------------------------------------
 # Engine discovery (v0.6) — finds engine/ wherever the add-on was installed from.
 # ---------------------------------------------------------------------------
@@ -1160,19 +1174,20 @@ except Exception:
             from engine.render.contract import (BG_PLANE, BG_MATERIAL,
                                                 SPRITE_MATERIAL, SPRITE_POSITIONS,
                                                 POSITIONS, DIALOGUE_PLANE,
-                                                IMAGE_MODE_DEFAULT,
-                                                TEX_NODE_NAME, MIX_NODE_NAME,
-                                                WHITE_IMAGE_NAME)
+                                                IMAGE_MODE_DEFAULT)
         except Exception:
             BG_PLANE, BG_MATERIAL = "BG_Plane", "MABackground"
             SPRITE_MATERIAL, DIALOGUE_PLANE = "MASprite", "Dialogue_Box"
             IMAGE_MODE_DEFAULT = "color"
-            TEX_NODE_NAME, MIX_NODE_NAME = "UPVN Tex Image", "UPVN Tex Mix"
-            WHITE_IMAGE_NAME = "UPVN_White1px"
             SPRITE_POSITIONS = ("far_left", "left", "center", "right", "far_right")
             POSITIONS = {p: ({"far_left": -5.0, "left": -3.0, "center": 0.0,
                               "right": 3.0, "far_right": 5.0}[p], -0.15, 0.0)
                          for p in SPRITE_POSITIONS}
+        # NOTE: TEX_NODE_NAME / MIX_NODE_NAME / WHITE_IMAGE_NAME are bound at
+        # MODULE scope (headless-safe imports block) — do not rebind them as
+        # locals here: _rewrite_unlit/_ensure_white_image resolve them as
+        # module globals and locals would leave those functions with a
+        # NameError (M26g bug — broke every tex_capable=True material).
 
         def _ensure_material(_b, name, color, tex_capable=False):
             mat = _b.data.materials.get(name)
