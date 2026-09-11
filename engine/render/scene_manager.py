@@ -20,8 +20,22 @@ except ImportError:
     HAS_BGE = False
 
 from ..core.vn_state import VNState
-from .contract import BG_PLANE, BG_MATERIAL, ASSET_BACKGROUNDS
+from .contract import (BG_PLANE, BG_MATERIAL, ASSET_BACKGROUNDS,
+                       image_mode_from, stage_color, apply_object_color,
+                       plane_material, apply_material_image,
+                       reset_material_palette)
 import time
+
+# Relative search prefixes for background images, relative to the .blend.
+# '//../' and '//../../' cover repo (<repo>/blend + <repo>/assets) and
+# packaged (<pkg>/blend + <pkg>/assets) layouts.
+BG_PATH_PREFIXES = ("//", "//game/", "//../", "//../game/",
+                    "//../../", "//../../game/")
+
+def _dbg(msg: str):
+    """Asset decisions are rare — print unconditionally so a debug tee
+    (UPVN_DEBUG_TEE) or a console captures them."""
+    print(f"[SceneManager] {msg}")
 
 BACKGROUND_LAYER = 0
 TRANSITIONS = {"fade": 0.6, "dissolve": 0.45, None: 0.0}
@@ -44,8 +58,17 @@ class SceneManager:
             self._transition_name = event.get("transition")
             self._transition_start = time.time()
             self._transition_duration = TRANSITIONS.get(self._transition_name, 0.5)
-        elif t == "load_stage" and HAS_BGE:
-            self._load_stage_bge(event["stage"])
+        elif t == "load_stage":
+            # M26c: 3D-stage loading is StageManager's job (it existence-
+            # checks every candidate path before LibLoad). This manager used
+            # to LibLoad the raw expanded path with NO exists-check — a
+            # missing stage file SIGSEGVs the player in UPBGE 0.50 before
+            # the Python except can run (kernel log: blenderplayer sig=11;
+            # full-sample game died at label classroom → load_stage
+            # classroom_3d). Log-and-continue here; StageManager handles it.
+            print(f"[SceneManager] load_stage '{event.get('stage')}' → "
+                  "deferred to StageManager (existence-check + gated LibLoad "
+                  "or baked-stage repositioning happen there)")
 
     def set_background(self, asset: str, transition: str | None = None):
         self._prev_bg = self.state.scene.background
@@ -67,21 +90,72 @@ class SceneManager:
             plane = scene.objects.get(BG_PLANE)
             if not plane:
                 return
-            # Use bge.texture to swap image
-            import bge.texture as vt
-            try:
-                mat_id = vt.materialID(plane, BG_MATERIAL)
-            except Exception:
-                mat_id = -1
-            if mat_id < 0:
-                mat_id = 0  # first material slot fallback
+            # M26 policy: "color" (default for the template + samples) never
+            # touches image files — the palette paints the stage, so a missing
+            # texture cannot equal a missing background. The policy lives on
+            # the VNController game property (image_mode); the plane is only a
+            # fallback reader.
+            ctrl = scene.objects.get("VNController")
+            mode = image_mode_from(ctrl if ctrl is not None else plane)
+            def _palette_bg():
+                # any bank plane left visible from a previous 'scene'?
+                try:
+                    for ob in scene.objects:
+                        if str(ob.name).startswith("BGIMG_"):
+                            ob.visible = False
+                except Exception:
+                    pass
+                plane.visible = True
+                reset_material_palette(plane_material(plane))
+                return apply_object_color(plane, stage_color(asset))
+
+            if mode == "color":
+                painted = _palette_bg()
+                _dbg(f"stage '{asset}' → palette color "
+                     f"(image_mode=color, painted={painted})")
+                if transition in ("fade", "dissolve"):
+                    plane["upvn_transition"] = transition
+                    plane["upvn_transition_t0"] = time.time()
+                return
+            # image_mode == "auto": converted projects carry a baked image
+            # bank (BGIMG_<stem> planes, textures assigned by
+            # tools/wire_converted_blend.py — bge.texture cannot bind node
+            # materials in UPBGE 0.50). Show the matching plane, hide the
+            # rest; palette fallback when no bank plane exists.
+            stems = [asset, asset.replace(" ", "_"),
+                     asset.replace(" ", "/").replace("/", "_"),
+                     asset.split()[-1] if " " in asset else asset]
+            bank = None
+            for stem in stems:
+                cand = scene.objects.get("BGIMG_" + stem.lower())
+                if cand is not None:
+                    bank = cand
+                    break
+            if bank is not None:
+                try:
+                    for ob in scene.objects:
+                        if str(ob.name).startswith("BGIMG_"):
+                            ob.visible = (ob is bank)
+                        # keep the palette plane behind the bank
+                    plane.visible = False
+                    bank.visible = True
+                    _dbg(f"stage '{asset}' → bank plane {bank.name}")
+                    if transition in ("fade", "dissolve"):
+                        bank["upvn_transition"] = transition
+                        bank["upvn_transition_t0"] = time.time()
+                    return
+                except Exception as e:
+                    _dbg(f"stage '{asset}' bank show failed ({e}) → palette")
             import os
-            stems = [asset, asset.replace(" ", "_"), asset.replace(" ", "/")]
+            stems = [asset, asset.replace(" ", "_"),
+                     asset.replace(" ", "/").replace("/", "_"),
+                     asset.split()[-1] if " " in asset else asset]
             tex_path = None
             for stem in stems:
                 for ext in (".png", ".jpg", ".webp"):
-                    for prefix in (f"//{ASSET_BACKGROUNDS}/", f"//game/{ASSET_BACKGROUNDS}/"):
-                        alt = bge.logic.expandPath(f"{prefix}{stem}{ext}")
+                    for prefix in BG_PATH_PREFIXES:
+                        alt = bge.logic.expandPath(
+                            f"{prefix}{ASSET_BACKGROUNDS}/{stem}{ext}")
                         if os.path.exists(alt):
                             tex_path = alt
                             break
@@ -89,12 +163,47 @@ class SceneManager:
                         break
                 if tex_path:
                     break
-            if tex_path and os.path.exists(tex_path):
-                img = vt.ImageFFmpeg(tex_path)
-                img.scale = False
-                tex = vt.Texture(plane, mat_id)
-                tex.source = img
-                plane["upvn_tex"] = tex
+            if tex_path:
+                # (2) direct material node swap — per-material, no
+                # bge.texture needed (M26b; works on TexImage node graphs)
+                if apply_material_image(plane_material(plane), tex_path):
+                    try:
+                        for ob in scene.objects:
+                            if str(ob.name).startswith("BGIMG_"):
+                                ob.visible = False
+                    except Exception:
+                        pass
+                    plane.visible = True
+                    _dbg(f"stage '{asset}' → material texture {tex_path}")
+                    if transition in ("fade", "dissolve"):
+                        plane["upvn_transition"] = transition
+                        plane["upvn_transition_t0"] = time.time()
+                    return
+                # (3) legacy bge.texture (blend-mode materials only)
+                import bge.texture as vt
+                try:
+                    mat_id = vt.materialID(plane, BG_MATERIAL)
+                except Exception:
+                    mat_id = -1
+                if mat_id < 0:
+                    mat_id = 0  # first material slot fallback
+                try:
+                    img = vt.ImageFFmpeg(tex_path)
+                    img.scale = False
+                    tex = vt.Texture(plane, mat_id)
+                    tex.source = img
+                    plane["upvn_tex"] = tex
+                    _dbg(f"stage '{asset}' → bge.texture {tex_path}")
+                except Exception as e:
+                    _dbg(f"stage '{asset}' texture bind failed ({e}) → palette")
+                    apply_object_color(plane, _palette_bg() or stage_color(asset))
+                if transition in ("fade", "dissolve"):
+                    plane["upvn_transition"] = transition
+                    plane["upvn_transition_t0"] = time.time()
+            else:
+                painted = _palette_bg()
+                _dbg(f"stage '{asset}' → no image found, palette color "
+                     f"(painted={painted})")
                 if transition in ("fade", "dissolve"):
                     plane["upvn_transition"] = transition
                     plane["upvn_transition_t0"] = time.time()
@@ -116,17 +225,8 @@ class SceneManager:
         # ease out
         return t
 
-    def _load_stage_bge(self, stage_name: str):
-        if not HAS_BGE:
-            return
-        try:
-            import bge.logic as logic
-            path = logic.expandPath(f"//stages/{stage_name}.blend")
-            # LibLoad merges collections
-            logic.LibLoad(path, "Scene", load_actions=True)  # type: ignore
-            print(f"[SceneManager] Loaded stage {stage_name} from {path}")
-        except Exception as e:
-            print(f"[SceneManager] LibLoad failed for {stage_name}: {e}")
+    # M26c: _load_stage_bge removed — it LibLoad'ed unguarded paths and
+    # segfaulted the player on missing stage files (StageManager owns this).
 
     # headless helper for screenshot verification
     def current_background(self) -> str | None:

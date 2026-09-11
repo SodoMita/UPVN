@@ -94,5 +94,5 @@ def test_addon_setup_resets_camera_and_adds_allkeys():
     assert 'upvn_camera_custom' in src
     assert 'need_keys' in src and 'AllKeys' in src
     assert 'use_all_keys' in src
-    assert '"version": (0, 6, 11)' in src
+    assert '"version": (0, 6, 15)' in src
     assert "loc=(0, -10, 5)" not in src

@@ -54,6 +54,13 @@ SPRITE_TAG_PREFIX = "Sprite_"           # f"Sprite_{tag}" per-actor plane
 DIALOGUE_PLANE = "Dialogue_Box"
 SPEAKER_TEXT = "Speaker_Text"
 DIALOGUE_TEXT = "Dialogue_Text"
+# Backlog (H) and the rewind indicator (M26d). Both are drawn from the same
+# FONT/plane recipe as the dialogue box, so `H` is visible in the player and
+# not only in headless traces. Missing objects degrade quietly (the overlay just
+# stays invisible) — Setup Scene / the template bake create them.
+HISTORY_PLANE = "History_Box"
+HISTORY_TEXT = "History_Text"
+REWIND_TEXT = "Rewind_Text"
 CHOICE_PREFIX = "choice_"
 CHOICE_COUNT = 9
 UI_MATERIAL = "MAUI"
@@ -85,6 +92,261 @@ LAUNCHER_TEXT = "upvn_launcher"
 ASSET_BACKGROUNDS = "assets/backgrounds"     # <asset>.png|jpg|webp
 ASSET_SPRITES = "assets/sprites"             # <asset with '/' or '_'>.png
 
+# ---------------------------------------------------------------------------
+# Texture-free palette (M26).
+#
+# The shipped template and every sample game play WITHOUT image textures:
+# stages and sprites are solid colors driven by KX_GameObject.color, which the
+# template materials wire through Object Info → Emission (see
+# blend/upvn_editor_addon.py::_rewrite_unlit). PNG/JPG loading is still
+# supported for real projects ("auto" image mode — e.g. a converted Ren'Py
+# game), but it is best-effort: when nothing loads, the palette below paints
+# the plane so a missing image never equals a missing stage/sprite.
+#
+# Policy resolution (image_mode_from, first match wins):
+#   1. env UPVN_IMAGES            ("color" | "auto")
+#   2. controller prop image_mode (game property or custom property)
+#   3. IMAGE_MODE_DEFAULT
+# The shipped template and sample scenes use "color" — zero texture lookups.
+# tools/renpy_convert.py writes "auto" into converted projects so their
+# assets/ images are used when present.
+IMAGE_MODE_DEFAULT = "color"
+_IMAGE_MODES = ("color", "auto")
+
+# curated stage colors for the sample worlds (bg <name> → RGB 0..1)
+COLOR_STAGES = {
+    "classroom": (0.87, 0.78, 0.60),      # warm tan walls
+    "lecturehall": (0.55, 0.62, 0.78),    # cool slate
+    "meadow": (0.55, 0.78, 0.45),         # summer green
+    "uni": (0.72, 0.50, 0.42),            # brick
+    "room": (0.62, 0.52, 0.44),           # dorm wood
+    "black": (0.02, 0.02, 0.03),
+    "white": (0.95, 0.95, 0.95),
+    "night": (0.07, 0.08, 0.16),
+    "sakura": (0.95, 0.78, 0.84),
+}
+
+# per-character sprite tints for the sample cast (tag → RGB 0..1)
+SPRITE_TINTS = {
+    "eileen": (0.98, 0.62, 0.35),         # warm silhouette
+    "sylvie": (0.45, 0.65, 0.95),         # cool silhouette
+    "lucy": (0.55, 0.90, 0.65),
+}
+
+# fallback sprite silhouette when neither a tint nor an image exists
+SPRITE_FALLBACK_COLOR = (0.75, 0.70, 0.90, 1.0)
+
+
+def hash_color(name: str) -> tuple:
+    """Deterministic, pleasant color for an arbitrary asset name (0..1 RGBA).
+
+    Stable across runs/platforms (hash() is not — it is seeded per process)."""
+    import hashlib
+    digest = hashlib.md5((name or "asset").encode("utf-8")).digest()
+    hue = digest[0] / 255.0
+    sat = 0.45 + (digest[1] / 255.0) * 0.25      # 0.45..0.70
+    val = 0.55 + (digest[2] / 255.0) * 0.25      # 0.55..0.80
+    # HSV → RGB (h in [0,1))
+    i = int(hue * 6.0) % 6
+    f = hue * 6.0 - int(hue * 6.0)
+    p = val * (1.0 - sat)
+    q = val * (1.0 - f * sat)
+    t = val * (1.0 - (1.0 - f) * sat)
+    r, g, b = (
+        (val, t, p), (q, val, p), (p, val, t),
+        (p, q, val), (t, p, val), (val, p, q),
+    )[i]
+    return (r, g, b, 1.0)
+
+
+def stage_color(asset: str) -> tuple:
+    """Palette color for a `bg <name>` stage asset (RGBA 0..1).
+
+    Curated COLOR_STAGES first (match on any whitespace-separated token, so
+    'bg classroom' and 'bg classroom day' both hit), deterministic hash
+    fallback for anything else."""
+    tokens = [t.lower().strip(" \t-_") for t in (asset or "").split()]
+    for token in tokens:
+        if token in COLOR_STAGES:
+            rgb = COLOR_STAGES[token]
+            return (rgb[0], rgb[1], rgb[2], 1.0)
+    return hash_color("stage:" + (asset or ""))
+
+
+def sprite_color(tag: str) -> tuple:
+    """Palette tint for a character tag (RGBA 0..1), hash fallback."""
+    import re
+    key = (tag or "").lower().strip()
+    if key in SPRITE_TINTS:
+        rgb = SPRITE_TINTS[key]
+        return (rgb[0], rgb[1], rgb[2], 1.0)
+    for token in re.split(r"[\s_/-]+", key):
+        if token in SPRITE_TINTS:
+            rgb = SPRITE_TINTS[token]
+            return (rgb[0], rgb[1], rgb[2], 1.0)
+    return hash_color("sprite:" + key)
+
+
+def _prop_str(owner, key: str) -> str | None:
+    """Read a property from a KX_GameObject / dict / bpy object, or None.
+
+    Covers both runtime shapes (game properties expose __getitem__/__contains__)
+    and editor shapes (bpy objects carry custom properties the same way)."""
+    if owner is None:
+        return None
+    try:
+        if key in owner:
+            val = owner[key]
+            if val is not None:
+                return str(val)
+    except Exception:
+        pass
+    try:
+        val = owner.get(key)
+        if val is not None:
+            return str(val)
+    except Exception:
+        pass
+    return None
+
+
+def image_mode_from(owner=None, env=None) -> str:
+    """Resolve the image policy: "color" (texture-free palette) or "auto"
+    (use a PNG/JPG/WebP when one is found, palette otherwise).
+
+    Order: env UPVN_IMAGES → owner property image_mode → IMAGE_MODE_DEFAULT.
+    Unknown values fail closed to "color" (the robust path)."""
+    modes = {"color": "color", "auto": "auto",
+             "0": "color", "off": "color", "none": "color",
+             "1": "auto", "images": "auto", "on": "auto"}
+    import os
+    env_val = env if env is not None else os.environ.get("UPVN_IMAGES")
+    if env_val:
+        resolved = modes.get(str(env_val).strip().lower())
+        if resolved:
+            return resolved
+    prop = _prop_str(owner, "image_mode")
+    if prop:
+        resolved = modes.get(prop.strip().lower())
+        if resolved:
+            return resolved
+    return IMAGE_MODE_DEFAULT
+
+
+def apply_object_color(obj, color) -> bool:
+    """Set a runtime object tint (KX_GameObject.color / fallback .color).
+
+    The template materials multiply Object Info → Color into Emission, so this
+    is the texture-free way everything gets painted. Returns True on success."""
+    if obj is None:
+        return False
+    try:
+        obj.color = color
+        return True
+    except Exception:
+        pass
+    try:
+        obj.color = color
+        return True
+    except Exception:
+        return False
+
+
+# ---------------------------------------------------------------------------
+# M26b: texture-capable material graph (sprite/background PNGs at runtime).
+#
+# bge.texture cannot bind node materials in UPBGE 0.50 ("Texture is not
+# available", measured in-field), but an editor/runtime-assigned TexImage node
+# renders fine when the mesh has UVs and the image is file-backed (a packed
+# 1×1 white starter keeps the graph valid without any asset). The graph is
+#     Output ← Emission ← Mix(A=Object Info.Color, B=TexImage.Color, Factor)
+# Factor 0.0 → object color drives (palette); Factor 1.0 → texture drives.
+# The runtime flips the factor per material — each Sprite_* plane owns a
+# material slot copy (MASprite_<pos>), so sprites texture independently.
+TEX_NODE_NAME = "UPVN Tex Image"
+MIX_NODE_NAME = "UPVN Tex Mix"
+WHITE_IMAGE_NAME = "UPVN_White1px"
+
+
+def _bpy_module():
+    try:
+        import bpy
+        return bpy
+    except ImportError:
+        return None
+
+
+def plane_material(plane):
+    """First bpy material of a KX_GameObject plane (None headless / missing)."""
+    bpy = _bpy_module()
+    if bpy is None or plane is None:
+        return None
+    try:
+        bo = getattr(plane, "blenderObject", None)
+        slots = getattr(bo, "material_slots", None)
+        if not slots:
+            return None
+        return slots[0].material
+    except Exception:
+        return None
+
+
+def apply_material_image(mat, image_path) -> bool:
+    """Point the material's TexImage node at a file-backed image and switch
+    the mix factor to texture. Returns False when the graph is not
+    texture-capable or the path does not exist (caller falls back)."""
+    import os
+    bpy = _bpy_module()
+    if bpy is None or mat is None or not image_path:
+        return False
+    try:
+        if not os.path.isfile(image_path):
+            return False
+        nt = getattr(mat, "node_tree", None)
+        if nt is None:
+            return False
+        tex = None
+        for n in nt.nodes:
+            if n.type == "TEX_IMAGE":
+                tex = n
+                break
+        if tex is None:
+            return False
+        img = bpy.data.images.load(image_path, check_existing=True)
+        tex.image = img
+        for n in nt.nodes:
+            if n.type == "MIX":
+                try:
+                    for inp in n.inputs:
+                        if inp.name == "Factor":
+                            inp.default_value = 1.0
+                except Exception:
+                    pass
+        return True
+    except Exception:
+        return False
+
+
+def reset_material_palette(mat) -> bool:
+    """Mix factor back to 0.0 → Object Info color (the palette) drives."""
+    if mat is None:
+        return False
+    try:
+        nt = getattr(mat, "node_tree", None)
+        if nt is None:
+            return False
+        for n in nt.nodes:
+            if n.type == "MIX":
+                try:
+                    for inp in n.inputs:
+                        if inp.name == "Factor":
+                            inp.default_value = 0.0
+                except Exception:
+                    pass
+        return True
+    except Exception:
+        return False
+
 
 def required_objects() -> list[dict]:
     """Authoritative, ordered list of every named item the code expects.
@@ -101,6 +363,12 @@ def required_objects() -> list[dict]:
          "engine/ui/world_ui.py"),
         (DIALOGUE_TEXT, "3D FONT — dialogue body",
          "engine/ui/world_ui.py"),
+        (HISTORY_PLANE, "backlog panel shown by H (M26d)",
+         "engine/ui/world_ui.py::apply_world_ui"),
+        (HISTORY_TEXT, "3D FONT — backlog body (M26d)",
+         "engine/ui/world_ui.py::format_history"),
+        (REWIND_TEXT, "3D FONT — '« rewound N' indicator while rolled back (M26d)",
+         "engine/ui/world_ui.py::apply_world_ui"),
     ):
         items.append({"kind": "object", "name": name,
                       "purpose": purpose, "used_by": used_by})
@@ -114,6 +382,13 @@ def required_objects() -> list[dict]:
                       "name": f"{CHOICE_PREFIX}{i}",
                       "purpose": f"clickable 3D menu button {i}",
                       "used_by": "engine/ui/world_ui.py + engine/ui/pointer.py"})
+        # the label is a separate FONT child; apply_world_ui writes it every
+        # tick, so a scene without it shows plates with no text (M26d: it was
+        # already required in practice but absent from the contract)
+        items.append({"kind": "object",
+                      "name": f"{CHOICE_PREFIX}{i}_text",
+                      "purpose": f"FONT label of menu button {i}",
+                      "used_by": "engine/ui/world_ui.py::apply_world_ui"})
     for mat, purpose in (
         (BG_MATERIAL, "material slot of BG_Plane receiving the background texture"),
         (SPRITE_MATERIAL, "material slot of every Sprite_* plane receiving the sprite texture"),

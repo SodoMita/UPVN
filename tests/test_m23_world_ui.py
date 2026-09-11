@@ -122,6 +122,6 @@ def test_frontend_and_addon_are_3d_unlit():
     assert "_rewrite_unlit" in ad
     assert "ShaderNodeEmission" in ad
     assert "Speaker_Text" in ad and "choice_" in ad
-    assert '"version": (0, 6, 11)' in ad
+    assert '"version": (0, 6, 15)' in ad
     assert "scene_name=None" in ad
     assert "_get_or_create" in ad

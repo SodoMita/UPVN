@@ -83,8 +83,15 @@ def build_addon_zip(out_path: pathlib.Path, with_template: bool = True):
         raise SystemExit("add-on source missing: " + str(ADDON_SRC))
     version = addon_version(ADDON_SRC)
     folder = f"upvn_editor_addon_v{version}.zip"
-    if out_path.is_dir() or str(out_path).endswith((".zip",)):
-        out_path = out_path / folder if out_path.is_dir() else out_path
+    # M26g (both agents hit this independently): a missing out_dir must be
+    # CREATED, not treated as a zip filename — `python tools/package_addon.py`
+    # with no dist/ on disk used to write the whole archive into a regular
+    # FILE literally named `dist`. An explicit *.zip path is used as-is.
+    if str(out_path).endswith((".zip",)):
+        pass                       # explicit file path — use it as-is
+    else:
+        out_path.mkdir(parents=True, exist_ok=True)
+        out_path = out_path / folder
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     with tempfile.TemporaryDirectory(prefix="upvn_addon_zip_") as tmp:

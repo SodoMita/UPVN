@@ -12,14 +12,32 @@ apt install sway wtype grim xwayland x11-xserver-utils xdotool imagemagick \
             mesa-utils libgl1-mesa-dri libpulse0 libsndfile1 libjack-jackd2-0
 ```
 
-1. Runtime dir + minimal config (`default_border none`, headless output mode):
+0. **Swap first (OOM guard).** `blenderplayer` needs **~0.9–1.2 GB RSS**
+   (llvmpipe buffers). On a ~2 GB sandbox that also runs platform services
+   (~0.3 GB) the OOM killer murders the player **5–15 s in, often before the
+   window even maps** — the symptom triad is: black desktop, a *stale*
+   `UPVN_HEARTBEAT` json (written by the already-dead process, content never
+   changes) and `dmesg` saying `Out of memory: Killed process … blenderplayer`.
+   Do not chase ghosts in the render stack before checking `dmesg`:
+   ```bash
+   sudo fallocate -l 3G /swapfile && sudo chmod 600 /swapfile \
+     && sudo mkswap /swapfile >/dev/null && sudo swapon /swapfile
+   ```
+
+1. Runtime dir + minimal config (`default_border none`, headless output mode).
+   **Mode syntax varies between sway/wlroots builds** (both seen on "Debian 13
+   + sway 1.10.1"): some builds only accept `output HEADLESS-1 model 1280x720`
+   (headless outputs expose no mode list), others reject `model` as *"Invalid
+   output subcommand"* and want `mode --custom 1280x720`. A bad line aborts
+   startup or parks a swaynag banner over the desktop — keep the file
+   mode-free and set the mode at runtime (non-fatal if it fails):
    ```bash
    mkdir -p /tmp/xdg && chmod 700 /tmp/xdg
-   cat > /tmp/sway_upvn.conf <<'EOF'
-   default_border none
-   output HEADLESS-1 mode 1280x720
+   printf 'default_border none\n' > /tmp/sway_upvn.conf
+   # then after sway is up:
+   swaymsg output HEADLESS-1 mode --custom 1280x720 \
+     || swaymsg output HEADLESS-1 model 1280x720 || true
    # xwayland stays enabled: UPBGE 0.50 is an X11 client (BUG-009 era finding)
-   EOF
    ```
 2. Start the compositor (pixman renderer auto-falls-back when no DRM/GPU):
    ```bash
@@ -27,8 +45,15 @@ apt install sway wtype grim xwayland x11-xserver-utils xdotool imagemagick \
    ```
    Expect in the log: `HEADLESS-1` output, `wayland-1` display, XWayland
    lazy-starting `/tmp/.X11-unix/X0` ⇒ **DISPLAY=:0**.
-3. One-time UPBGE userpref prep (BUG-006): audio device valid/None-object +
-   launcher autoexec, else the player segfaults at startup.
+3. One-time UPBGE userpref prep (BUG-006/BUG-016, exact Blender 5.0 API):
+   ```bash
+   LIBGL_ALWAYS_SOFTWARE=1 ./blender --background --python-expr \
+     "import bpy; bpy.context.preferences.system.audio_device='None'; \
+      bpy.context.preferences.filepaths.use_scripts_auto_execute=True; \
+      bpy.ops.wm.save_userpref()"
+   ```
+   (5.0 moved audio prefs to `preferences.system`; without this the player
+   SIGSEGVs in `AUD_Device_setSpeedOfSound` before the first frame.)
 4. Play:
    ```bash
    DISPLAY=:0 LIBGL_ALWAYS_SOFTWARE=1 \
@@ -85,3 +110,20 @@ quits on Esc at engine level, modal or not (BUG-011).
 - Keep the UPBGE tarball mirror inside the workspace (`tmp/upbge.tar.xz`):
   sandbox reprovisions wipe installed packages and big binaries between
   sessions; the 408 MB download is the slowest recovery step.
+
+## UPBGE 0.50 runtime API findings (M26, all verified live)
+
+- `KX_GameObject.rayCast` does NOT see `physics_type='SENSOR'` objects —
+  ray-target plates must be `STATIC` (+ BOX collision bounds).
+- `Camera.getScreenRay` returns None on orthographic cameras.
+- `KX_Scene.rayCast` does not exist — cast from a camera/object.
+- `bge.logic.mouse.position` y is measured from the window TOP.
+- `bge.texture.Texture` cannot bind node-based (Emission) materials —
+  "Texture is not available"; use editor-assigned image planes or object
+  color tints.
+- `blender -w WxH+X+Y` opens the editor windowed (the argument before the
+  blend is still parsed as a file — order matters: `-w 800x450+0+0 file.blend`).
+- Embedded P (editor) needs ~1.6 GB RSS; on 2 GB hosts it gets OOM-killed
+  (~2 s after engine start) — use the standalone blenderplayer there.
+- `tools/desktop_run.sh` wraps the env-correct standalone player run
+  (DISPLAY, LIBGL_ALWAYS_SOFTWARE, SDL dummy audio, heartbeat + debug tee).
