@@ -11,8 +11,9 @@ twin: `tools/smoke_walkthrough.sh` (self-verifying, retry-until-state).
       can — the player/editor need ~0.9–1.6 GB RSS and get OOM-killed
       otherwise (black desktop + stale heartbeat is the signature).
 - [ ] compositor up: `swaymsg -t get_outputs` shows HEADLESS-1 (or Xvfb :99).
-- [ ] `pytest tests/ -q` green (353 passed / 16 skipped after the
-      desktop-gui consolidation merge).
+- [ ] `pytest tests/ -q` green (366 passed / 16 skipped after the
+      desktop-gui consolidation merge; binary tests need /opt/upbge —
+      otherwise they skip).
 - [ ] `bash tools/desktop_sway.sh` (bootstrap: sway + UPBGE + 3 GB swap) and
       `source /tmp/wl-upvn/env.sh`. After a sandbox reprovision this is the
       FIRST thing to re-run: apt packages, `/opt/upbge`, the swapfile and

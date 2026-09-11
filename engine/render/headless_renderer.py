@@ -558,7 +558,11 @@ def _pil_probe():
             raise RuntimeError(
                 "Pillow (PIL) is not available in this Python interpreter. Install it into "
                 "UPBGE's bundled Python, e.g.:\n"
-                "  <upbge>/5.0/python/bin/python3.11 -m pip install pillow\n"
+                "  python3 -m pip install --python-version 3.11 --only-binary=:all: \\\n"
+                "      --target <upbge>/5.0/python/lib/python3.11/site-packages pillow\n"
+                "(UPBGE 0.50 ships Python as a lib only — no bin/python3.11 — so pip must\n"
+                "cross-install from the host python3; without --python-version it installs\n"
+                "host-ABI wheels and _imaging fails to load.)\n"
                 "If you just installed it, restart Blender/UPBGE so the interpreter sees it."
             )
     return Image, ImageDraw, ImageFont

@@ -26,7 +26,18 @@ import sys, pathlib, os, bpy
 
 addon_path = str(pathlib.Path("{blend.parent}").resolve())
 sys.path.insert(0, addon_path)
-import upvn_editor_addon
+# Load the REPO addon file explicitly — a bare `import upvn_editor_addon`
+# silently returns a stale same-named module when one is already enabled
+# in ~/.config (auto-registered at startup, already in sys.modules), so the
+# test would exercise the OLD code. The merged addon's
+# _purge_stale_registrations() then clears those stale RNA classes.
+sys.modules.pop("upvn_editor_addon", None)
+import importlib.util
+_spec = importlib.util.spec_from_file_location(
+    "upvn_editor_addon", addon_path + "/upvn_editor_addon.py")
+upvn_editor_addon = importlib.util.module_from_spec(_spec)
+sys.modules["upvn_editor_addon"] = upvn_editor_addon
+_spec.loader.exec_module(upvn_editor_addon)
 upvn_editor_addon.register()
 
 p = bpy.context.scene.upvn_props

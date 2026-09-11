@@ -61,7 +61,11 @@ def test_headless_renderer_importable_without_pil(monkeypatch):
     with pytest.raises(RuntimeError) as ei:
         mod.render_state(VNState(), {"type": "say", "who": None, "text": "x"})
     msg = str(ei.value)
-    assert "Pillow" in msg and "pip install pillow" in msg
+    # instructive error: mentions Pillow and a WORKING install command (the
+    # UPBGE 0.50 tarball has no bundled python binary, so the fix must be
+    # the host-python cross-install with the right ABI flags)
+    assert "Pillow" in msg and "pip install" in msg and "pillow" in msg
+    assert "--python-version 3.11" in msg and "--only-binary=:all:" in msg
     monkeypatch.undo()  # restore import machinery
 
 
