@@ -474,86 +474,99 @@ class UPVN_GameBuilder:
         return "\n".join(out)
 
     def write(self):
-        # Preserve mode: if _existing_text exists, merge new additions rather than overwrite cleanly?
-        # New logic: if file existed and we have _existing_text, we merge by appending new label lines
-        # and inserting new defines at top after last define.
-        if self._existing_text is not None and self.script_path.exists():
-            existing = self.script_path.read_text(encoding="utf-8")
-            # collect new defines that are not already in existing
-            new_defines = []
-            for cid, data in self.characters.items():
-                define_line = f'define {cid} = Character("{data["name"]}", color="{data["color"]}")'
-                if define_line not in existing and f'define {cid} =' not in existing:
-                    new_defines.append(define_line)
-            # collect new label lines (those in self.labels[current] that are not in existing)
-            # Simpler: just append new lines for current_label to the end of that label's block in existing file
-            # Find label block for current_label and insert before next label or end
-            if self.current_label in existing:
-                # find label occurrence
-                lines = existing.splitlines()
-                # locate label line
-                label_idx = None
-                for i, l in enumerate(lines):
-                    if re.match(rf'^\s*label\s+{re.escape(self.current_label)}\s*:', l):
-                        label_idx = i
+        """Write the project script. STRICTLY non-destructive (M26g).
+
+        If the target file exists we only ever
+          (a) insert new `define` lines after the last existing define,
+          (b) insert NEW lines into an existing label's block immediately
+              BEFORE its trailing `return` (so additions are reachable —
+              the old code appended after `return`: dead code), and
+          (c) append brand-new label blocks at the end of the file.
+        If there is nothing to change, the file is not touched at all.
+
+        The old implementation fell through to a full regeneration from
+        the constructor's *placeholder* labels whenever the merge had
+        nothing to do — silently replacing every existing label body with
+        `"Empty label."` (live-verified data loss: one click of Create
+        Project emptied the M25 smoke game script). That path is gone.
+        """
+        fresh = self._existing_text is None or not self.script_path.exists()
+        if fresh:
+            self.script_path.parent.mkdir(parents=True, exist_ok=True)
+            self.script_path.write_text(self.build_rpy(), encoding="utf-8")
+            return self.script_path
+
+        existing = self.script_path.read_text(encoding="utf-8")
+        lines = existing.splitlines()
+
+        # 1) new defines only (never rewrite existing ones)
+        new_defines = []
+        for cid, data in self.characters.items():
+            define_line = f'define {cid} = Character("{data["name"]}", color="{data["color"]}")'
+            if f"define {cid} =" not in existing:
+                new_defines.append(define_line)
+
+        # 2) label block bounds
+        label_re = re.compile(r'^\s*label\s+(\w+)\s*:')
+        starts = [(label_re.match(l).group(1), i)
+                  for i, l in enumerate(lines) if label_re.match(l)]
+        bounds = {}
+        for bi, (name, start) in enumerate(starts):
+            bounds[name] = (start, starts[bi + 1][1] if bi + 1 < len(starts) else len(lines))
+
+        insertions = []          # (line index, [new lines])
+        new_label_blocks = []    # full blocks for labels not in the file
+        for label, new_lines in self.labels.items():
+            wanted = [l for l in new_lines if l.strip()]
+            if not wanted:
+                continue
+            if label in bounds:
+                start, end = bounds[label]
+                block_lines = set(l.strip() for l in lines[start + 1:end])
+                to_insert = [l for l in wanted if l.strip() not in block_lines]
+                if not to_insert:
+                    continue
+                # insert before the block's LAST `return` when it ends with
+                # one — otherwise right before the next label
+                at = end
+                for j in range(end - 1, start, -1):
+                    s = lines[j].strip()
+                    if s:
+                        if s == "return":
+                            at = j
                         break
-                if label_idx is not None:
-                    # find next label after
-                    next_idx = None
-                    for j in range(label_idx + 1, len(lines)):
-                        if re.match(r'^\s*label\s+\w+\s*:', lines[j]):
-                            next_idx = j
-                            break
-                    # insert new lines before next_idx or at end
-                    insert_at = next_idx if next_idx is not None else len(lines)
-                    # new lines to insert are those in self.labels[current_label] that are not already in block
-                    block = lines[label_idx + 1:insert_at] if insert_at else []
-                    block_text = "\n".join(block)
-                    to_insert = []
-                    for nl in self.labels[self.current_label]:
-                        if nl.strip() not in block_text:
-                            to_insert.append(nl)
-                    if to_insert:
-                        # insert
-                        new_lines = lines[:insert_at] + to_insert + lines[insert_at:]
-                        # insert new defines at top after last define or after imports
-                        if new_defines:
-                            last_define_idx = -1
-                            for k, l in enumerate(new_lines):
-                                if l.strip().startswith("define "):
-                                    last_define_idx = k
-                            if last_define_idx >= 0:
-                                for nd in reversed(new_defines):
-                                    new_lines.insert(last_define_idx + 1, nd)
-                            else:
-                                # insert at top
-                                new_lines = new_defines + [""] + new_lines
-                        self.script_path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
-                        return self.script_path
-            # fallback: if we couldn't merge cleanly, append new defines at top and new lines at end
-            if new_defines:
-                existing = "\n".join(new_defines) + "\n" + existing
-            # append new label blocks that don't exist yet
-            new_rpy = self.build_rpy()
-            # For simplicity, if current_label lines were not merged, append them
-            # Check if any new lines not in existing, append at end of current label block via simple append
-            # We'll just write merged via appending to_insert if exists else fallback to overwrite prevention: append at end
-            # Last resort: overwrite with build_rpy but preserve original defines+labels that were not in builder
-            # To avoid data loss, we append to existing file directly for new lines
-            if to_insert if 'to_insert' in locals() else []:
-                # already handled
-                pass
+                insertions.append((at, to_insert))
             else:
-                # no merge, just append new lines for current label at end of file
-                extra = "\n".join(self.labels[self.current_label])
-                if extra.strip() and extra.strip() not in existing:
-                    # append inside current label: find label and append before next label
-                    # simple: append at end of file
-                    self.script_path.write_text(existing.rstrip() + "\n" + extra + "\n", encoding="utf-8")
-                    return self.script_path
-            # if still not written, fall through to full write
-        rpy = self.build_rpy()
-        self.script_path.write_text(rpy, encoding="utf-8")
+                body = [f"label {label}:"] + wanted
+                last = wanted[-1].strip()
+                if last != "return" and not last.startswith("jump "):
+                    body.append("    return")
+                new_label_blocks.append("\n".join(body))
+
+        if not new_defines and not insertions and not new_label_blocks:
+            return self.script_path   # nothing to do — leave the file alone
+
+        # apply label insertions bottom-up so indices stay valid
+        for at, to_insert in sorted(insertions, key=lambda t: -t[0]):
+            lines[at:at] = to_insert
+
+        if new_label_blocks:
+            while lines and not lines[-1].strip():
+                lines.pop()
+            for blk in new_label_blocks:
+                lines += ["", blk]
+
+        if new_defines:
+            last_define = -1
+            for k, l in enumerate(lines):
+                if l.strip().startswith("define "):
+                    last_define = k
+            if last_define >= 0:
+                lines[last_define + 1:last_define + 1] = new_defines
+            else:
+                lines = new_defines + [""] + lines
+
+        self.script_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
         return self.script_path
 
     def validate(self):
@@ -1705,6 +1718,22 @@ except Exception:
         def execute(self, context):
             props = context.scene.upvn_props
             path = bpy.path.abspath(props.project_path)
+            # M26g data-loss guard: Create Project generates a STARTER. If
+            # the target script already has content (e.g. the panel adopted
+            # the blend's script_path after Setup Scene — pointing at an
+            # existing game), regenerating would empty every label body.
+            # Refuse and tell the user what to do instead.
+            try:
+                existing = pathlib.Path(path)
+                if existing.exists() and existing.read_text(encoding="utf-8").strip():
+                    self.report(
+                        {"ERROR"},
+                        f"Refusing to overwrite existing script: {path} — "
+                        "change Script Path (empty file/folder for a new game) "
+                        "or delete that file first")
+                    return {"CANCELLED"}
+            except OSError:
+                pass                                   # unreadable → builder will surface it
             builder = UPVN_GameBuilder(path)
             builder.add_character("e", "Eileen", "#c8ffc8")
             builder.add_character("s", "Sylvie", "#c8c8ff")
