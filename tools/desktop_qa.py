@@ -54,6 +54,21 @@ def win_id(e):
     return None
 
 
+# xdotool has its own key-name table and silently *ignores* names it does not
+# know ("No such key name 'PageUp'") — the key never reaches the window and the
+# run looks like an engine bug. Translate the names a VN manual actually uses.
+KEY_ALIASES = {
+    "PageUp": "Prior", "PageDown": "Next",
+    "Home": "Home", "End": "End",
+    "Escape": "Escape", "Return": "Return", "Space": "space",
+}
+
+
+def resolve_key(name):
+    key = KEY_ALIASES.get(name, name)
+    return key
+
+
 def hb():
     try:
         return json.loads(Path(HB).read_text())
@@ -78,7 +93,7 @@ def shot(e, name):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["status", "shot", "keys"])
+    ap.add_argument("cmd", choices=["status", "shot", "keys", "wheel"])
     ap.add_argument("rest", nargs="*")
     ap.add_argument("--shot", dest="shot_name")
     ap.add_argument("--expect", default=None, help="json subset to wait for")
@@ -96,6 +111,30 @@ def main():
         return 0 if p.exists() else 1
 
     wid = win_id(e)
+    if a.cmd == "wheel":
+        if not wid:
+            print("FAIL: no player window", file=sys.stderr)
+            return 1
+        subprocess.run(["xdotool", "windowactivate", wid], env=e, timeout=20)
+        subprocess.run(["xdotool", "windowfocus", "--remap", wid], env=e, timeout=20)
+        time.sleep(0.4)
+        direction = (a.rest or ["up"])[0]
+        count = int(a.rest[1]) if len(a.rest) > 1 else 1
+        btn = "4" if direction.startswith("up") else "5"
+        want = json.loads(a.expect) if a.expect else None
+        # XTEST, not `--window`: synthetic (send_event) events are dropped by
+        # the SDL/X11 frontend, and the wheel is the main Rewind binding in a
+        # VN, so a harness that silently no-ops here reads as a broken engine.
+        for i in range(count):
+            subprocess.run(["xdotool", "click", btn], env=e, timeout=20)
+            time.sleep(a.settle)
+        print("state:", json.dumps(hb()))
+        if want is not None:
+            cur = hb()
+            ok = all(cur.get(k) == v or str(cur.get(k)) == str(v) for k, v in want.items())
+            print("wheel", direction, count, "->", "OK" if ok else f"MISMATCH want {want}")
+            return 0 if ok else 1
+        return 0
     if not wid:
         print("FAIL: no player window", file=sys.stderr)
         return 1
@@ -109,9 +148,13 @@ def main():
         # 80 ms hold spans two ticks and the engine's per-tick `just` edge sees
         # it twice, so one "PageUp" rolled back two lines.
         hold = "80" if "+" in key else "12"
+        key = resolve_key(key)
         for attempt in range(3):
-            subprocess.run(["xdotool", "key", "--window", wid, "--delay", hold, key],
-                           env=e, timeout=20)
+            r = subprocess.run(["xdotool", "key", "--window", wid, "--delay", hold, key],
+                               env=e, capture_output=True, text=True, timeout=20)
+            if "No such key name" in (r.stderr or ""):
+                # never let a typoed keymasquerade as a failing feature
+                sys.exit(f"xdotool does not know key {key!r}: {r.stderr.strip()}")
             time.sleep(a.settle)
             if want is None:
                 break
