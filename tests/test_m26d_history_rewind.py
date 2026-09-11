@@ -425,7 +425,9 @@ def test_format_history_pages_by_rows_and_shows_position():
     # a short script needs no pager at all
     short = world_ui.format_history(_entries(3))
     assert "page" not in short and len(short.split("\n")) == 3
-    assert world_ui.history_max_scroll(_entries(12)) == 0
+    cap = world_ui.HISTORY_MAX_LINES
+    assert world_ui.history_max_scroll(_entries(cap)) == 0, "what fits has no pager"
+    assert world_ui.history_max_scroll(_entries(cap + 1)) >= 1
 
 
 def test_wrapping_counts_towards_the_row_budget():
