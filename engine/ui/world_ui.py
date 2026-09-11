@@ -36,17 +36,24 @@ except Exception:                        # pragma: no cover - direct module load
     REWIND_TEXT = "Rewind_Text"
 HISTORY_MAX_LINES = 8       # rendered backlog rows the panel can hold
 HISTORY_WRAP = 44           # chars per backlog row before wrapping
-# The player draws FONT objects with the engine's bitmap face, NOT with the
-# curve's glyph mesh: measured in-player at em 0.30 the advance is ~1.0-1.4 em
-# per character and the row pitch ~2.2 em, while `curve.dimensions` (what the
-# editor and the headless probes read) reports 0.42 em / 1.1 em.  Sizing the
-# backlog from the curve metrics is what made it overrun the panel.  PITCH_EM
-# and ADVANCE_EM below are the player numbers, and FIT_SLACK exists because the
-# game window aspect and the engine's render aspect can differ (measured 9%
-# apart under XWayland, which otherwise silently reclaims the margin).
-HISTORY_PITCH_EM = 2.2
-HISTORY_ADVANCE_EM = 1.0
+# Player font metrics, measured from screenshots of the running game — NOT the
+# curve numbers the editor reports (bpy's depsgraph says 0.42 em advance /
+# 1.117 em pitch, and the *advance* is close, but sizing from the editor's
+# numbers while the drawn block behaves differently is what made the backlog
+# overrun the panel and slice its own top row off at the window edge):
+#   PITCH_EM   row-to-row distance, from an 8-row block spanning 156 px at
+#              64 px/unit and em 0.249  -> 0.30 / 0.249
+#   ADVANCE_EM widest wrapped row: 44 chars measured 5.6 units at em 0.249
+#              -> 0.51 em, with margin for digits and "Name: " prefixes
+#   FIT_SLACK  the game window aspect and the engine's render aspect differ by
+#              ~9% under XWayland, so the fit keeps that much slack
+HISTORY_PITCH_EM = 1.2
+HISTORY_ADVANCE_EM = 0.62
 HISTORY_FIT_SLACK = 0.85
+# The block lives in the upper band: the panel is a full-screen backdrop, but
+# the dialogue box owns the lower half, so the backlog must not grow into it.
+BACKLOG_TOP = 0.86         # where the FIRST row lands (fraction of half_v)
+BACKLOG_BOTTOM = 0.02      # the block may never descend below this
 
 
 def history_lines(entries, wrap_at: int = HISTORY_WRAP) -> list[str]:
@@ -270,7 +277,9 @@ HOVER_SCALE = 1.08   # M26c: choice plate grows 8% under the cursor
 # alone and coplanar-ish quads lose text to depth precision (measured with the
 # backlog). Kept as named constants so the dialogue box and the overlay share
 # one rule.
-BACKLOG_TOP = 0.45   # first backlog line's height / vertical half-extent
+# (BACKLOG_TOP / BACKLOG_BOTTOM, the backlog's vertical band, are up by the
+# other HISTORY_* constants — defining them twice here is what silently pinned
+# the block back to 0.45 and clipped its first row at the window edge.)
 UI_DEPTH = 0.12      # panel in front of the story planes
 TEXT_FRONT = 0.45    # text in front of its own panel
 
@@ -375,28 +384,38 @@ def layout_screen_ui(get_obj: Callable[[str], Any], payload: dict, ortho: float 
     htext = get_obj(HISTORY_TEXT)
     rtext = get_obj(REWIND_TEXT)
     panel_h = half_v * 0.92
-    backlog_top = half_v * BACKLOG_TOP
-    # Rows have to fit between the anchor and the dialogue box AND the wrapped
-    # text has to fit between the panel's edges, so the em is the smaller of
-    # the two bounds (see HISTORY_PITCH_EM / HISTORY_ADVANCE_EM for where the
-    # per-row numbers come from).
-    band = half_v * (BACKLOG_TOP + 0.70)
+    first_row_z = half_v * BACKLOG_TOP
+    # The em is the smaller of the height bound (the rows must fit the band
+    # above the dialogue box) and the width bound (a wrapped row must fit
+    # between the panel's edges). See HISTORY_PITCH_EM / HISTORY_ADVANCE_EM for
+    # where the per-row numbers come from.
+    band = half_v * (BACKLOG_TOP - BACKLOG_BOTTOM)
     by_height = band / (HISTORY_MAX_LINES * HISTORY_PITCH_EM)
     by_width = (half * 1.72) / (HISTORY_WRAP * HISTORY_ADVANCE_EM)
     hist_em = min(by_height, by_width) * HISTORY_FIT_SLACK
+    # A FONT curve draws *upward* from its origin in the player — `align_y=TOP`
+    # is set on the curve and ignored at runtime (measured: an 8-row block
+    # anchored at +0.45 had its top row cut by the window edge, its footer
+    # landing at the anchor). So the origin is the block's BOTTOM, derived from
+    # the row count the payload actually produced.
+    body = payload.get("history") or ""
+    n_rows = len(body.split("\n")) if body else 0
+    block_h = max(1, n_rows) * hist_em * HISTORY_PITCH_EM
+    backlog_z = first_row_z - block_h
     if hbox:
         _set_pos(hbox, (0.0, y_ui + UI_DEPTH, 0.0))
         _set_scale(hbox, (half * 0.94, panel_h, 1.0))
     # FONT text grows down from its origin (align_y TOP), so the block is
     # anchored at the top and the panel's top edge is its padding.
     if htext:
-        _set_pos(htext, (-half * 0.86, y_ui + UI_DEPTH - TEXT_FRONT, backlog_top))
+        _set_pos(htext, (-half * 0.86, y_ui + UI_DEPTH - TEXT_FRONT, backlog_z))
     set_font_size(htext, hist_em)
     # The rewind marker shares the backlog text's depth plane and height on
     # purpose: the two are never visible at once, so they cannot fight, and the
     # marker reuses the margin that was measured instead of a second guess.
     if rtext:
-        _set_pos(rtext, (-half * 0.86, y_ui + UI_DEPTH - TEXT_FRONT, backlog_top))
+        _set_pos(rtext, (-half * 0.86, y_ui + UI_DEPTH - TEXT_FRONT,
+                         first_row_z - hist_em * HISTORY_PITCH_EM))
     set_font_size(rtext, half * 0.030)
     vis_n = sum(1 for c in payload.get("choices", []) if c.get("visible"))
     for i, ch in enumerate(payload.get("choices", [])):

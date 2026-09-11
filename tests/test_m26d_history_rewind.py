@@ -192,8 +192,11 @@ def test_layout_positions_history_panel_and_scales_text():
     names = [contract.SPEAKER_TEXT, contract.DIALOGUE_TEXT, contract.DIALOGUE_PLANE,
              contract.HISTORY_PLANE, contract.HISTORY_TEXT, contract.REWIND_TEXT]
     scene = FakeScene(names)
-    world_ui.layout_screen_ui(scene.get, {"choices": [], "history_visible": True},
-                              ortho=15.0)
+    body = world_ui.format_history(_entries(world_ui.HISTORY_MAX_LINES + 4))
+    n_rows = len(body.split("\n"))
+    assert n_rows == world_ui.HISTORY_MAX_LINES
+    world_ui.layout_screen_ui(scene.get, {"choices": [], "history_visible": True,
+                                          "history": body}, ortho=15.0)
     half = 15.0 / 2.0
     half_v = half / world_ui.aspect_wh()
     box = scene.get(contract.HISTORY_PLANE)
@@ -203,24 +206,33 @@ def test_layout_positions_history_panel_and_scales_text():
     assert htext.worldPosition[2] > 0, \
         "backlog text anchors above centre so it grows downward"
     # the backlog em is derived from the space available, not a magic number
-    by_height = (half_v * (world_ui.BACKLOG_TOP + 0.70)) / (
+    by_height = (half_v * (world_ui.BACKLOG_TOP - world_ui.BACKLOG_BOTTOM)) / (
         world_ui.HISTORY_MAX_LINES * world_ui.HISTORY_PITCH_EM)
     by_width = (15.0 / 2 * 1.72) / (world_ui.HISTORY_WRAP * world_ui.HISTORY_ADVANCE_EM)
     hist_em = min(by_height, by_width) * world_ui.HISTORY_FIT_SLACK
     assert htext.worldScale[0] == pytest.approx(hist_em, abs=1e-4), \
         "set_font_size rounds to 5 dp before caching"
-    # rows at that size still fit above the dialogue box (the old fixed em size
-    # overran the panel and drew over the dialogue)
-    assert htext.worldPosition[2] - world_ui.HISTORY_MAX_LINES * hist_em * \
-        world_ui.HISTORY_PITCH_EM > -half_v * 0.70
+    # the block grows UP from its origin (align_y is ignored at runtime), so a
+    # full page must land with its first row just under the panel's top edge
+    # and its bottom above the dialogue box — the old top-anchor clipped row 1
+    # against the window edge.
+    top = htext.worldPosition[2] + n_rows * hist_em * world_ui.HISTORY_PITCH_EM
+    assert top <= half_v * world_ui.BACKLOG_TOP + 1e-6, "first row inside the band"
+    assert htext.worldPosition[2] >= half_v * world_ui.BACKLOG_BOTTOM - 1e-6, \
+        "last row stays clear of the dialogue box"
     # ...and a wrapped row still fits between the panel's edges
     assert world_ui.HISTORY_WRAP * hist_em * world_ui.HISTORY_ADVANCE_EM < 15.0 * 0.94
     # the depth rule IS the bug fix: the panel must clear the story planes and
     # the text must clear the panel, or the glyphs are silently not drawn
     assert box.worldPosition[1] - htext.worldPosition[1] == pytest.approx(world_ui.TEXT_FRONT)
     assert htext.worldPosition[1] - rtext.worldPosition[1] == pytest.approx(0.0)
-    # marker and first line share one height on purpose (never shown together)
-    assert rtext.worldPosition[2] == pytest.approx(htext.worldPosition[2])
+    # marker and backlog share the same TOP row (they are never shown at once):
+    # each origin is its block's bottom, so top = origin + rows * pitch * em
+    row_h = hist_em * world_ui.HISTORY_PITCH_EM
+    assert rtext.worldPosition[2] + row_h == pytest.approx(
+        htext.worldPosition[2] + n_rows * row_h, abs=1e-4)
+    assert htext.worldPosition[2] + n_rows * row_h == pytest.approx(
+        half_v * world_ui.BACKLOG_TOP, abs=1e-4)
     # the panel is taller than the text block so the list reads as inside it
     assert box.worldScale[1] > htext.worldPosition[2]
 
