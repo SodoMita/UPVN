@@ -769,22 +769,42 @@ if HAS_BPY:
 
         def execute(self, context):
             py = _upbge_python_path()
-            if not py:
-                self.report({"ERROR"}, "Bundled Python of UPBGE not found next to " +
-                            str(getattr(bpy.app, "binary_path", "")))
-                return {"FINISHED"}
-            import subprocess
-            # Install into the site-packages of the RUNNING interpreter (already
-            # on sys.path), so the package becomes visible without a restart.
+            # target: site-packages of the RUNNING interpreter (already on
+            # sys.path), so the package becomes visible without a restart
             target = None
             try:
                 import sysconfig
                 target = sysconfig.get_paths().get("purelib")
             except Exception:
                 target = None
+            cross_flags = []
+            if not py:
+                # Official UPBGE 0.50 tarball layout: python as LIB ONLY
+                # (5.0/python/lib/python3.11/…, no bin/python3.11). The
+                # bundled pip route is impossible — fall back to the HOST
+                # python3 and cross-install INTO that site-packages with
+                # pip's --python-version/--only-binary flags (a plain
+                # `--target` without them silently ships host-ABI wheels —
+                # `import PIL` then works but `_imaging` fails to load).
+                import shutil
+                py = shutil.which("python3")
+                if not py:
+                    self.report({"ERROR"},
+                                "No bundled Python binary next to " +
+                                str(getattr(bpy.app, "binary_path", "")) +
+                                " and no python3 on PATH.")
+                    return {"FINISHED"}
+                cross_flags = ["--python-version", "3.11",
+                               "--only-binary=:all:"]
+                if not target:
+                    self.report({"ERROR"}, "Cannot determine this "
+                                "interpreter's site-packages (sysconfig).")
+                    return {"FINISHED"}
+            import subprocess
             cmd = [py, "-m", "pip", "install", "pillow"]
             if target:
                 cmd += ["--target", target]
+            cmd += cross_flags
             try:
                 r = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
             except Exception as e:

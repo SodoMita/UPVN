@@ -208,6 +208,13 @@ def test_template_carries_texture_graph_and_uvs():
     """blend/UPVN_Template.blend: TexImage+Mix nodes on BG + per-pos sprites,
     packed white starter, UV layers, per-position sprite materials."""
     import subprocess
+    # binary test (same pattern as test_m26g_addon_live_update): without a
+    # UPBGE install this must SKIP, not error — a hardcoded path with no
+    # guard turned "no /opt/upbge on this machine" into a suite failure.
+    if not Path("/opt/upbge/upbge-0.50-linux-x64/blender").exists():
+        import pytest
+        pytest.skip("UPBGE binary not present "
+                    "(/opt/upbge/upbge-0.50-linux-x64)")
     blend = Path(__file__).resolve().parents[1] / "blend" / "UPVN_Template.blend"
     expr = (
         "import bpy;"
