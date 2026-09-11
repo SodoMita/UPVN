@@ -452,92 +452,85 @@ class UPVN_GameBuilder:
                 out.append("    return")
             else:
                 out.extend(lines)
-                # ensure return if no jump/return at end
                 last = lines[-1].strip()
-                if not last.startswith("jump ") and last != "return" and "menu:" not in "\n".join(lines[-3:]):
-                    pass
+                if not last.startswith("jump ") and last != "return" and not last.startswith("return"):
+                    out.append("    return")
             out.append("")
         return "\n".join(out)
 
     def write(self):
-        # Preserve mode: if _existing_text exists, merge new additions rather than overwrite cleanly?
-        # New logic: if file existed and we have _existing_text, we merge by appending new label lines
-        # and inserting new defines at top after last define.
+        # Preserve mode: if _existing_text exists, merge new additions rather than overwrite cleanly
         if self._existing_text is not None and self.script_path.exists():
             existing = self.script_path.read_text(encoding="utf-8")
+            lines = existing.splitlines()
+
             # collect new defines that are not already in existing
             new_defines = []
             for cid, data in self.characters.items():
                 define_line = f'define {cid} = Character("{data["name"]}", color="{data["color"]}")'
                 if define_line not in existing and f'define {cid} =' not in existing:
                     new_defines.append(define_line)
-            # collect new label lines (those in self.labels[current] that are not in existing)
-            # Simpler: just append new lines for current_label to the end of that label's block in existing file
-            # Find label block for current_label and insert before next label or end
+
+            # insert lines for current_label
             if self.current_label in existing:
-                # find label occurrence
-                lines = existing.splitlines()
-                # locate label line
                 label_idx = None
                 for i, l in enumerate(lines):
                     if re.match(rf'^\s*label\s+{re.escape(self.current_label)}\s*:', l):
                         label_idx = i
                         break
                 if label_idx is not None:
-                    # find next label after
-                    next_idx = None
+                    next_idx = len(lines)
                     for j in range(label_idx + 1, len(lines)):
                         if re.match(r'^\s*label\s+\w+\s*:', lines[j]):
                             next_idx = j
                             break
-                    # insert new lines before next_idx or at end
-                    insert_at = next_idx if next_idx is not None else len(lines)
-                    # new lines to insert are those in self.labels[current_label] that are not already in block
-                    block = lines[label_idx + 1:insert_at] if insert_at else []
-                    block_text = "\n".join(block)
-                    to_insert = []
-                    for nl in self.labels[self.current_label]:
-                        if nl.strip() not in block_text:
-                            to_insert.append(nl)
+
+                    block = lines[label_idx + 1:next_idx]
+                    to_insert = [nl for nl in self.labels[self.current_label] if nl.strip() not in "\n".join(block)]
                     if to_insert:
-                        # insert
-                        new_lines = lines[:insert_at] + to_insert + lines[insert_at:]
-                        # insert new defines at top after last define or after imports
-                        if new_defines:
-                            last_define_idx = -1
-                            for k, l in enumerate(new_lines):
-                                if l.strip().startswith("define "):
-                                    last_define_idx = k
-                            if last_define_idx >= 0:
-                                for nd in reversed(new_defines):
-                                    new_lines.insert(last_define_idx + 1, nd)
-                            else:
-                                # insert at top
-                                new_lines = new_defines + [""] + new_lines
-                        self.script_path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
-                        return self.script_path
-            # fallback: if we couldn't merge cleanly, append new defines at top and new lines at end
+                        cleaned_block = []
+                        for bl in block:
+                            if bl.strip() in ('"Empty label."', "'Empty label.'"):
+                                continue
+                            cleaned_block.append(bl)
+
+                        insert_rel_idx = len(cleaned_block)
+                        for idx_rev, bl in enumerate(reversed(cleaned_block)):
+                            if bl.strip() == "return":
+                                insert_rel_idx = len(cleaned_block) - 1 - idx_rev
+                                break
+                            elif bl.strip():
+                                break
+
+                        updated_block = cleaned_block[:insert_rel_idx] + to_insert + cleaned_block[insert_rel_idx:]
+                        lines = lines[:label_idx + 1] + updated_block + lines[next_idx:]
+
+            # append new label blocks that don't exist in file yet
+            for lbl, lbl_lines in self.labels.items():
+                if lbl != self.current_label and not any(re.match(rf'^\s*label\s+{re.escape(lbl)}\s*:', l) for l in lines):
+                    lines.append("")
+                    lines.append(f"label {lbl}:")
+                    if lbl_lines:
+                        lines.extend(lbl_lines)
+                    else:
+                        lines.append('    "Empty label."')
+                        lines.append("    return")
+
+            # insert new defines at top
             if new_defines:
-                existing = "\n".join(new_defines) + "\n" + existing
-            # append new label blocks that don't exist yet
-            new_rpy = self.build_rpy()
-            # For simplicity, if current_label lines were not merged, append them
-            # Check if any new lines not in existing, append at end of current label block via simple append
-            # We'll just write merged via appending to_insert if exists else fallback to overwrite prevention: append at end
-            # Last resort: overwrite with build_rpy but preserve original defines+labels that were not in builder
-            # To avoid data loss, we append to existing file directly for new lines
-            if to_insert if 'to_insert' in locals() else []:
-                # already handled
-                pass
-            else:
-                # no merge, just append new lines for current label at end of file
-                extra = "\n".join(self.labels[self.current_label])
-                if extra.strip() and extra.strip() not in existing:
-                    # append inside current label: find label and append before next label
-                    # simple: append at end of file
-                    self.script_path.write_text(existing.rstrip() + "\n" + extra + "\n", encoding="utf-8")
-                    return self.script_path
-            # if still not written, fall through to full write
+                last_define_idx = -1
+                for k, l in enumerate(lines):
+                    if l.strip().startswith("define "):
+                        last_define_idx = k
+                if last_define_idx >= 0:
+                    for nd in reversed(new_defines):
+                        lines.insert(last_define_idx + 1, nd)
+                else:
+                    lines = new_defines + [""] + lines
+
+            self.script_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            return self.script_path
+
         rpy = self.build_rpy()
         self.script_path.write_text(rpy, encoding="utf-8")
         return self.script_path
@@ -1737,8 +1730,7 @@ except Exception:
                 try:
                     src = pathlib.Path(bpy.path.abspath(p.bg_image))
                     if src.exists():
-                        dest_dir = pathlib.Path(path).parent.parent / "assets" / "backgrounds"
-                        dest_dir.mkdir(parents=True, exist_ok=True)
+                        dest_dir = _get_project_asset_dir(path, "backgrounds")
                         dest = dest_dir / src.name
                         shutil.copy2(src, dest)
                         bg = f"bg {src.stem}"
@@ -1776,8 +1768,7 @@ except Exception:
                 try:
                     src = pathlib.Path(bpy.path.abspath(p.sprite_image))
                     if src.exists():
-                        dest_dir = pathlib.Path(path).parent.parent / "assets" / "sprites"
-                        dest_dir.mkdir(parents=True, exist_ok=True)
+                        dest_dir = _get_project_asset_dir(path, "sprites")
                         dest = dest_dir / src.name
                         shutil.copy2(src, dest)
                         asset = src.stem
@@ -1828,7 +1819,7 @@ except Exception:
                 print("[UPVN] " + engine_diag_text())
                 self.report({'ERROR'}, "Engine not found. " + str(ENGINE_INFO.get("message", ""))[:200])
                 return {'FINISHED'}
-            text = pathlib.Path(path).read_text(encoding="utf-8") if pathlib.Path(path).exists() else ""
+            text = _get_script_text(context, path)
             try:
                 _p, _vc, _sm = _engine_api
                 _p.parse_string(text, filename=path)
@@ -1937,6 +1928,25 @@ except Exception:
                 self.report({'ERROR'}, f"Arbitrary preview failed {e}")
             return {'FINISHED'}
 
+    def _get_project_asset_dir(script_path: str, category: str) -> pathlib.Path:
+        p = pathlib.Path(script_path)
+        root = p.parent.parent if p.parent.name == "game" else p.parent
+        dest = root / "assets" / category
+        dest.mkdir(parents=True, exist_ok=True)
+        return dest
+
+    def _get_script_text(context, path: str) -> str:
+        if hasattr(context, "edit_text") and context.edit_text:
+            return context.edit_text.as_string()
+        fname = pathlib.Path(path).name
+        tb = bpy.data.texts.get(fname)
+        if tb is not None:
+            return tb.as_string()
+        p = pathlib.Path(path)
+        if p.exists():
+            return p.read_text(encoding="utf-8")
+        return ""
+
     def _builder_from_file(path: str) -> UPVN_GameBuilder:
         """Load existing script.rpy into builder preserving labels (v0.5 fix)."""
         # Use UPVN_GameBuilder's own preservation logic (it loads _existing_text)
@@ -2013,8 +2023,8 @@ except Exception:
             layout.prop(props, "sprite_image")
             layout.prop(props, "side_image")
             layout.operator("upvn.add_show", icon='OBJECT_DATA')
-            layout.operator("upvn.add_stage", icon='MESH_CUBE')
             layout.prop(props, "stage_name")
+            layout.operator("upvn.add_stage", icon='MESH_CUBE')
             layout.separator()
             layout.label(text="Dialogue", icon='SPEAKER')
             layout.prop(props, "speaker")
@@ -2035,8 +2045,11 @@ except Exception:
             row.operator("upvn.preview", icon='RENDER_RESULT')
             row.operator("upvn.check_wiring", icon='VIEWZOOM')
             layout.operator("upvn.save_demo", icon='FILE_TICK')
-            layout.operator("upvn.install_pillow", icon='CONSOLE',
-                            text="Install Pillow (for Preview)")
+            if pil_live_available():
+                layout.label(text="✓ Pillow installed (Preview active)", icon='CHECKMARK')
+            else:
+                layout.operator("upvn.install_pillow", icon='CONSOLE',
+                                text="Install Pillow (for Preview)")
             layout.prop(props, "arbitrary_slot")
             layout.operator("upvn.preview_arbitrary", icon='IMAGE_REFERENCE')
             layout.label(text="Saves: arbitrary slots 1..∞ (←→ pagination)", icon='INFO')
