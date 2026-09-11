@@ -879,6 +879,22 @@ except Exception:
         obj.data.materials.append(mat)
         return obj
 
+    # Material/image node names. These three have to live HERE, not only in
+    # build_vn_scene's local `from engine.render.contract import ...`:
+    # _rewrite_unlit and _ensure_white_image are separate module-level
+    # functions (both inside `if HAS_BPY:`), so a *local* import in the caller
+    # is invisible to them — which made every tex_capable=True material raise
+    # `NameError: TEX_NODE_NAME` and killed tools/make_template.py (and
+    # "Setup Scene") outright. build_vn_scene keeps its own import for the rest
+    # of its names; the values are identical because both come from contract.
+    try:
+        from engine.render.contract import (TEX_NODE_NAME, MIX_NODE_NAME,
+                                            WHITE_IMAGE_NAME)
+    except Exception:                                    # standalone add-on copy
+        TEX_NODE_NAME = "UPVN Tex Image"
+        MIX_NODE_NAME = "UPVN Tex Mix"
+        WHITE_IMAGE_NAME = "UPVN_White1px"
+
     def _ensure_white_image(_b):
         """1×1 white PNG, packed into the blend. NEVER ship a fileless
         generated image in a TexImage node: the player segfaults at startup
