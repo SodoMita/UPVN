@@ -301,7 +301,7 @@ def layout_screen_ui(get_obj: Callable[[str], Any], payload: dict, ortho: float 
     _set_scale(hbox, (half * 0.94, panel_h, 1.0))
     # FONT text grows down from its origin (align_y TOP) → anchor just inside
     # the panel's top edge with one line of padding
-    _set_pos(htext, (-half * 0.86, y_ui + UI_DEPTH - TEXT_FRONT, panel_h - 0.30))
+    _set_pos(htext, (-half * 0.86, y_ui - 0.55, half_v * 0.45))  # EXP-A
     set_font_size(htext, half * 0.036)
     # rewind marker sits outside the panel so it reads without the backlog open
     _set_pos(rtext, (-half * 0.86, y_ui - TEXT_FRONT, half_v * 0.92))
