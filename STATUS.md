@@ -245,3 +245,21 @@ Status: 307 passed / 16 skipped. `feat/desktop-gui`.
   load_stage log wording fixed (deferred-to-StageManager, no false "no stage
   file").
 - Tests: 322 passed / 16 skipped (4 new M26f).
+
+## M26g (v0.6.15) — plugin update works live, no uninstall/restart (2026-09-11)
+
+- register() purges stale registrations by RNA name (panels via bl_idname
+  UPVN_PT_main; operators via lowercase keys like UPVN_OT_reload_addon)
+  before binding — install-over-a-running-UPBGE applies immediately.
+- Scene.upvn_addon_version live property + upvn.reload_addon operator
+  ("Apply Update") for file-replaced updates; synchronous in background,
+  timer-deferred in UI.
+- Proven in one blender session (test_m26g_addon_live_update.py, 5 tests):
+  real addon_install of the 0.6.15 zip over live 0.6.14 → new code live with
+  no restart; reload op applies an on-disk 0.6.99 bump in-session.
+- Blender 5.0.1 findings: addons/ not on sys.path until
+  refresh_script_paths() (the install operator calls it);
+  addon_utils.enable returns module-or-None (unpacking it as (ok, err)
+  raises).
+- package_addon.py mkdir fix (missing dist/ wrote a FILE named dist).
+  Tests: 327 passed / 16 skipped.

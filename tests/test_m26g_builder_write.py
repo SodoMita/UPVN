@@ -159,3 +159,19 @@ def test_menu_addition_creates_jump_targets(smoke):
     start_i = text.index("label start:")
     left_i = text.index("label left:")
     assert text.index("menu:", start_i) < left_i
+
+
+def test_placeholder_empty_label_is_cleaned_up(tmp_path):
+    """M27 (e16c666) behaviour folded into the non-destructive write: when
+    real content enters a block that only carried build_rpy's
+    `"Empty label."` placeholder, the placeholder line is dropped."""
+    p = tmp_path / "script.rpy"
+    p.write_text('define e = Character("Eileen")\n\nlabel start:\n    "Empty label."\n    return\n', encoding="utf-8")
+    b = UPVN_GameBuilder(str(p))
+    b.ensure_label("start")
+    b.add_say("e", "Real line.")
+    b.write()
+    text = p.read_text(encoding="utf-8")
+    assert '"Empty label."' not in text
+    assert 'e "Real line."' in text
+    assert "return" in text

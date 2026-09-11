@@ -113,7 +113,11 @@ def main():
     if ctrl is not None:
         set_runtime_prop(ctrl, "script_path", "//../game")
         set_runtime_prop(ctrl, "image_mode", "auto")
-        print("[wire] script_path=//../game image_mode=auto")
+        # A converted project IS Ren'Py source, so it needs the full parse tier
+        # (extend / init / screen). Without this the runtime parses it with the
+        # declarative subset and refuses to start.
+        set_runtime_prop(ctrl, "parse_mode", "full")
+        print("[wire] script_path=//../game image_mode=auto parse_mode=full")
 
     # hide the palette fallback planes' default state stays as-is; add banks
     n_bg = n_sp = 0
