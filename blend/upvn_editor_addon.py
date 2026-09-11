@@ -883,6 +883,10 @@ except Exception:
         """1×1 white PNG, packed into the blend. NEVER ship a fileless
         generated image in a TexImage node: the player segfaults at startup
         on those (M26b field-verified; packed/file-backed are safe)."""
+        try:
+            from engine.render.contract import WHITE_IMAGE_NAME
+        except Exception:
+            WHITE_IMAGE_NAME = "UPVN_White1px"
         img = _b.data.images.get(WHITE_IMAGE_NAME)
         if img is None:
             img = _b.data.images.new(WHITE_IMAGE_NAME, 1, 1, alpha=True)
@@ -912,6 +916,10 @@ except Exception:
         cannot bind node materials ("Texture is not available"), an unassigned
         TexImage evaluated black (BUG-005), and the palette makes images
         optional (image_mode="color" for the template and all samples)."""
+        try:
+            from engine.render.contract import TEX_NODE_NAME, MIX_NODE_NAME
+        except Exception:
+            TEX_NODE_NAME, MIX_NODE_NAME = "UPVN Tex Image", "UPVN Tex Mix"
         mat.use_nodes = True
         nt = mat.node_tree
         try:
