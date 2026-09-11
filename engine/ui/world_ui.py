@@ -34,14 +34,19 @@ except Exception:                        # pragma: no cover - direct module load
     HISTORY_BOX = "History_Box"
     HISTORY_TEXT = "History_Text"
     REWIND_TEXT = "Rewind_Text"
-HISTORY_MAX_LINES = 12      # rendered backlog rows the panel can hold
-HISTORY_WRAP = 62           # chars per backlog line before wrapping
-# The player lays FONT curves out ~2.1 em apart for the shipped face (measured
-# from a screenshot: 13 rows spanned 530 px at 70 px/unit while the curve
-# reports 1.0 line spacing), so a fixed em size silently overruns the panel on
-# any aspect change. layout_screen_ui therefore *derives* the size from the
-# room available and HISTORY_MAX_LINES stays an honest row count.
-HISTORY_LINE_ADVANCE = 2.1
+HISTORY_MAX_LINES = 8       # rendered backlog rows the panel can hold
+HISTORY_WRAP = 44           # chars per backlog row before wrapping
+# The player draws FONT objects with the engine's bitmap face, NOT with the
+# curve's glyph mesh: measured in-player at em 0.30 the advance is ~1.0-1.4 em
+# per character and the row pitch ~2.2 em, while `curve.dimensions` (what the
+# editor and the headless probes read) reports 0.42 em / 1.1 em.  Sizing the
+# backlog from the curve metrics is what made it overrun the panel.  PITCH_EM
+# and ADVANCE_EM below are the player numbers, and FIT_SLACK exists because the
+# game window aspect and the engine's render aspect can differ (measured 9%
+# apart under XWayland, which otherwise silently reclaims the margin).
+HISTORY_PITCH_EM = 2.2
+HISTORY_ADVANCE_EM = 1.0
+HISTORY_FIT_SLACK = 0.85
 
 
 def history_lines(entries, wrap_at: int = HISTORY_WRAP) -> list[str]:
@@ -371,10 +376,14 @@ def layout_screen_ui(get_obj: Callable[[str], Any], payload: dict, ortho: float 
     rtext = get_obj(REWIND_TEXT)
     panel_h = half_v * 0.92
     backlog_top = half_v * BACKLOG_TOP
-    # 12 rows have to fit between the anchor and the dialogue box, so the em
-    # size follows from the room available: an aspect change then shrinks the
-    # text instead of overflowing the panel (it used to do the latter).
-    hist_em = (half_v * (BACKLOG_TOP + 0.70)) / (HISTORY_MAX_LINES * HISTORY_LINE_ADVANCE)
+    # Rows have to fit between the anchor and the dialogue box AND the wrapped
+    # text has to fit between the panel's edges, so the em is the smaller of
+    # the two bounds (see HISTORY_PITCH_EM / HISTORY_ADVANCE_EM for where the
+    # per-row numbers come from).
+    band = half_v * (BACKLOG_TOP + 0.70)
+    by_height = band / (HISTORY_MAX_LINES * HISTORY_PITCH_EM)
+    by_width = (half * 1.72) / (HISTORY_WRAP * HISTORY_ADVANCE_EM)
+    hist_em = min(by_height, by_width) * HISTORY_FIT_SLACK
     if hbox:
         _set_pos(hbox, (0.0, y_ui + UI_DEPTH, 0.0))
         _set_scale(hbox, (half * 0.94, panel_h, 1.0))
