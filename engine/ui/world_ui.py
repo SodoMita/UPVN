@@ -200,6 +200,7 @@ HOVER_SCALE = 1.08   # M26c: choice plate grows 8% under the cursor
 # alone and coplanar-ish quads lose text to depth precision (measured with the
 # backlog). Kept as named constants so the dialogue box and the overlay share
 # one rule.
+BACKLOG_TOP = 0.45   # first backlog line's height / vertical half-extent
 UI_DEPTH = 0.12      # panel in front of the story planes
 TEXT_FRONT = 0.45    # text in front of its own panel
 
@@ -288,23 +289,36 @@ def layout_screen_ui(get_obj: Callable[[str], Any], payload: dict, ortho: float 
     set_font_size(sp, half * 0.055)
     set_font_size(dt, half * 0.048)
     # --- backlog + rewind indicator (M26d) ---
-    # The overlay panel and its text are both flat quads. At the tiny front
-    # offset the dialogue box happens to use, the backlog text vanished in the
-    # player (correct body, correct scale, visible=True — nothing drawn), so
-    # panels get UI_DEPTH and text gets TEXT_FRONT in front of its own panel:
-    # one explicit rule instead of a coincidence of numbers.
+    # Two depth margins matter and they are not the same thing: a panel has to
+    # clear the STORY planes behind it (UI_DEPTH), while text has to clear its
+    # OWN panel (TEXT_FRONT).  A text curve a few hundredths in front of a big
+    # flat quad is not drawn at all - silently, with a correct body, non-zero
+    # dimensions and visible=True; that is how the backlog was invisible for a
+    # whole debug round.  The dialogue box gets away with 0.05 only because
+    # nothing is ever drawn on top of it.
+    #
+    # BACKLOG_TOP is the first line's height above the centre as a fraction of
+    # the vertical half-extent.  The panel is deliberately taller than the
+    # text so the list reads as being inside it; 0.45 is the value confirmed to
+    # draw in the player (0.74 pushed the glyphs onto the panel's own edge).
     hbox = get_obj(HISTORY_BOX)
     htext = get_obj(HISTORY_TEXT)
     rtext = get_obj(REWIND_TEXT)
-    panel_h = half_v * 0.80
-    _set_pos(hbox, (0.0, y_ui + UI_DEPTH, 0.0))
-    _set_scale(hbox, (half * 0.94, panel_h, 1.0))
-    # FONT text grows down from its origin (align_y TOP) → anchor just inside
-    # the panel's top edge with one line of padding
-    _set_pos(htext, (-half * 0.86, y_ui - 0.55, half_v * 0.45))  # EXP-A
+    panel_h = half_v * 0.92
+    backlog_top = half_v * BACKLOG_TOP
+    if hbox:
+        _set_pos(hbox, (0.0, y_ui + UI_DEPTH, 0.0))
+        _set_scale(hbox, (half * 0.94, panel_h, 1.0))
+    # FONT text grows down from its origin (align_y TOP), so the block is
+    # anchored at the top and the panel's top edge is its padding.
+    if htext:
+        _set_pos(htext, (-half * 0.86, y_ui + UI_DEPTH - TEXT_FRONT, backlog_top))
     set_font_size(htext, half * 0.036)
-    # rewind marker sits outside the panel so it reads without the backlog open
-    _set_pos(rtext, (-half * 0.86, y_ui - TEXT_FRONT, half_v * 0.92))
+    # The rewind marker shares the backlog text's depth plane and height on
+    # purpose: the two are never visible at once, so they cannot fight, and the
+    # marker reuses the margin that was measured instead of a second guess.
+    if rtext:
+        _set_pos(rtext, (-half * 0.86, y_ui + UI_DEPTH - TEXT_FRONT, backlog_top))
     set_font_size(rtext, half * 0.030)
     vis_n = sum(1 for c in payload.get("choices", []) if c.get("visible"))
     for i, ch in enumerate(payload.get("choices", [])):

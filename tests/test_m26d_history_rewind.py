@@ -194,12 +194,23 @@ def test_layout_positions_history_panel_and_scales_text():
     scene = FakeScene(names)
     world_ui.layout_screen_ui(scene.get, {"choices": [], "history_visible": True},
                               ortho=15.0)
-    assert scene.get(contract.HISTORY_PLANE).worldPosition is not None
-    assert scene.get(contract.HISTORY_TEXT).worldPosition[2] > 0, \
+    half = 15.0 / 2.0
+    half_v = half / world_ui.aspect_wh()
+    box = scene.get(contract.HISTORY_PLANE)
+    htext = scene.get(contract.HISTORY_TEXT)
+    rtext = scene.get(contract.REWIND_TEXT)
+    assert box.worldPosition is not None
+    assert htext.worldPosition[2] > 0, \
         "backlog text anchors above centre so it grows downward"
-    assert scene.get(contract.HISTORY_TEXT).worldScale[0] == pytest.approx(0.27)
-    assert scene.get(contract.REWIND_TEXT).worldPosition[2] > \
-        scene.get(contract.HISTORY_TEXT).worldPosition[2]
+    assert htext.worldScale[0] == pytest.approx(0.27)
+    # the depth rule IS the bug fix: the panel must clear the story planes and
+    # the text must clear the panel, or the glyphs are silently not drawn
+    assert box.worldPosition[1] - htext.worldPosition[1] == pytest.approx(world_ui.TEXT_FRONT)
+    assert htext.worldPosition[1] - rtext.worldPosition[1] == pytest.approx(0.0)
+    # marker and first line share one height on purpose (never shown together)
+    assert rtext.worldPosition[2] == pytest.approx(htext.worldPosition[2])
+    # the panel is taller than the text block so the list reads as inside it
+    assert box.worldScale[1] > htext.worldPosition[2]
 
 
 # ---------------------------------------------------------------- controller side
