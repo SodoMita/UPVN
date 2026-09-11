@@ -95,3 +95,41 @@ def test_build_vn_scene_does_not_shadow_contract_names():
             f"build_vn_scene binds {name} locally — hoist it to module scope "
             f"instead (the material helpers read the module global)"
         )
+
+
+def _bpy_classes_and_registration():
+    """AST-walk the add-on: classes whose base is a bpy.types.X and the
+    contents of the `classes = (...)` registration tuple."""
+    import ast
+    tree = ast.parse(ADDON.read_text(encoding="utf-8"))
+    defined, registered = set(), set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef):
+            for base in node.bases:
+                # accept both `bpy.types.Panel` (nested attribute) and a
+                # hypothetical bare `bpy.Panel`
+                if not (isinstance(base, ast.Attribute)
+                        and base.attr in ("Panel", "Operator", "PropertyGroup",
+                                          "AddonPreferences", "Menu", "UIList")):
+                    continue
+                v = base.value
+                is_bpy = (isinstance(v, ast.Name) and v.id == "bpy") or (
+                    isinstance(v, ast.Attribute) and v.attr == "types"
+                    and isinstance(v.value, ast.Name) and v.value.id == "bpy")
+                if is_bpy:
+                    defined.add(node.name)
+        if (isinstance(node, ast.Assign)
+                and any(t.id == "classes" for t in node.targets if isinstance(t, ast.Name))):
+            registered = {e.id for e in node.value.elts if isinstance(e, ast.Name)}
+    return defined, registered
+
+
+def test_every_bpy_class_is_registered():
+    """M26g bug: UPVN_Prefs (AddonPreferences) was defined but missing from
+    the classes tuple — its Preferences page never appeared and 'Locate
+    Engine' could not persist its choice."""
+    defined, registered = _bpy_classes_and_registration()
+    missing = defined - registered
+    assert not missing, f"bpy classes defined but never registered: {sorted(missing)}"
+    # and nothing registered that doesn't exist
+    assert not (registered - defined), f"classes tuple references undefined: {sorted(registered - defined)}"

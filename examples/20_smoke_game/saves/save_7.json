@@ -1,0 +1,25 @@
+{
+  "version": "0.1.0",
+  "current_label": "start",
+  "instruction_index": 0,
+  "variables": {
+    "slot_test": 7
+  },
+  "scene": {
+    "background": null,
+    "actors": {}
+  },
+  "audio": {
+    "music": null
+  },
+  "history": [
+    {
+      "who": null,
+      "who_name": "Narrator",
+      "text": "Arbitrary save demo",
+      "stripped": "Arbitrary save demo"
+    }
+  ],
+  "timestamp": 1789094326.4029222,
+  "screenshot": null
+}
