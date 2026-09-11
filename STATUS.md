@@ -1,3 +1,18 @@
+# Current Status — 2026-09-11 (M26g: GUI button sweep DONE, branch agent/desktop-gui-run-fixes)
+
+## Last completed
+- **M26g (branch `agent/desktop-gui-run-fixes`, v0.6.14)**: every panel
+  button executed live in the UPBGE 0.50 editor GUI on the headless-Wayland
+  stack; the embedded game (P) played to a branch in-editor; four
+  showstoppers fixed: BUG-017 Setup Scene NameError (tex-capable materials),
+  BUG-018 write() label-wipe data loss, BUG-019 Create Project overwrite,
+  BUG-020 UPVN_Prefs never registered (Preferences page invisible). Plus
+  sandbox/tooling: BUG-021..024 (package_addon fresh-clone, smoke
+  relative path, OOM/swap guard, sway mode syntax). Panel de-duplicated
+  (Check Wiring ×2 in UPBGE). 335 passed / 16 skipped. Evidence:
+  screenshots/m26g/* (editor with game running, Preferences page, text
+  editor area).
+
 # Current Status — 2026-09-10 (M26b: sprite textures work at runtime, branch feat/desktop-gui)
 
 ## Last completed
