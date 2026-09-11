@@ -7,16 +7,30 @@ twin: `tools/smoke_walkthrough.sh` (self-verifying, retry-until-state).
 ## 0. Prep (once per sandbox)
 - [ ] UPBGE 0.50 extracted; `blenderplayer` runs (`--version`).
 - [ ] userpref prep done (BUG-006) — otherwise instant segfault.
+- [ ] **swap present** (BUG-023): `tools/desktop_sway.sh` adds 3 GB when it
+      can — the player/editor need ~0.9–1.6 GB RSS and get OOM-killed
+      otherwise (black desktop + stale heartbeat is the signature).
 - [ ] compositor up: `swaymsg -t get_outputs` shows HEADLESS-1 (or Xvfb :99).
-- [ ] `pytest tests/ -q` green (276 passed at freeze).
+- [ ] `pytest tests/ -q` green (335 passed at M26g).
 
-## 1. Install / Setup (editor, optional in sandbox)
+## 1. Install / Setup (editor)
 - [ ] Install addon zip; enable; UPVN panel in View3D > N.
-- [ ] Create Project → writes `game/script.rpy` + defines.
+- [ ] Add-on Preferences page shows "✓ Engine available" + Root +
+      Locate Engine… / Check / Copy engine (BUG-020 regression — the page
+      used to be permanently empty).
+- [ ] Create Project → writes `game/script.rpy` + defines; **refuses with
+      an error when the target script already has content** (BUG-019).
 - [ ] Setup Scene → contract objects exist; `VNController` carries
       **game properties** `script_path` / `upvn_root` / `upvn_bricks`
-      (Object properties > Game Properties, NOT just custom props — BUG-009).
-- [ ] Check Wiring reports 29/29.
+      (Object properties > Game Properties, NOT just custom props — BUG-009);
+      no `NameError` in the console (BUG-017 regression).
+- [ ] Check Wiring reports 29/29 (in UPBGE it lives only in the Play box).
+- [ ] Add Character / Scene / Show / 3D Stage / Dialogue / Menu append to
+      the script and the file keeps every existing line, additions BEFORE
+      the label's `return` (BUG-018 regression check).
+- [ ] Install Pillow → Preview renders `screenshots/upvn_preview.png`.
+- [ ] Press P: game plays inside the editor; Space/menu/digits work; Esc
+      returns to the editor (needs swap on small hosts).
 
 ## 2. Play — smoke game (`examples/20_smoke_game/script.rpy`)
 Run `bash tools/smoke_walkthrough.sh` or by hand:

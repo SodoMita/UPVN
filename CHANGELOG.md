@@ -1,5 +1,43 @@
 # Changelog
 
+## 0.6.14 — 2026-09-11 M26g: live GUI button sweep — engine usable in the UPBGE editor, four showstoppers fixed
+
+Every UPVN panel button was executed in the real UPBGE 0.50 GUI on the
+headless-Wayland stack (blind-agent QA: pixel diffs, OCR of the panel,
+heartbeat files, disk side-effects), and the game was played to a branch
+**inside the editor** (P → Space×2 → menu → digit 1 → "You chose left." →
+Esc back to the editor). Fixes found by that sweep:
+
+- **BUG-017 (P0)** Setup Scene crashed with `NameError: TEX_NODE_NAME` on
+  every tex_capable sprite material — contract names were locals of
+  `build_vn_scene`, invisible to `_rewrite_unlit`/`_ensure_white_image`.
+  Hoisted to module scope; symtable scope-regression tests.
+- **BUG-018 (P0)** `UPVN_GameBuilder.write()` could silently replace every
+  label body of an existing script with "Empty label." (live-verified data
+  loss on the M25 smoke game). write() is now strictly non-destructive and
+  inserts additions BEFORE the label's `return` (was dead code after it).
+- **BUG-019 (P0)** Create Project now refuses to overwrite an existing
+  non-empty script (clear ERROR report, file untouched).
+- **BUG-020 (P1)** UPVN_Prefs (AddonPreferences) was never registered —
+  the add-on Preferences page (engine status, engine_path picker,
+  Locate/Check/Copy buttons) never appeared. Registered; AST test pins
+  every bpy class ↔ registration tuple.
+- Panel redundancy: Check Wiring no longer appears twice in UPBGE (Play box
+  + Tools); the Tools copy stays only for plain-Blender installs.
+- Tooling/sandbox: package_addon.py fresh-clone `dist` file bug (BUG-021),
+  smoke_walkthrough relative-path bug (BUG-022), OOM/swap guard in
+  desktop_sway.sh (BUG-023 — player needs ~1 GB RSS; without swap it died
+  before the window mapped), sway output-mode syntax made
+  runtime-and-tolerant (BUG-024).
+- Verified in the GUI this round: all 17 operators (create/setup/wiring/
+  add_character/scene/show/stage/dialogue/menu/validate/preview/save_demo/
+  preview_arbitrary/install_pillow/check_engine/locate_engine/
+  bundle_engine), the add-on Preferences page, the embedded game (P) with
+  click/space/digit input, Esc-return to the editor, and the standalone
+  player smoke walkthrough (9/9 states green).
+- Tests: 335 passed / 16 skipped (+13 new: scope, builder-write, prefs
+  registration).
+
 ## 0.6.14 — 2026-09-10 (cont.) M26f: packaged build verified live — script_path baked, zero manual steps
 
 - **tools/package_game.py executed end-to-end** for the first time since the

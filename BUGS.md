@@ -23,6 +23,15 @@ play; P1 = play breaks silently; P2 = cosmetic / QA pain.
 | BUG-014 | P1 | _hide_idle_sprites hid the opening sprite right after load | fixed (keep sprite_mgr planes) |
 | BUG-015 | P1 | Setup Scene clobbered configured script_path with panel default | fixed (adopt blend value) |
 | BUG-016 | P0 | blenderplayer SIGSEGV at startup with factory PulseAudio userpref | fixed (audio_device='None' recipe) |
+| BUG-017 | P0 | Setup Scene NameError 'TEX_NODE_NAME' — every tex_capable sprite material crashed in the GUI | fixed (M26g) |
+| BUG-018 | P0 | UPVN_GameBuilder.write() regenerated from placeholder labels — one click emptied an existing script | fixed (M26g) |
+| BUG-019 | P0 | Create Project overwrote an existing script at project_path (Setup Scene had just adopted it) | fixed (M26g: refuses) |
+| BUG-020 | P1 | UPVN_Prefs (AddonPreferences) never registered — Preferences page (Locate Engine/engine_path) invisible | fixed (M26g) |
+| BUG-021 | P2 | package_addon.py wrote the zip to a *file* named dist on a fresh clone | fixed (M26g) |
+| BUG-022 | P2 | smoke_walkthrough.sh broke on a relative blend path arg (cd $UPBGE first) | fixed (M26g) |
+| BUG-023 | P2 | 2 GB sandbox: player OOM-killed 5–15 s in, before the window mapped (black desktop, stale heartbeat) | fixed (M26g: swap guard) |
+| BUG-024 | P2 | desktop_sway.sh sway config: `model` word rejected by some sway 1.10.1 builds → swaynag banner | fixed (M26g: runtime mode) |
+
 
 ## BUG-001 — stale template
 The shipped `blend/UPVN_Template.blend` predated the addon's object contract
@@ -176,3 +185,85 @@ bpy.ops.wm.save_userpref()"`
 (Blender 5.0: audio prefs live in `preferences.system`, not
 `preferences.audio`; autoexec flag is `use_scripts_auto_execute`.)
 Kept fixed: docs/SANDBOX_UPBGE.md step 0; smoke walkthrough depends on it.
+
+## BUG-017 — Setup Scene NameError in the GUI (M26g)
+**Symptom:** first click of *Setup Scene* in the real UPBGE 0.50 GUI raised
+`NameError: name 'TEX_NODE_NAME' is not defined` from `_rewrite_unlit`
+(addon `__init__.py:932`) and the operator reported "Setup failed"; no scene
+wiring happened. Headless tests stayed green because the helpers live under
+`if HAS_BPY:` and pytest runs without bpy.
+**Cause:** M26b added the texture-capable material graph referencing
+`TEX_NODE_NAME` / `MIX_NODE_NAME` / `WHITE_IMAGE_NAME`, but those names were
+imported (with fallbacks) as LOCALS inside `build_vn_scene` — while
+`_rewrite_unlit()` and `_ensure_white_image()` are defined at the outer
+`if HAS_BPY:` scope and can never see them. Every `tex_capable=True`
+material (all sprite planes) hit the NameError. The standalone
+`tools/update_template_materials.py` has its own copy of the logic, which is
+why the shipped template looked fine.
+**Fix:** the three contract names are bound once at module scope (engine
+import when available, mirrored hardcoded fallback); `build_vn_scene` no
+longer shadows them. Kept fixed:
+`tests/test_m26g_gui_scope.py` (symtable: every free name used by the
+material helpers must be a module global or builtin).
+
+## BUG-018 — write() could destroy an existing script (M26g)
+**Symptom (live-verified):** with the panel's Script Path pointing at
+`examples/20_smoke_game/script.rpy` (which Setup Scene adopts from the
+blend), running any add_* operator whose line already existed — or Create
+Project — replaced EVERY label body with `"Empty label."` / lost 26 lines of
+the M25 smoke game. Additions also landed after the label's `return`
+(unreachable dead code).
+**Cause:** `UPVN_GameBuilder.__init__` parses the existing file into
+*placeholder* (empty) labels; `write()`'s merge path bailed when there was
+nothing to insert and fell through to a full `build_rpy()` regeneration —
+from those empty placeholders.
+**Fix:** `write()` is strictly non-destructive: new defines after the last
+define; additions inserted BEFORE the label's trailing `return`; brand-new
+labels appended as blocks; **no-op leaves the file byte-identical**. Kept
+fixed: `tests/test_m26g_builder_write.py` (7 tests incl. byte-identical
+no-op and reachability).
+
+## BUG-019 — Create Project overwrote existing scripts (M26g)
+**Symptom:** "Create UPVN Project" regenerates a starter script at
+project_path — after Setup Scene adopted the blend's script_path, that
+meant one click wiped an existing game (see BUG-018 for the blast radius).
+**Fix:** the operator refuses with a clear report when the target file
+exists and has any non-whitespace content; fresh paths still generate the
+starter. Verified live in the GUI (ERROR report, file untouched).
+
+## BUG-020 — UPVN_Prefs never registered (M26g)
+**Symptom:** the add-on's Preferences page was permanently empty below the
+header — no engine status, no engine_path picker, no Locate/Check/Copy
+buttons — and "Locate Engine" could not persist its choice (the addon
+entry did not exist).
+**Cause:** `UPVN_Prefs(bpy.types.AddonPreferences)` was defined but missing
+from the `classes` registration tuple.
+**Fix:** registered; AST regression test asserts every `bpy.types.*` class
+defined in the add-on is in the tuple (and vice versa).
+
+## BUG-021 — package_addon.py on a fresh clone (M26g)
+A non-zip out path that did not exist yet (the default `dist/`) was used as
+the zip FILE path, producing a file literally named `dist`. Non-zip
+arguments are now always treated as a directory (created if missing).
+
+## BUG-022 — smoke_walkthrough.sh relative blend path (M26g)
+The script `cd`s into `$UPBGE` before launching the player, so a relative
+blend argument resolved against the wrong directory and the player aborted
+with "loading … failed". The argument is now `realpath`-ed up front.
+
+## BUG-023 — sandbox OOM masquerading as a render bug (M26g)
+`blenderplayer` needs ~0.9–1.2 GB RSS. On a ~2 GB sandbox that also runs
+platform services, the OOM killer struck 5–15 s in — typically BEFORE the
+window mapped: black desktop, a *stale* heartbeat JSON (written by the
+already-dead process), and (before swap existed) an intermittent
+`general protection fault` in libc. The fix is 3 GB of swap, now created by
+`tools/desktop_sway.sh` when missing; docs/SANDBOX_UPBGE.md leads with it.
+Lesson recorded: check `dmesg` for `Out of memory: Killed process …
+blenderplayer` before debugging the render stack.
+
+## BUG-024 — sway output-mode syntax differs across builds (M26g)
+The M26e `model 1280x800` config word is rejected by other sway 1.10.1
+builds ("Invalid output subcommand: model") — a bad line parks a swaynag
+banner over the QA desktop or kills startup. `desktop_sway.sh` now keeps
+the config file mode-free and sets the mode at runtime
+(`mode --custom`, falling back to `model`), both non-fatal.

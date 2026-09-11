@@ -2069,7 +2069,12 @@ except Exception:
             row = layout.row(align=True)
             row.operator("upvn.validate", icon='CHECKMARK')
             row.operator("upvn.preview", icon='RENDER_RESULT')
-            row.operator("upvn.check_wiring", icon='VIEWZOOM')
+            # M26g: in UPBGE, Check Wiring already sits in the "Play in
+            # UPBGE" box above — drawing it twice made the panel noisier
+            # without adding anything. Keep it here only for plain-Blender
+            # installs, where the Play box (and thus the button) is absent.
+            if not _has_game_support():
+                row.operator("upvn.check_wiring", icon='VIEWZOOM')
             layout.operator("upvn.save_demo", icon='FILE_TICK')
             layout.operator("upvn.install_pillow", icon='CONSOLE',
                             text="Install Pillow (for Preview)")
