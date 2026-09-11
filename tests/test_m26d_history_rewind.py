@@ -203,14 +203,18 @@ def test_layout_positions_history_panel_and_scales_text():
     assert htext.worldPosition[2] > 0, \
         "backlog text anchors above centre so it grows downward"
     # the backlog em is derived from the space available, not a magic number
-    hist_em = (half_v * (world_ui.BACKLOG_TOP + 0.70)) / (
-        world_ui.HISTORY_MAX_LINES * world_ui.HISTORY_LINE_ADVANCE)
+    by_height = (half_v * (world_ui.BACKLOG_TOP + 0.70)) / (
+        world_ui.HISTORY_MAX_LINES * world_ui.HISTORY_PITCH_EM)
+    by_width = (15.0 / 2 * 1.72) / (world_ui.HISTORY_WRAP * world_ui.HISTORY_ADVANCE_EM)
+    hist_em = min(by_height, by_width) * world_ui.HISTORY_FIT_SLACK
     assert htext.worldScale[0] == pytest.approx(hist_em, abs=1e-4), \
         "set_font_size rounds to 5 dp before caching"
-    # 12 rows at that size still fit above the dialogue box (the old fixed em
-    # size overran the panel and drew over the dialogue)
+    # rows at that size still fit above the dialogue box (the old fixed em size
+    # overran the panel and drew over the dialogue)
     assert htext.worldPosition[2] - world_ui.HISTORY_MAX_LINES * hist_em * \
-        world_ui.HISTORY_LINE_ADVANCE > -half_v * 0.70
+        world_ui.HISTORY_PITCH_EM > -half_v * 0.70
+    # ...and a wrapped row still fits between the panel's edges
+    assert world_ui.HISTORY_WRAP * hist_em * world_ui.HISTORY_ADVANCE_EM < 15.0 * 0.94
     # the depth rule IS the bug fix: the panel must clear the story planes and
     # the text must clear the panel, or the glyphs are silently not drawn
     assert box.worldPosition[1] - htext.worldPosition[1] == pytest.approx(world_ui.TEXT_FRONT)
@@ -406,13 +410,15 @@ def _entries(n):
 def test_format_history_pages_by_rows_and_shows_position():
     body = world_ui.format_history(_entries(20))
     lines = body.split("\n")
-    # 12 rows, one spent on the footer -> 11 rows per page, newest last
-    assert len(lines) == 12
-    assert lines[0] == "Eileen: line 10" and lines[-2] == "Eileen: line 20"
-    assert "rows 10-20 of 20" in lines[-1] and "page 1/2" in lines[-1]
-    older = world_ui.format_history(_entries(20), scroll=1)
-    assert older.split("\n")[0] == "Eileen: line 1" and "line 9" in older
-    assert "page 2/2" in older
+    budget = world_ui.HISTORY_MAX_LINES - 1          # footer steals one row
+    assert len(lines) == world_ui.HISTORY_MAX_LINES, "never more rows than fit"
+    assert lines[-1].startswith("\u2014 rows") and f"of 20" in lines[-1]
+    assert lines[0] == f"Eileen: line {20 - budget + 1}" and lines[-2] == "Eileen: line 20"
+    assert "page 1/" in lines[-1]
+    pages = int(lines[-1].split("page ")[1].split("/")[1])
+    assert pages == -(-20 // budget)
+    oldest = world_ui.format_history(_entries(20), scroll=pages - 1)
+    assert oldest.split("\n")[0] == "Eileen: line 1"
     # clamped: past the oldest page the newest page stays put
     assert world_ui.format_history(_entries(20), scroll=99).split("\n")[0] \
         == "Eileen: line 1"
