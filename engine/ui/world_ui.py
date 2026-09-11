@@ -34,60 +34,77 @@ except Exception:                        # pragma: no cover - direct module load
     HISTORY_BOX = "History_Box"
     HISTORY_TEXT = "History_Text"
     REWIND_TEXT = "Rewind_Text"
-HISTORY_MAX_LINES = 12      # backlog lines on screen at once
+HISTORY_MAX_LINES = 12      # rendered backlog rows the panel can hold
 HISTORY_WRAP = 62           # chars per backlog line before wrapping
+# The player lays FONT curves out ~2.1 em apart for the shipped face (measured
+# from a screenshot: 13 rows spanned 530 px at 70 px/unit while the curve
+# reports 1.0 line spacing), so a fixed em size silently overruns the panel on
+# any aspect change. layout_screen_ui therefore *derives* the size from the
+# room available and HISTORY_MAX_LINES stays an honest row count.
+HISTORY_LINE_ADVANCE = 2.1
 
 
-def history_max_scroll(total: int, max_lines: int = HISTORY_MAX_LINES) -> int:
-    """Largest valid page offset (in entries) for a backlog of `total` entries."""
-    if total <= max_lines:
-        return 0
-    return total - (max_lines - 1)        # -1: the footer steals one slot
+def history_lines(entries, wrap_at: int = HISTORY_WRAP) -> list[str]:
+    """Every backlog entry as the wrapped rows the panel will actually draw.
 
-
-def history_window(total: int, max_lines: int = HISTORY_MAX_LINES,
-                   scroll: int = 0) -> tuple[int, int, bool]:
-    """(start, end, footer) — the entry slice the backlog shows for `scroll`.
-
-    One place owns the paging maths so the text and the controller's clamp
-    cannot drift apart: 12 rows on screen, 20 entries in the script, and the
-    newest page ends on the last entry. The "lines a-b of n" footer only makes
-    sense when something is above the window, and it costs one entry slot.
+    One row per entry is a lie as soon as a line is longer than `wrap_at`, and
+    the row count is what decides both the page budget and the font size — so
+    it is computed here once, for the tests and the player alike.
     """
-    if total <= max_lines:
-        return 0, total, False
-    show = max_lines - 1
-    scroll = max(0, min(int(scroll or 0), history_max_scroll(total, max_lines)))
-    end = total - scroll
-    return end - show, end, True
-
-
-def format_history(entries, max_lines: int = HISTORY_MAX_LINES,
-                   wrap_at: int = HISTORY_WRAP, scroll: int = 0) -> str:
-    """Backlog body for the 3D font object: newest line last, tags stripped.
-
-    Pure (no bge) so the same text is asserted by the headless tests and drawn
-    by the player. Entries are the dicts recorded in `VNState.history`.
-
-    `scroll` is a page offset in entries, because the panel is a fixed-capacity
-    viewport over a script that can be thousands of lines long. The footer rides
-    along as a line instead of needing a new contract object — the object that
-    draws the backlog is a single FONT curve.
-    """
-    entries = [e for e in list(entries or []) if isinstance(e, dict)]
-    start, end, footer = history_window(len(entries), max_lines, scroll)
-    lines: list[str] = []
-    for e in entries[start:end]:
+    rows: list[str] = []
+    for e in list(entries or []):
+        if not isinstance(e, dict):
+            continue
         who = e.get("who_name") or e.get("who") or ""
         body = (e.get("stripped") or e.get("display_text") or e.get("text") or "").strip()
         wrapped = wrap_text(body, width=wrap_at)
         if who:
             first, *rest = wrapped.split("\n")
             wrapped = "\n".join([f"{who}: {first}"] + rest)
-        lines.append(wrapped)
-    if footer:
-        lines.append(f"— lines {start + 1}-{end} of {len(entries)}  (wheel to scroll) —")
-    return "\n".join(lines)
+        rows.extend(wrapped.split("\n"))
+    return rows
+
+
+def history_pages(entries, max_lines: int = HISTORY_MAX_LINES,
+                  wrap_at: int = HISTORY_WRAP) -> tuple[int, int]:
+    """(rows_per_page, page_count) for this backlog."""
+    rows = history_lines(entries, wrap_at)
+    budget = max(1, max_lines - 1) if len(rows) > max_lines else max_lines
+    return budget, max(1, -(-len(rows) // budget))      # ceil
+
+
+def history_max_scroll(entries, max_lines: int = HISTORY_MAX_LINES,
+                       wrap_at: int = HISTORY_WRAP) -> int:
+    """Highest page index the backlog can scroll to (0 when it all fits)."""
+    return history_pages(entries, max_lines, wrap_at)[1] - 1
+
+
+def format_history(entries, max_lines: int = HISTORY_MAX_LINES,
+                   wrap_at: int = HISTORY_WRAP, scroll: int = 0) -> str:
+    """Backlog body for the 3D font object: newest row last, tags stripped.
+
+    Pure (no bge) so the same text is asserted by the headless tests and drawn
+    by the player. Entries are the dicts recorded in `VNState.history`.
+
+    `scroll` is a PAGE index (0 = the newest page), because the panel is a
+    fixed-capacity viewport over a script that can run to thousands of rows and
+    one wheel notch should move a screen, not a row. The "rows a-b of n" footer
+    only appears when something is above the window and costs one row, which is
+    what `history_pages` accounts for.
+    """
+    rows = history_lines(entries, wrap_at)
+    if not rows:
+        return ""
+    total = len(rows)
+    budget, pages = history_pages(entries, max_lines, wrap_at)
+    page = max(0, min(int(scroll or 0), pages - 1))
+    end = total - page * budget
+    start = max(0, end - budget)
+    body = rows[start:end]
+    if pages > 1:
+        body = body + [f"— rows {start + 1}-{end} of {total}  ·  "
+                       f"page {page + 1}/{pages} (wheel) —"]
+    return "\n".join(body)
 
 
 def build_world_ui(event: Optional[dict], ui_mgr=None, diag=None,
@@ -339,6 +356,10 @@ def layout_screen_ui(get_obj: Callable[[str], Any], payload: dict, ortho: float 
     rtext = get_obj(REWIND_TEXT)
     panel_h = half_v * 0.92
     backlog_top = half_v * BACKLOG_TOP
+    # 12 rows have to fit between the anchor and the dialogue box, so the em
+    # size follows from the room available: an aspect change then shrinks the
+    # text instead of overflowing the panel (it used to do the latter).
+    hist_em = (half_v * (BACKLOG_TOP + 0.70)) / (HISTORY_MAX_LINES * HISTORY_LINE_ADVANCE)
     if hbox:
         _set_pos(hbox, (0.0, y_ui + UI_DEPTH, 0.0))
         _set_scale(hbox, (half * 0.94, panel_h, 1.0))
@@ -346,7 +367,7 @@ def layout_screen_ui(get_obj: Callable[[str], Any], payload: dict, ortho: float 
     # anchored at the top and the panel's top edge is its padding.
     if htext:
         _set_pos(htext, (-half * 0.86, y_ui + UI_DEPTH - TEXT_FRONT, backlog_top))
-    set_font_size(htext, half * 0.036)
+    set_font_size(htext, hist_em)
     # The rewind marker shares the backlog text's depth plane and height on
     # purpose: the two are never visible at once, so they cannot fight, and the
     # marker reuses the margin that was measured instead of a second guess.
