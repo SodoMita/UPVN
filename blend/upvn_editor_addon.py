@@ -45,7 +45,7 @@ Headless fallback: when bpy unavailable (CI), the module still imports and expos
 bl_info = {
     "name": "UPVN — Visual Novel Editor",
     "author": "UPVN",
-    "version": (0, 6, 14),
+    "version": (0, 6, 15),
     "blender": (4, 2, 0),
     "location": "View3D > Sidebar > UPVN, Text Editor > Sidebar > UPVN",
     "description": "Create Ren'Py-like visual novel inside UPBGE with minimal coding — self-contained engine, one-click scene setup, characters, scenes, dialogue, menus, arbitrary saves, preview",
@@ -1990,6 +1990,8 @@ except Exception:
                 box.operator("upvn.check_engine", text="Re-check", icon='FILE_REFRESH')
                 box.operator("upvn.locate_engine", text="Locate engine folder…", icon='FILE_FOLDER')
             layout.separator()
+            layout.operator("upvn.reload_addon", icon='FILE_REFRESH')
+            layout.separator()
             layout.label(text="Project", icon='FILE_FOLDER')
             layout.prop(props, "project_path")
             layout.operator("upvn.create_project", icon='ADD')
@@ -2074,19 +2076,105 @@ except Exception:
             layout.operator("upvn.validate", icon='CHECKMARK')
             layout.operator("upvn.preview", icon='RENDER_RESULT')
 
+    class UPVN_OT_ReloadAddon(bpy.types.Operator):
+        """Apply an add-on update WITHOUT restarting UPBGE: install the new
+        zip / replace the add-on file, then click this — it re-imports the
+        file from disk and re-registers everything cleanly."""
+        bl_idname = "upvn.reload_addon"
+        bl_label = "Apply Update (reload add-on)"
+        bl_options = {'REGISTER'}
+
+        def execute(self, context):
+            import sys
+            import importlib
+            mod = sys.modules.get(__name__)
+
+            def _do_reload():
+                try:
+                    new = importlib.reload(mod)
+                    reg = getattr(new, "register", None)
+                    if reg is not None:
+                        reg()
+                    scn = getattr(bpy.context, "scene", None)
+                    ver = getattr(scn, "upvn_addon_version", "?") if scn else "?"
+                    print(f"[UPVN] add-on reloaded live — now v{ver} "
+                          "(no restart needed)")
+                except Exception as e:
+                    print(f"[UPVN] add-on reload failed: {e}")
+                    try:
+                        import traceback
+                        traceback.print_exc()
+                    except Exception:
+                        pass
+                return None
+
+            if bpy.app.background:
+                # no UI/timer pump in background sessions (also the path the
+                # automated live-update tests take)
+                _do_reload()
+            else:
+                # reload from a timer: doing it mid-invoke would replace the
+                # very class running this operator
+                bpy.app.timers.register(_do_reload, first_interval=0.1)
+                self.report({'INFO'}, "Reloading UPVN add-on…")
+            return {'FINISHED'}
+
     classes = (UPVN_SceneProps, UPVN_OT_LocateEngine, UPVN_OT_CheckEngine, UPVN_OT_BundleEngine,
-               UPVN_OT_InstallPillow,
+               UPVN_OT_InstallPillow, UPVN_OT_ReloadAddon,
                UPVN_OT_CreateProject, UPVN_OT_AddCharacter, UPVN_OT_AddScene,
                UPVN_OT_AddDialogue, UPVN_OT_AddShow, UPVN_OT_AddMenu, UPVN_OT_AddStage,
                UPVN_OT_SetupScene, UPVN_OT_CheckWiring, UPVN_OT_Validate,
                UPVN_OT_Preview, UPVN_OT_SaveSlotDemo, UPVN_OT_QuickPreviewArbitrary,
                UPVN_PT_MainPanel, UPVN_PT_TextPanel)
 
+    def _purge_stale_registrations():
+        """M26g: make UPDATE-over-running work (no uninstall/restart needed).
+
+        Two things break a live update in this file's old form:
+        - register() aborted on the first already-registered class, so the
+          NEW code never bound and the Scene pointer stayed stale;
+        - unregister() needed the OLD module's class objects, which are gone
+          once the module is re-imported — so unregister BY NAME from
+          bpy.types (which always holds the live registration).
+        """
+        for cls in classes:
+            # panels/menus register under bl_idname ("UPVN_PT_main"), while
+            # operator classes register under the class name (their bl_idname
+            # with a dot is the bpy.ops key, not the RNA type name) — try the
+            # valid candidates so a stale registration is always found
+            for nm in (getattr(cls, "bl_idname", None),
+                       getattr(cls, "__name__", None)):
+                if not nm or "." in nm:
+                    continue
+                live = getattr(bpy.types, nm, None)
+                if live is not None:
+                    try:
+                        bpy.utils.unregister_class(live)
+                    except Exception:
+                        pass
+        for prop in ("upvn_props", "upvn_addon_version"):
+            if hasattr(bpy.types.Scene, prop):
+                try:
+                    delattr(bpy.types.Scene, prop)
+                except Exception:
+                    pass
+
     def register():
+        # M26g: an update installed OVER a running UPBGE must just work —
+        # purge whatever the previous version left registered, then bind the
+        # new code. (Before: "already registered" on the first class killed
+        # the whole block; the only fix was uninstall + restart.)
+        _purge_stale_registrations()
         try:
             for cls in classes:
                 bpy.utils.register_class(cls)
             bpy.types.Scene.upvn_props = bpy.props.PointerProperty(type=UPVN_SceneProps)
+            bpy.types.Scene.upvn_addon_version = bpy.props.StringProperty(
+                name="UPVN addon version",
+                description="Version of the UPVN editor add-on currently registered "
+                            "(live-updated; compare against the zip you installed)",
+                default=".".join(str(x) for x in bl_info.get("version", ())),
+            )
             ok, info = ensure_engine(retry=True)
             ver = ".".join(str(x) for x in bl_info.get("version", ()))
             print(f"[UPVN] Editor addon v{ver} registered — engine: {'OK via ' + str(info['source']) if ok else 'NOT FOUND (' + str(info['message'])[:120] + ')'}")
@@ -2100,15 +2188,10 @@ except Exception:
                 pass
 
     def unregister():
-        for cls in reversed(classes):
-            try:
-                bpy.utils.unregister_class(cls)
-            except Exception:
-                pass
-        try:
-            del bpy.types.Scene.upvn_props
-        except Exception:
-            pass
+        # M26g: purge by name — after an over-install the module object can
+        # be stale, and class objects from a previous import would be
+        # unreachable from here.
+        _purge_stale_registrations()
         print("[UPVN] Editor addon unregistered")
 
     if __name__ == "__main__":

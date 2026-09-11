@@ -1,5 +1,46 @@
 # Changelog
 
+## 0.6.15 — M26g: plugin updates apply LIVE (no uninstall, no UPBGE restart)
+
+Installing a new addon version over a running UPBGE now just works. What was
+broken: `register()` aborted on the first already-registered class ("already
+registered"), so the NEW code never bound and the only fix was uninstall +
+restart.
+
+- **Self-cleaning register/unregister** (`_purge_stale_registrations`):
+  unregisters stale classes BY NAME from `bpy.types` (survives module
+  identity loss across re-imports) before binding the new code. Learned the
+  hard way and encoded: panels/menus register under `bl_idname`
+  (`UPVN_PT_main`), operator classes under their lowercase RNA key
+  (`UPVN_OT_reload_addon`) — the class __name__ alone misses both.
+- **Live version property**: `Scene.upvn_addon_version` always reports the
+  currently REGISTERED version (read the scene INSTANCE, not the type — the
+  type attr is the PropertyDeferred definition).
+- **New `upvn.reload_addon` operator** ("Apply Update (reload add-on)" in the
+  panel): applies a file-replaced update in one click — importlib.reload +
+  clean re-register; synchronous in background sessions, timer-deferred in
+  the UI (reloading mid-invoke would replace the running operator's class).
+- **Proven in ONE blender session** (tests/test_m26g_addon_live_update.py,
+  real binary; skips without /opt): enable 0.6.14 → install the 0.6.15 zip
+  via the REAL `preferences.addon_install` operator (no fallback needed) →
+  WITHOUT restart the new code is live (version prop 0.6.15, reload op
+  registered, `upvn.check_engine` still `{'FINISHED'}`) → then
+  `upvn.reload_addon` applies an on-disk 0.6.99 bump in-session. Note:
+  same-second mtime can keep a stale .pyc alive — the test sleeps 1.1s
+  before the reload; real installs are minutes apart (non-issue).
+- **Install-path findings (UPBGE 0.50 / Blender 5.0.1)**: `scripts/addons/`
+  is NOT on sys.path at startup (only `addons/modules` is) — imports only
+  work after `bpy.utils.refresh_script_paths()`, which the real install
+  operator calls; discovery (`addon_utils.modules`) works regardless. This
+  build's `addon_utils.enable` returns the module or None (older builds
+  returned an `(ok, err)` tuple) and RAISES TypeError on unpack — code that
+  does `ok, err = addon_utils.enable(...)` breaks.
+- **tools/package_addon.py**: a missing out-dir now is created — previously
+  the archive was written into a regular FILE named `dist` (found after a
+  sandbox reset removed dist/). Addon zip rebuilt: dist/
+  upvn_editor_addon_v0.6.15.zip (0.6.14 zip was untracked and lost in a
+  reset).
+
 ## 0.6.14 — 2026-09-10 (cont.) M26f: packaged build verified live — script_path baked, zero manual steps
 
 - **tools/package_game.py executed end-to-end** for the first time since the
