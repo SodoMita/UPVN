@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.6.14 — 2026-09-10 (cont.) M26f: packaged build verified live — script_path baked, zero manual steps
+
+- **tools/package_game.py executed end-to-end** for the first time since the
+  M26d tree-copy change: sample game → `dist/10_full_sample_game/`
+  (+1740 KB zip), validation OK, in-packager headless playable check 59
+  events, zip healthy.
+- **script_path is baked into the packaged blend** (`//game/script.rpy`):
+  the README's hand-edit step 3 is gone. Binary-optional — clear NOTE +
+  manual fallback when no blender binary exists. Flip drops the .blend1
+  backup so packaged builds stay clean.
+- **Packaged game verified LIVE** (player on build/blend/
+  UPVN_Template.blend, no manual steps): start → library zoom section → book
+  menu → classroom 3D lines (`classroom_3d.blend` correctly FOUND in
+  `game/stages/` with the LibLoad-DISABLED message) → ending menu →
+  good_ending → `end`, ALIVE. Audio resolves `theme` (device-less sandbox
+  warns once, silent continue).
+- Hygiene: `blend/sample_test.blend` (accidentally committed probe file)
+  removed from the repo — it even shipped inside packaged zips;
+  SceneManager's load_stage log no longer claims "no stage file" (it cannot
+  know; wording now defers to StageManager).
+- New tests `tests/test_m26f_package_game.py` (4; flip assertion
+  binary-skipped): packager exit/logs, whole-tree shipping (assets/ +
+  stages/), baked property read back from the blend + no .blend1, zip
+  contents (ships game+stages, no bytecode).
+
 ## 0.6.14 — 2026-09-10 (cont.) M26e: bootstrap script fixed; bake tool executed end-to-end
 
 - **tools/desktop_sway.sh sway-start FIXED** (standing bug for many rounds,

@@ -21,6 +21,7 @@ For 30-min showcase, see examples/10_full_sample_game (generated if missing).
 
 import argparse
 import json
+import os
 import shutil
 import sys
 import textwrap
@@ -318,6 +319,64 @@ def ensure_showcase(project: Path):
     print(f"Created showcase {project / 'script.rpy'}")
     return project
 
+def _find_blender():
+    """M26f: a blender binary for blend post-processing (script_path flip).
+    UPVN_BLENDER env wins; then the known /opt UPBGE location; then PATH."""
+    import os
+    cand = os.environ.get("UPVN_BLENDER")
+    if cand and os.path.exists(cand):
+        return cand
+    for c in ("/opt/upbge/upbge-0.50-linux-x64/blender", "blender",
+              "/usr/bin/blender"):
+        if os.path.exists(c):
+            return c
+    import shutil as _sh
+    return _sh.which("blender")
+
+
+def _flip_packaged_blend(build_blend: Path, script_rel: str) -> bool:
+    """Set VNController.script_path in the packaged blend. Returns True on
+    success; logs and returns False when no binary is available."""
+    exe = _find_blender()
+    if not exe:
+        print("NOTE: no blender binary found — blend/UPVN_Template.blend "
+              f"still has its default script_path; set it to {script_rel} "
+              "by hand before pressing P")
+        return False
+    expr = (
+        "import bpy; ob = bpy.data.objects.get('VNController'); "
+        "props = [p for p in ob.game.properties if p.name == 'script_path'] "
+        "if ob else []; "
+        "(props[0] if props else None) and setattr(props[0], 'value', "
+        f"'{script_rel}'); "
+        f"print('FLIPPED packaged script_path ->', {script_rel!r}); "
+        "bpy.ops.wm.save_mainfile()"
+    )
+    import subprocess
+    try:
+        proc = subprocess.run(
+            [exe, "--background", str(build_blend), "--python-expr", expr],
+            capture_output=True, text=True, timeout=180,
+            env={**os.environ, "LIBGL_ALWAYS_SOFTWARE": "1"},
+        )
+        ok = "FLIPPED" in proc.stdout
+        if not ok:
+            print(f"NOTE: blend flip failed ({proc.stdout[-200:]} "
+                  f"{proc.stderr[-200:]}) — set script_path by hand")
+        else:
+            # save_mainfile drops a .blend1 backup next to the blend — keep
+            # packaged builds clean
+            backup = build_blend.with_name(build_blend.name + "1")
+            if backup.exists():
+                backup.unlink()
+            print(f"Blend: script_path baked as {script_rel} "
+                  "(open and press P — no manual step)")
+        return ok
+    except Exception as e:
+        print(f"NOTE: blend flip error: {e} — set script_path by hand")
+        return False
+
+
 def package_project(project: Path, out: Path, do_zip: bool = True):
     """Main packaging."""
     project = project.resolve()
@@ -442,8 +501,9 @@ def package_project(project: Path, out: Path, do_zip: bool = True):
         How to play in UPBGE:
           1. Extract upbge-0.50-linux-x64.tar.xz (if not already)
           2. Open blend/UPVN_Template.blend in UPBGE
-          3. Scene VN_Main → Empty VNController → property script_path = //game/script.rpy
-          4. Press P → Click/Space to advance, H history, Q quick menu, S save (arbitrary slot), Ctrl+S quick save, wheel rollback
+          3. Press P (script_path is pre-baked to //game/script.rpy by the packager)
+             — if it was built without a blender binary, set VNController.script_path = //game/script.rpy by hand
+          4. Click/Space to advance, H history, Q quick menu, S save (arbitrary slot), Ctrl+S quick save, wheel rollback
 
         How to play headless (no UPBGE):
           python run.py
@@ -509,6 +569,14 @@ def package_project(project: Path, out: Path, do_zip: bool = True):
 
     # copy saves dir placeholder
     (build / "saves").mkdir(exist_ok=True)
+
+    # M26f: bake script_path into the packaged blend so "press P" just works —
+    # the README used to require editing the VNController property BY HAND
+    # (step 3) on every build. Binary-optional: skipped with a clear note
+    # when no blender binary is available (pure-headless environments).
+    _blend = build / "blend" / "UPVN_Template.blend"
+    if _blend.exists():
+        _flip_packaged_blend(_blend, "//game/script.rpy")
 
     # zip — exclude compiled bytecode (I-2)
     if do_zip:

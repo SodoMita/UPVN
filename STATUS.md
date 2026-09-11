@@ -216,3 +216,17 @@ Status: 307 passed / 16 skipped. `feat/desktop-gui`.
   /tmp/bakedgame: spawns/anim/preset-skip/menu/hover-click-select → end,
   ALIVE.
 - Tests: 318 passed / 16 skipped (4 new M26e; bake tests skip without /opt).
+
+## M26f — package_game verified live, script_path baked (2026-09-10)
+
+- Packager runs clean on the sample game (zip 1740 KB; in-packager playable
+  check 59 events). Packaged blend has VNController.script_path =
+  //game/script.rpy pre-baked (binary-optional with manual fallback; .blend1
+  removed post-flip). README_PLAY updated — "press P" with no manual step.
+- Packaged build live-verified start→end in the player: assets palette OK,
+  game/stages/classroom_3d.blend FOUND (LibLoad-gated message correct), theme
+  resolves, endings menu, ALIVE.
+- Removed accidentally-tracked blend/sample_test.blend; SceneManager
+  load_stage log wording fixed (deferred-to-StageManager, no false "no stage
+  file").
+- Tests: 322 passed / 16 skipped (4 new M26f).
