@@ -22,6 +22,23 @@ if [ ! -x /opt/upbge/upbge-0.50-linux-x64/blenderplayer ]; then
 fi
 UPBGE=/opt/upbge/upbge-0.50-linux-x64
 
+# 2b) swap — blenderplayer needs ~0.9–1.2 GB RSS (llvmpipe buffers). On a
+# ~2 GB sandbox that also runs platform services (~0.3 GB) the OOM killer
+# murders the player 5–15 s in, often BEFORE the window maps: symptom is a
+# black desktop, a stale UPVN_HEARTBEAT json (written by the already-dead
+# process) and dmesg "Out of memory: Killed process ... blenderplayer".
+# 3 GB of swap makes the player survive; skip if swap already exists.
+if [ "$(awk '/SwapTotal/{print $2}' /proc/meminfo)" -lt 1048576 ]; then
+    if swapon --show 2>/dev/null | grep -q .; then
+        echo "note: <1 GB swap total — player may OOM on a 2 GB host"
+    elif sudo -n fallocate -l 3G /swapfile 2>/dev/null; then
+        sudo -n chmod 600 /swapfile && sudo -n mkswap /swapfile >/dev/null \
+            && sudo -n swapon /swapfile && echo "swap added: 3G /swapfile"
+    else
+        echo "warning: could not add swap (no sudo?) — if the player dies ~10 s in, that is OOM"
+    fi
+fi
+
 # 3) headless sway (XWayland hosts the X11-only player)
 # M26e fix: this MUST be exported — a bare assignment is invisible to the
 # sway child, which aborted with "XDG_RUNTIME_DIR is not set in the
@@ -29,15 +46,24 @@ UPBGE=/opt/upbge/upbge-0.50-linux-x64
 export XDG_RUNTIME_DIR=/tmp/wl-upvn
 mkdir -m 700 -p "$XDG_RUNTIME_DIR"
 if ! pgrep -x sway >/dev/null 2>&1; then
-    # M26e fix: headless outputs have no mode list — sway's config word is
-    # `model` (W×H@R). The old `mode 1280x800` was rejected at startup and
-    # sway died with "output config mode unavailable" (in-script sway start
-    # looked permanently broken while the manual recipe worked).
-    printf 'output HEADLESS-1 model 1280x800\ndefault_border none\n' \
-        > "$XDG_RUNTIME_DIR/cfg"
+    # M26g fix: the output-mode syntax differs between sway/wlroots builds:
+    # some 1.10.1 builds only accept `model 1280x800` (headless outputs have
+    # no mode list), others reject `model` as "Invalid output subcommand"
+    # and want `mode --custom 1280x800`. A wrong line in the config file
+    # aborts startup or leaves a swaynag banner over the QA desktop — so
+    # keep the file mode-free and set the mode at RUNTIME (failures there
+    # are non-fatal and we can try both words).
+    printf 'default_border none\n' > "$XDG_RUNTIME_DIR/cfg"
     WLR_BACKENDS=headless WLR_LIBINPUT_NO_DEVICES=1 WLR_RENDERER=pixman \
         nohup sway -c "$XDG_RUNTIME_DIR/cfg" >"$XDG_RUNTIME_DIR/sway.log" 2>&1 &
     sleep 1.5
+    SWAYSOCK_SETUP="$(ls "$XDG_RUNTIME_DIR"/sway-ipc.*.sock 2>/dev/null | head -1)"
+    if [ -n "$SWAYSOCK_SETUP" ]; then
+        SWAYSOCK="$SWAYSOCK_SETUP" swaymsg output HEADLESS-1 mode --custom 1280x800 \
+            >/dev/null 2>&1 \
+            || SWAYSOCK="$SWAYSOCK_SETUP" swaymsg output HEADLESS-1 model 1280x800 \
+            >/dev/null 2>&1 || true
+    fi
 fi
 WAYLAND_DISPLAY="$(ls "$XDG_RUNTIME_DIR" | grep '^wayland-' | grep -v lock | head -1)"
 export WAYLAND_DISPLAY SWAYSOCK="$(ls "$XDG_RUNTIME_DIR"/sway-ipc.*.sock | head -1)"
