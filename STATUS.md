@@ -263,3 +263,27 @@ Status: 307 passed / 16 skipped. `feat/desktop-gui`.
   raises).
 - package_addon.py mkdir fix (missing dist/ wrote a FILE named dist).
   Tests: 327 passed / 16 skipped.
+
+
+## M26h — branch consolidation (2026-09-11)
+
+`agent/desktop-gui-run-fixes` = the whole desktop-gui lineage in ONE branch
+(target: a single PR to main):
+
+- merged `origin/desktop-gui-fixed` (730c316: desktop-gui@7995acd +
+  agent/desktop-gui-fixes era + ReloadAddon/_get_script_text/panel tweaks)
+- merged `origin/agent/desktop-gui-fixes` (940912c: M26d backlog/rewind
+  GUI, history panel, desktop_qa.py, template bake tools, docs)
+- NOT merged, deliberately: `feat/desktop-no-textures` (forked from main,
+  not desktop-gui; cross-review-rejected approaches — AABB pick, fileless
+  white images -> player segfault, template brick loss).
+- already ancestors (nothing to do): agent/desktop-gui-stable,
+  feat/declarative-rpy, feat/renpy-corpus-compat.
+
+State: 366 passed / 16 skipped; zip rebuilt (dist/
+upvn_editor_addon_v0.6.15.zip = merged code); smoke walkthrough green
+incl. M26d backlog+rewind; live editor round green (all ops, wiring
+29/29, embedded game P->menu->branch->Esc, editor alive; evidence in
+screenshots/consolidation/). See CHANGELOG 0.6.15 (cont.) for the merge
+decisions and the three follow-up fixes (test import, skip guard,
+Pillow-on-lib-only-tarball).

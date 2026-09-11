@@ -1,5 +1,45 @@
 # Changelog
 
+## 0.6.15 (cont.) — desktop-gui lineage consolidated into one branch
+
+`agent/desktop-gui-run-fixes` now carries the whole desktop-gui lineage —
+feat/desktop-gui@7995acd + desktop-gui-fixed@730c316 +
+agent/desktop-gui-fixes@940912c + the M26g run-fixes work — so a single PR
+to main contains everything. Resolution highlights and follow-up fixes:
+
+- write() keeps the strictly non-destructive M26g form and now also drops
+  the `"Empty label."` placeholder when real content enters a block
+  (e16c666 behaviour folded in; regression test added).
+- classes tuple is the union: UPVN_Prefs + UPVN_OT_ReloadAddon both
+  registered; _purge_stale_registrations covers AddonPreferences
+  (bl_idname without a dot) — live reload over a running session works.
+- M27 operator test now loads the repo addon file explicitly: a bare
+  `import upvn_editor_addon` silently returns a stale same-named module
+  from ~/.config when one is enabled, so the test used to exercise OLD
+  code. Also skips (not fails) without /opt/upbge, like every other
+  binary test.
+- Install Pillow operator: the UPBGE 0.50 official tarball ships Python
+  as a LIB ONLY (no bin/python3.11) — the bundled-pip route was
+  impossible and the error suggested a nonexistent path. Fallback: host
+  python3 cross-installs into the running interpreter's purelib with
+  `--python-version 3.11 --only-binary=:all:` (a plain `--target` ships
+  host-ABI wheels: `import PIL` works, `_imaging` fails to load).
+  Verified live: installs + becomes visible in-session, no restart.
+- tools/smoke_walkthrough.sh keeps both fixes (absolute blend path +
+  UPBGE probe); desktop_sway.sh = runtime output-mode (both sway syntaxes)
+  + setsid + socket polling.
+- Full suite: 366 passed / 16 skipped (binary tests need /opt/upbge —
+  else skip). Live re-verified after the merges: standalone smoke
+  walkthrough all states green incl. M26d backlog/rewind; editor round:
+  all operators FINISHED, Wiring 29/29, P → start → menu → "Ask her
+  chosen." → Esc → editor alive (screenshots/consolidation/).
+- QA driver note: in the UPBGE 0.50 GUI, bpy.app.timers registered from a
+  --python startup script never pump (window does not exist yet) and
+  load_post does not fire for the CLI file argument — a SpaceView3D
+  POST_PIXEL draw handler is the reliable queue pump (force redraws with
+  numpad view keys). While the embedded game runs, the editor does not
+  redraw (the game owns the window) — expected, not a hang.
+
 ## 0.6.15 — M26g: plugin updates apply LIVE (no uninstall, no UPBGE restart)
 
 Installing a new addon version over a running UPBGE now just works. What was
