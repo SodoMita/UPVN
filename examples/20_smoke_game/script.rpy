@@ -32,4 +32,19 @@ label right:
 label save_test:
     e "Save, load, rollback, and continue from here."
     e "Route is [route]."
+    e "Hello from Blender!"
+    menu:
+        "What do you do?"
+        "Ask her":
+            jump ask
+        "Wait":
+            jump wait
+    return
+
+label ask:
+    "Ask her chosen."
+    return
+
+label wait:
+    "Wait chosen."
     return

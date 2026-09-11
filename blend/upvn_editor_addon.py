@@ -2097,7 +2097,12 @@ except Exception:
             layout.operator("upvn.validate", icon='CHECKMARK')
             layout.operator("upvn.preview", icon='RENDER_RESULT')
 
-    classes = (UPVN_SceneProps, UPVN_OT_LocateEngine, UPVN_OT_CheckEngine, UPVN_OT_BundleEngine,
+    # M26g bugfix: UPVN_Prefs was defined but NEVER registered — the add-on
+    # Preferences page (engine folder picker + Locate/Check/Copy buttons +
+    # the persisted engine_path preference) silently never appeared, and
+    # "Locate Engine" could not save its choice.
+    classes = (UPVN_Prefs,
+               UPVN_SceneProps, UPVN_OT_LocateEngine, UPVN_OT_CheckEngine, UPVN_OT_BundleEngine,
                UPVN_OT_InstallPillow,
                UPVN_OT_CreateProject, UPVN_OT_AddCharacter, UPVN_OT_AddScene,
                UPVN_OT_AddDialogue, UPVN_OT_AddShow, UPVN_OT_AddMenu, UPVN_OT_AddStage,
