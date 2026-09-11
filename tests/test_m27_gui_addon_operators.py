@@ -57,6 +57,7 @@ assert bpy.ops.upvn.validate() == {{'FINISHED'}}
 assert bpy.ops.upvn.setup_scene() == {{'FINISHED'}}
 assert bpy.ops.upvn.check_wiring() == {{'FINISHED'}}
 assert bpy.ops.upvn.save_demo() == {{'FINISHED'}}
+assert bpy.ops.upvn.install_pillow() == {{'FINISHED'}}
 assert bpy.ops.upvn.preview_arbitrary() == {{'FINISHED'}}
 assert bpy.ops.upvn.preview() == {{'FINISHED'}}
 
