@@ -67,7 +67,8 @@ class SceneManager:
             # full-sample game died at label classroom → load_stage
             # classroom_3d). Log-and-continue here; StageManager handles it.
             print(f"[SceneManager] load_stage '{event.get('stage')}' → "
-                  f"3D stage handled by StageManager (no stage file: skipped)")
+                  "deferred to StageManager (existence-check + gated LibLoad "
+                  "or baked-stage repositioning happen there)")
 
     def set_background(self, asset: str, transition: str | None = None):
         self._prev_bg = self.state.scene.background
