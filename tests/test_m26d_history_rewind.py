@@ -483,3 +483,41 @@ def test_scroll_offset_reaches_the_payload(long_ctrl):
     assert f"of {rows}" in payload["history"]
     assert world_ui.build_world_ui(ctrl.current_event, None, history_entries=[],
                                    history_open=False)["history"] == ""
+
+
+class _CurveObj:
+    """Minimal stand-in for a KX font object (blenderObject.data.body)."""
+
+    def __init__(self):
+        self.writes = 0
+        self._body = ""
+
+        class _D:
+            def __init__(inner, outer):
+                inner._o = outer
+
+            @property
+            def body(inner):
+                return inner._o._body
+
+            @body.setter
+            def body(inner, v):
+                inner._o.writes += 1
+                inner._o._body = v
+
+        self.data = _D(self)
+        self.blenderObject = type("BO", (), {"data": self.data})()
+
+
+def test_set_font_text_is_idempotent():
+    """M26d: the layout runs every tick; re-writing an unchanged body rebuilds
+    the glyph mesh each time and the player drew two pages on top of each other
+    in the frame where a mesh rebuild was still in flight."""
+    ob = _CurveObj()
+    world_ui.set_font_text(ob, "page one")
+    assert ob.writes == 1
+    world_ui.set_font_text(ob, "page one")
+    world_ui.set_font_text(ob, "page one")
+    assert ob.writes == 1, "unchanged text must not touch the curve"
+    world_ui.set_font_text(ob, "page two")
+    assert ob.writes == 2 and ob._body == "page two"
