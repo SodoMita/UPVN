@@ -362,3 +362,17 @@ def test_global_keys_polled_once_before_the_typewriter_branch():
     assert body.index("_handle_global_keys()") < body.index("update_typewriter(dt)")
     # and the old inline polling is gone (no second home for the same edges)
     assert body.count('ev.HKEY') == 0
+
+
+def test_opening_the_backlog_cannot_be_closed_by_the_same_input(ctrl, monkeypatch):
+    """H and an advance key can land in one tick; the overlay must stay open."""
+    logic = _install_fake_bge(monkeypatch, just_keys=[8])   # SPACE held "just"
+    ctrl.ui_mgr._typewriter_progress = 999                   # reveal finished
+    assert ctrl.toggle_history() is True
+    ctrl.update(dt=0.016)                                    # same-tick advance
+    assert ctrl._history_open() is True, "open guard: no flicker shut"
+    # after the guard window the same press does close it
+    ctrl._history_opened_at -= 1.0
+    logic.keyboard.inputs[8] = 1                             # still just-pressed
+    ctrl.update(dt=0.016)
+    assert ctrl._history_open() is False

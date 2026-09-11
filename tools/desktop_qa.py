@@ -104,8 +104,13 @@ def main():
     want = json.loads(a.expect) if a.expect else None
     fails = 0
     for key in a.rest:
+        # A chord needs the modifier held across a logic tick (13-19 fps under
+        # llvmpipe) so both halves register — 80 ms. A plain key must NOT: an
+        # 80 ms hold spans two ticks and the engine's per-tick `just` edge sees
+        # it twice, so one "PageUp" rolled back two lines.
+        hold = "80" if "+" in key else "12"
         for attempt in range(3):
-            subprocess.run(["xdotool", "key", "--window", wid, "--delay", "80", key],
+            subprocess.run(["xdotool", "key", "--window", wid, "--delay", hold, key],
                            env=e, timeout=20)
             time.sleep(a.settle)
             if want is None:

@@ -402,8 +402,13 @@ class VNController:
         # else is ignored, so skip/auto/rollback never scroll past text the
         # player is reading.
         if self._history_open():
-            if self._is_advance_pressed() or self._is_history_key_pressed():
-                self._close_history()
+            # M26d: the press that opened the overlay must not also close it.
+            # At the player's 13-19 fps an advance key and H can land in the
+            # same tick (or one tick apart), and `just` fires once for each —
+            # which made the backlog flicker shut the moment it opened.
+            if time.time() - getattr(self, "_history_opened_at", 0.0) > 0.3:
+                if self._is_advance_pressed() or self._is_history_key_pressed():
+                    self._close_history()
             return
         # M26d: global keys are polled before anything can early-return.
         if not self._handle_global_keys():
@@ -676,7 +681,10 @@ class VNController:
         if self.screen_mgr is None:
             return False
         self.screen_mgr.handle_key("h")
-        return self._history_open()
+        open_now = self._history_open()
+        if open_now:
+            self._history_opened_at = time.time()
+        return open_now
 
     def choose(self, index: int):
         """Called from UI when player picks a menu choice."""
