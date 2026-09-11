@@ -324,6 +324,7 @@ def _install_fake_bge(monkeypatch, just_keys=(), active_keys=(), mouse_just=()):
         SIXKEY=19, SEVENKEY=20, EIGHTKEY=21, NINEKEY=22,
         WHEELUPMOUSE=107, WHEELDOWNMOUSE=108,
         PAGEUPKEY=201, PAGEDOWNKEY=209, BACKSPACEKEY=14,
+        UPARROWKEY=200, DOWNARROWKEY=203,
     )
     fake.logic = logic
     fake.events = events
@@ -387,3 +388,76 @@ def test_opening_the_backlog_cannot_be_closed_by_the_same_input(ctrl, monkeypatc
     logic.keyboard.inputs[8] = 1                             # still just-pressed
     ctrl.update(dt=0.016)
     assert ctrl._history_open() is False
+
+
+# ---------------------------------------------------------------- backlog paging
+def _entries(n):
+    return [{"who_name": "Eileen", "text": f"line {i}"} for i in range(1, n + 1)]
+
+
+def test_format_history_pages_by_entries_and_shows_position():
+    body = world_ui.format_history(_entries(20))
+    lines = body.split("\n")
+    # 12 rows, one spent on the footer -> 11 entries per page, newest last
+    assert len(lines) == 12
+    assert lines[0] == "Eileen: line 10" and lines[-2] == "Eileen: line 20"
+    assert lines[-1] == "\u2014 lines 10-20 of 20  (wheel to scroll) \u2014"
+    older = world_ui.format_history(_entries(20), scroll=1)
+    assert older.split("\n")[0] == "Eileen: line 9" and "line 19" in older
+    # clamped: the oldest page starts at the first entry, nothing before it
+    top = world_ui.format_history(_entries(20), scroll=999)
+    assert top.split("\n")[0] == "Eileen: line 1"
+    assert "lines 1-11 of 20" in top
+    # a short script needs no pager at all
+    short = world_ui.format_history(_entries(3))
+    assert "wheel" not in short and len(short.split("\n")) == 3
+    assert world_ui.history_max_scroll(12) == 0 and world_ui.history_max_scroll(13) == 2
+
+
+@pytest.fixture()
+def long_ctrl():
+    """A 16-line script: long enough that the backlog has to page."""
+    c = VNController(script_dict=parse_string("\n".join(
+        ["label start:"] + [f'    "line {i}"' for i in range(1, 17)] + ["    return"])))
+    c.load()
+    for _ in range(16):
+        c._advance()
+    return c
+
+
+def test_backlog_wheel_pages_instead_of_rewinding(monkeypatch, long_ctrl):
+    """While the overlay is open the wheel scrolls the backlog; the very same
+    gesture rewinds the story once it is closed."""
+    ctrl = long_ctrl
+    assert len(ctrl.state.history) >= 13, "fixture must be pageable"
+    logic = _install_fake_bge(monkeypatch, mouse_just=[107])   # WHEELUPMOUSE
+    assert ctrl.toggle_history() is True
+    assert ctrl._history_scroll == 0
+    ctrl.update(dt=0.016)
+    assert ctrl._history_scroll == 1, "wheel up pages to older entries"
+    ctrl.update(dt=0.016)
+    assert ctrl._history_scroll == 2
+    lim = ctrl._history_max_scroll()
+    for _ in range(lim + 4):
+        logic.mouse = _FakeDevice([107])
+        ctrl.update(dt=0.016)
+    assert ctrl._history_scroll == lim, "paged clamps at the oldest window"
+    logic.mouse = _FakeDevice([108])                            # WHEELDOWNMOUSE
+    ctrl.update(dt=0.016)
+    assert ctrl._history_scroll == lim - 1
+    # the wheel never rewound the story while the backlog was up
+    assert ctrl.rewind_depth() == 0, "paging must not steal the rewind gesture"
+    ctrl._close_history()
+    assert ctrl._history_scroll == 0, "closing resets the page"
+
+
+def test_scroll_offset_reaches_the_payload(long_ctrl):
+    ctrl = long_ctrl
+    n = len(ctrl.state.history)
+    payload = world_ui.build_world_ui(ctrl.current_event, None,
+                                      history_entries=ctrl.state.history,
+                                      history_open=True, history_scroll=1)
+    # 11 entries + 1 footer = the 12 rows the panel can hold
+    assert f"lines {n - 11}-{n - 1} of {n}" in payload["history"]
+    assert world_ui.build_world_ui(ctrl.current_event, None, history_entries=[],
+                                   history_open=False)["history"] == ""

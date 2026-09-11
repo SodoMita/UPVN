@@ -38,17 +38,46 @@ HISTORY_MAX_LINES = 12      # backlog lines on screen at once
 HISTORY_WRAP = 62           # chars per backlog line before wrapping
 
 
+def history_max_scroll(total: int, max_lines: int = HISTORY_MAX_LINES) -> int:
+    """Largest valid page offset (in entries) for a backlog of `total` entries."""
+    if total <= max_lines:
+        return 0
+    return total - (max_lines - 1)        # -1: the footer steals one slot
+
+
+def history_window(total: int, max_lines: int = HISTORY_MAX_LINES,
+                   scroll: int = 0) -> tuple[int, int, bool]:
+    """(start, end, footer) — the entry slice the backlog shows for `scroll`.
+
+    One place owns the paging maths so the text and the controller's clamp
+    cannot drift apart: 12 rows on screen, 20 entries in the script, and the
+    newest page ends on the last entry. The "lines a-b of n" footer only makes
+    sense when something is above the window, and it costs one entry slot.
+    """
+    if total <= max_lines:
+        return 0, total, False
+    show = max_lines - 1
+    scroll = max(0, min(int(scroll or 0), history_max_scroll(total, max_lines)))
+    end = total - scroll
+    return end - show, end, True
+
+
 def format_history(entries, max_lines: int = HISTORY_MAX_LINES,
-                   wrap_at: int = HISTORY_WRAP) -> str:
+                   wrap_at: int = HISTORY_WRAP, scroll: int = 0) -> str:
     """Backlog body for the 3D font object: newest line last, tags stripped.
 
     Pure (no bge) so the same text is asserted by the headless tests and drawn
     by the player. Entries are the dicts recorded in `VNState.history`.
+
+    `scroll` is a page offset in entries, because the panel is a fixed-capacity
+    viewport over a script that can be thousands of lines long. The footer rides
+    along as a line instead of needing a new contract object — the object that
+    draws the backlog is a single FONT curve.
     """
+    entries = [e for e in list(entries or []) if isinstance(e, dict)]
+    start, end, footer = history_window(len(entries), max_lines, scroll)
     lines: list[str] = []
-    for e in list(entries or [])[-max_lines:]:
-        if not isinstance(e, dict):
-            continue
+    for e in entries[start:end]:
         who = e.get("who_name") or e.get("who") or ""
         body = (e.get("stripped") or e.get("display_text") or e.get("text") or "").strip()
         wrapped = wrap_text(body, width=wrap_at)
@@ -56,12 +85,15 @@ def format_history(entries, max_lines: int = HISTORY_MAX_LINES,
             first, *rest = wrapped.split("\n")
             wrapped = "\n".join([f"{who}: {first}"] + rest)
         lines.append(wrapped)
+    if footer:
+        lines.append(f"— lines {start + 1}-{end} of {len(entries)}  (wheel to scroll) —")
     return "\n".join(lines)
 
 
 def build_world_ui(event: Optional[dict], ui_mgr=None, diag=None,
                    n_choices: int = 9, history_entries=None,
-                   history_open: bool = False, rewind_depth: int = 0) -> dict:
+                   history_open: bool = False, rewind_depth: int = 0,
+                   history_scroll: int = 0) -> dict:
     """Pure snapshot of what 3D objects should show this frame."""
     speaker = ""
     dialogue = ""
@@ -95,7 +127,8 @@ def build_world_ui(event: Optional[dict], ui_mgr=None, diag=None,
             choices.append({"name": f"choice_{i}", "text": f"{i + 1}. {txt}", "visible": True})
         else:
             choices.append({"name": f"choice_{i}", "text": "", "visible": False})
-    history_body = format_history(history_entries) if history_open else ""
+    history_body = (format_history(history_entries, scroll=history_scroll)
+                    if history_open else "")
     rewind_visible = bool(rewind_depth)
     return {
         "speaker": speaker,

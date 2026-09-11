@@ -107,6 +107,18 @@ def resolve_script_path(logic, owner=None, extra_candidates=None):
     return None, tried
 
 
+def _prop(owner, name):
+    """Read a game property from either representation (dict or KX object)."""
+    if owner is None:
+        return None
+    try:
+        if isinstance(owner, dict):
+            return owner.get(name)
+        return owner[name] if name in owner else None
+    except Exception:
+        return None
+
+
 def _owner_script_prop(cont):
     """dict-like access to the object's script_path property (no bge import)."""
     if cont is None:
@@ -220,6 +232,7 @@ def _sync_world_ui(ctrl, hovered=None):
             history_entries=history_entries,
             history_open=history_open,
             rewind_depth=getattr(ctrl, "rewind_depth", lambda: 0)(),
+            history_scroll=int(getattr(ctrl, "_history_scroll", 0) or 0),
         )
         # hovered comes in as a parameter (set by _tick_pointer) — this
         # function has no `logic` in scope
@@ -515,17 +528,40 @@ def main(cont=None):
         # 1) explicit property on the controller object (add-on's project path)
         path, tried = resolve_script_path(logic, owner=owner)
         logic._upvn_tried = tried
+        # M26d: the parse tier is a project property, because a converted
+        # Ren'Py project is real .rpy source ("full" tier: init offset, extend,
+        # screen …) while the declarative samples stay on "safe".  Before this,
+        # every tool-converted game failed to load and the player showed the
+        # "script not found" screen even though the .rpy files were there.
+        parse_mode = _prop(owner, "parse_mode") or "safe"
+
+        def _load_with(mode):
+            ctrl = VNController(script_path=path, mode=mode)
+            ctrl.load()
+            logic._upvn_ctrl = ctrl
+            _unregister_overlay()
+            _hide_idle_sprites(ctrl)
+            print(f"[UPVN] Loaded script {path} (mode={mode}, from "
+                  f"{'VNController.script_path' if owner is not None else 'candidate'})")
+
         if path:
             try:
-                ctrl = VNController(script_path=path)
-                ctrl.load()
-                logic._upvn_ctrl = ctrl
-                _unregister_overlay()
-                _hide_idle_sprites(ctrl)
-                print(f"[UPVN] Loaded script {path} (from {'VNController.script_path' if owner is not None else 'candidate'})")
+                _load_with(parse_mode)
             except Exception as e:
-                print(f"[UPVN] failed to load {path}: {e}")
-                logic._last_upvn_error = f"{path}: {e}"
+                # One automatic retry at the full tier: it is a superset, so a
+                # blend whose property was never wired still plays instead of
+                # showing a diagnostic screen.
+                if parse_mode != "full":
+                    print(f"[UPVN] load with mode={parse_mode} failed ({e}); "
+                          f"retrying with mode=full")
+                    try:
+                        _load_with("full")
+                    except Exception as e2:
+                        print(f"[UPVN] failed to load {path}: {e2}")
+                        logic._last_upvn_error = f"{path}: {e2}"
+                else:
+                    print(f"[UPVN] failed to load {path}: {e}")
+                    logic._last_upvn_error = f"{path}: {e}"
         if not hasattr(logic, "_upvn_ctrl"):
             # 2) fallback: embedded minimal script that explains itself on the
             #    screen (a console-only warning is invisible to players)
@@ -625,6 +661,7 @@ def main(cont=None):
                 "history": len(getattr(_st, "history", []) or []),
                 "history_open": bool(_sm and _sm.is_overlay_visible("history"))
                 if _sm is not None else False,
+                "history_scroll": int(getattr(ctrl, "_history_scroll", 0) or 0),
                 "rollback_depth": len(getattr(_interp, "rollback_stack", []) or [])
                 if _interp is not None else 0,
                 "rollforward_depth": len(getattr(ctrl, "_forward_stack", []) or []),

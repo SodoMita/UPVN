@@ -402,6 +402,9 @@ class VNController:
         # else is ignored, so skip/auto/rollback never scroll past text the
         # player is reading.
         if self._history_open():
+            # Wheel/arrows page the backlog while it is open — the same wheel
+            # gesture rewinds when it is closed, so the two must not both run.
+            self._handle_history_scroll()
             # M26d: the press that opened the overlay must not also close it.
             # At the player's 13-19 fps an advance key and H can land in the
             # same tick (or one tick apart), and `just` fires once for each —
@@ -657,6 +660,10 @@ class VNController:
             return False
 
     def _close_history(self) -> None:
+        # Every close path goes through here (H, an advance click, …), so this
+        # is where the page offset resets — reopening must land on the newest
+        # line, not on whatever the player scrolled to last time.
+        self._history_scroll = 0
         try:
             self.screen_mgr.hide("history")
         except Exception:
@@ -676,6 +683,32 @@ class VNController:
         except Exception:
             return False
 
+    def _history_max_scroll(self) -> int:
+        """How far back (in entries) the open backlog can page."""
+        try:
+            total = len(self.state.history or [])
+        except Exception:
+            total = 0
+        try:
+            from ..ui.world_ui import history_max_scroll
+        except Exception:                       # standalone add-on copy
+            return max(0, total - 11) if total > 12 else 0
+        return history_max_scroll(total)
+
+    _HISTORY_SCROLL_UP = ("WHEELUPMOUSE", "UPARROWKEY")
+    _HISTORY_SCROLL_DOWN = ("WHEELDOWNMOUSE", "DOWNARROWKEY")
+
+    def _handle_history_scroll(self) -> None:
+        if not HAS_BGE:
+            return
+        up = self._any_just(self._HISTORY_SCROLL_UP)
+        down = self._any_just(self._HISTORY_SCROLL_DOWN)
+        if not (up or down):
+            return
+        cur = int(getattr(self, "_history_scroll", 0) or 0)
+        cur = cur + 1 if up else cur - 1
+        self._history_scroll = max(0, min(self._history_max_scroll(), cur))
+
     def toggle_history(self) -> bool:
         """H / the panel button. Returns the new open state."""
         if self.screen_mgr is None:
@@ -684,6 +717,7 @@ class VNController:
         open_now = self._history_open()
         if open_now:
             self._history_opened_at = time.time()
+            self._history_scroll = 0        # always open on the newest line
         return open_now
 
     def choose(self, index: int):

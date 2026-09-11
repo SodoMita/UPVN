@@ -1410,6 +1410,15 @@ except Exception:
         # M26: image policy for the renderers — "color" (texture-free palette,
         # template + samples) or "auto" (converted Ren'Py projects).
         _set_runtime_prop(_b, ctrl, "image_mode", IMAGE_MODE_DEFAULT)
+        # Parse tier (M26d): "safe" = the declarative subset the samples use,
+        # "full" = drop-in Ren'Py. Only seeded when absent, so Setup Scene on an
+        # already-converted project does not silently downgrade it to safe and
+        # break its script.
+        try:
+            if "parse_mode" not in ctrl:
+                _set_runtime_prop(_b, ctrl, "parse_mode", "safe")
+        except Exception:
+            pass
         # relative root to the folder that contains engine/ (launcher falls back
         # to the blend dir + parents when this is empty/stale)
         try:
