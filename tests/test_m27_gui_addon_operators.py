@@ -68,8 +68,25 @@ assert bpy.ops.upvn.validate() == {{'FINISHED'}}
 assert bpy.ops.upvn.setup_scene() == {{'FINISHED'}}
 assert bpy.ops.upvn.check_wiring() == {{'FINISHED'}}
 assert bpy.ops.upvn.save_demo() == {{'FINISHED'}}
-assert bpy.ops.upvn.preview_arbitrary() == {{'FINISHED'}}
-assert bpy.ops.upvn.preview() == {{'FINISHED'}}
+# Pillow-dependent operators: report({{'ERROR'}}) RAISES RuntimeError through
+# bpy.ops in --background, so without Pillow these two cannot return FINISHED
+# — instead they must surface the instructive error (same contract, both
+# environments stay covered; see BUG-M26h-010/012).
+try:
+    import PIL  # noqa: F401
+    _have_pil = True
+except Exception:
+    _have_pil = False
+if _have_pil:
+    assert bpy.ops.upvn.preview_arbitrary() == {{'FINISHED'}}
+    assert bpy.ops.upvn.preview() == {{'FINISHED'}}
+else:
+    for _op in ("preview_arbitrary", "preview"):
+        try:
+            getattr(bpy.ops.upvn, _op)()
+            raise AssertionError(_op + " should raise without Pillow")
+        except RuntimeError as _e:
+            assert "Pillow" in str(_e) or "PIL" in str(_e), (_op, _e)
 
 print("ALL_OPERATORS_SUCCESS")
 """
