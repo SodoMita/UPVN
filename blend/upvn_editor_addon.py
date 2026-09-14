@@ -618,6 +618,11 @@ class UPVN_GameBuilder:
         from engine.core.vn_state import VNState
         from engine.core.vn_interpreter import VNInterpreter
         _p, _vc, _sm = _engine_api
+        # CWD-relative default — make sure the dir exists (the editor may be
+        # launched from anywhere; without this the write dies on a missing
+        # "screenshots/" dir)
+        from pathlib import Path as _P
+        _P(out_path).parent.mkdir(parents=True, exist_ok=True)
         # prefer file on disk if exists
         if self.script_path.exists():
             try:
@@ -2058,6 +2063,7 @@ except Exception:
                 mgr.show("save", save_screen)
                 from pathlib import Path
                 out = Path("screenshots/upvn_arbitrary_preview.png")
+                out.parent.mkdir(parents=True, exist_ok=True)
                 render_state(state, {"type": "say", "who": None, "text": "Arbitrary preview"}, out, screen_mgr=mgr)
                 self.report({'INFO'}, f"Arbitrary preview at {out} page {save_screen.page + 1}")
             except Exception as e:
