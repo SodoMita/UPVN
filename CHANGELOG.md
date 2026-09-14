@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.6.16 — M26i: stylized, colored 3D text
+
+The UI type is now real 3D type instead of flat Bfont curves:
+
+- **Typeface**: DejaVu Sans (Book + Bold) travels in `blend/fonts/` and the
+  add-on zip; every template FONT curve uses it (speaker + choice labels
+  Bold). The .blend embeds fonts, so the shipped game needs none.
+- **3D shape**: extrude 0.16 + bevel 0.035 on all UI text; the rewind
+  marker gets an italic shear of 0.18.
+- **Drop shadows**: dark twins (tint 0.02, 0.03, 0.08; offset
+  +0.045/+0.04/−0.05, i.e. below-right and behind) for speaker, dialogue
+  and choices — visible depth against the box without touching materials.
+  History and rewind deliberately stay shadow-free. Old .blends without
+  shadows still run (the wiring check does not require them).
+- **Colored speaker names**: `Character(color="#c8ffc8")` tints the name
+  via obj.color (MAFont/MAUI ObjectInfo→Emission); neutral pale when no
+  color. Heartbeat exposes `speaker_color` + `<obj>_color` readbacks;
+  headless stills tint too.
+- **Bake**: tools/add_template_ui_objects.py styles existing objects
+  (idempotent, `styled:` notes on real change) and repairs pre-M26i
+  shadows; the addon's Setup Scene uses the same `_ensure_font`.
+- **Packaging gotcha fixed**: the bake tool loads the repo
+  `engine/render/contract.py` BY FILE PATH — an enabled ~/.config addon
+  snapshot bundles engine/ as a REGULAR package while the repo engine/ is
+  a namespace package, and a regular package anywhere on sys.path beats
+  earlier namespace portions, so sys.path ordering can never select the
+  repo copy. Version-pinned test assertions (0.6.15 literals) made
+  version-agnostic. blend/fonts/ now ships in the add-on zip.
+
+Suite: 375 passed / 16 skipped. Live-verified in blenderplayer (green
+"Eileen", 3D side faces, shadow rim below-right of the glyphs; heartbeat
+color readbacks correct; full smoke walkthrough green).
+
 ## 0.6.15 (cont.) — desktop-gui lineage consolidated into one branch
 
 `agent/desktop-gui-run-fixes` now carries the whole desktop-gui lineage —
