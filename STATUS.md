@@ -1,3 +1,19 @@
+# Current Status — 2026-09-14 (M26i: stylized colored 3D text, main, v0.6.16)
+
+## Last completed
+- **M26i (main, v0.6.16)**: real typeface (DejaVu Book/Bold in
+  blend/fonts/, shipped in the add-on zip), extrude 0.16 + bevel 0.035,
+  rewind italic shear 0.18, dark drop-shadow twins for speaker/dialogue/
+  choices, and Character(color=...) speaker-name tint via obj.color —
+  end to end: contract constants + style_font_curve, world_ui
+  parse/build/apply, frontend heartbeat colors, headless stills, addon
+  Setup Scene, idempotent template bake (all 24 FONT curves styled, 11
+  shadows). Live-verified in blenderplayer: green "Eileen" (Filmic
+  ~(189,196,188)), extrude side faces, shadow rim +4px right/+3px below;
+  smoke walkthrough green. Bake-tool import trap documented (regular
+  package beats earlier namespace portion — fixed by spec_from_file_location).
+  375 passed / 16 skipped.
+
 # Current Status — 2026-09-11 (M26g: GUI button sweep DONE, branch agent/desktop-gui-run-fixes)
 
 ## Last completed
@@ -13,6 +29,22 @@
   screenshots/m26g/* (editor with game running, Preferences page, text
   editor area).
 
+# Current Status — 2026-09-14 (M26i: stylized colored 3D text, main, v0.6.16)
+
+## Last completed
+- **M26i (main, v0.6.16)**: real typeface (DejaVu Book/Bold in
+  blend/fonts/, shipped in the add-on zip), extrude 0.16 + bevel 0.035,
+  rewind italic shear 0.18, dark drop-shadow twins for speaker/dialogue/
+  choices, and Character(color=...) speaker-name tint via obj.color —
+  end to end: contract constants + style_font_curve, world_ui
+  parse/build/apply, frontend heartbeat colors, headless stills, addon
+  Setup Scene, idempotent template bake (all 24 FONT curves styled, 11
+  shadows). Live-verified in blenderplayer: green "Eileen" (Filmic
+  ~(189,196,188)), extrude side faces, shadow rim +4px right/+3px below;
+  smoke walkthrough green. Bake-tool import trap documented (regular
+  package beats earlier namespace portion — fixed by spec_from_file_location).
+  375 passed / 16 skipped.
+
 # Current Status — 2026-09-10 (M26b: sprite textures work at runtime, branch feat/desktop-gui)
 
 ## Last completed
@@ -27,6 +59,22 @@
   bricks + game properties. Live-verified in the player on llvmpipe:
   auto mode renders PNG sprites with transparency + full-width backgrounds;
   color mode unchanged; converted Ren'Py project still plays. 295 tests.
+
+# Current Status — 2026-09-14 (M26i: stylized colored 3D text, main, v0.6.16)
+
+## Last completed
+- **M26i (main, v0.6.16)**: real typeface (DejaVu Book/Bold in
+  blend/fonts/, shipped in the add-on zip), extrude 0.16 + bevel 0.035,
+  rewind italic shear 0.18, dark drop-shadow twins for speaker/dialogue/
+  choices, and Character(color=...) speaker-name tint via obj.color —
+  end to end: contract constants + style_font_curve, world_ui
+  parse/build/apply, frontend heartbeat colors, headless stills, addon
+  Setup Scene, idempotent template bake (all 24 FONT curves styled, 11
+  shadows). Live-verified in blenderplayer: green "Eileen" (Filmic
+  ~(189,196,188)), extrude side faces, shadow rim +4px right/+3px below;
+  smoke walkthrough green. Bake-tool import trap documented (regular
+  package beats earlier namespace portion — fixed by spec_from_file_location).
+  375 passed / 16 skipped.
 
 # Current Status — 2026-09-10 (M26 Desktop GUI verification DONE, branch feat/desktop-gui)
 
@@ -48,6 +96,22 @@
   Evidence: examples/20_smoke_game/evidence/m26_*.png, screenshots/m26/*.
   Embedded P in-editor works but needs ~1.6 GB RSS (OOM below that in the
   2 GB sandbox; standalone player is the lean path here).
+
+# Current Status — 2026-09-14 (M26i: stylized colored 3D text, main, v0.6.16)
+
+## Last completed
+- **M26i (main, v0.6.16)**: real typeface (DejaVu Book/Bold in
+  blend/fonts/, shipped in the add-on zip), extrude 0.16 + bevel 0.035,
+  rewind italic shear 0.18, dark drop-shadow twins for speaker/dialogue/
+  choices, and Character(color=...) speaker-name tint via obj.color —
+  end to end: contract constants + style_font_curve, world_ui
+  parse/build/apply, frontend heartbeat colors, headless stills, addon
+  Setup Scene, idempotent template bake (all 24 FONT curves styled, 11
+  shadows). Live-verified in blenderplayer: green "Eileen" (Filmic
+  ~(189,196,188)), extrude side faces, shadow rim +4px right/+3px below;
+  smoke walkthrough green. Bake-tool import trap documented (regular
+  package beats earlier namespace portion — fixed by spec_from_file_location).
+  375 passed / 16 skipped.
 
 # Current Status — 2026-09-10 (M25 Usability Stabilization Freeze DONE)
 

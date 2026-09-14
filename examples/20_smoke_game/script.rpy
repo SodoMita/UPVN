@@ -2,7 +2,7 @@
 # The one script every release must pass: dialogue, sprites, choices,
 # save/load, rollback, quit. Intentionally plain — no fancy syntax.
 
-define e = Character("Eileen")
+define e = Character("Eileen", color="#c8ffc8")
 
 default route = "none"
 
