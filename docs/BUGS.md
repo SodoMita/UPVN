@@ -145,3 +145,60 @@ python3 tools/desktop_qa.py wheel up 2                        # mouse-wheel rewi
 * A screenshot is not the state at the instant of the heartbeat write; under
   llvmpipe it can be a frame behind. `tools/desktop_qa.py --shot` is advisory —
   assert on the heartbeat, then take a second shot.
+
+## BUG-M26h-010 — the M27 operator test was testing the wrong code
+
+* `tests/test_m27_gui_addon_operators.py` did a bare
+  `import upvn_editor_addon` after `sys.path.insert`. When an add-on with
+  that module name is already enabled in `~/.config` (auto-imported and
+  registered at startup), the bare import returns the STALE module from
+  `sys.modules` — the test then exercised the OLD code, and the stale
+  module's no-purge `register()` aborted at the first already-registered
+  class ("already registered as a subclass 'UPVN_Prefs'") while the
+  startup-registered operators kept answering `bpy.ops`, masking it.
+* Fix: the test now pops the stale entry and loads the repo file explicitly
+  (`importlib.util.spec_from_file_location`); the merged add-on's
+  `_purge_stale_registrations` then clears the stale RNA classes by name.
+* Also: `report({'ERROR'})` RAISES `RuntimeError` through a `bpy.ops` call
+  in `--background` — an operator that returns `{'FINISHED'}` with an ERROR
+  report still aborts the caller. The M27 test therefore needs Pillow
+  actually visible to the UPBGE python (see BUG-M26h-012).
+
+## BUG-M26h-011 — binary test errored instead of skipping without /opt/upbge
+
+* `test_template_carries_texture_graph_and_uvs` hardcoded
+  `/opt/upbge/.../blender` with no skip guard: on any machine without that
+  path the suite FAILED (FileNotFoundError from posix_spawn) instead of
+  skipping like every other binary test. Guard added (same pattern as
+  `test_m26g_addon_live_update`).
+
+## BUG-M26h-012 — "Install Pillow" was impossible on the official UPBGE 0.50 tarball
+
+* The operator looked for a bundled python *binary*
+  (`<upbge>/5.0/python/bin/python3.11`). The official linux tarball ships
+  Python as a LIB ONLY (`5.0/python/lib/python3.11/`, no `bin/`) — so the
+  button could only report "Bundled Python of UPBGE not found", and both it
+  and `_pil_probe`'s error suggested running a pip that does not exist.
+* Fix: fall back to the HOST `python3` cross-installing into the running
+  interpreter's `purelib` with `--python-version 3.11 --only-binary=:all:`.
+  A plain `pip install --target` here is a TRAP: pip resolves wheels for
+  the HOST abi (cp313), so `import PIL` works but `from PIL import Image`
+  dies on `_imaging` — the flags are load-bearing.
+* Verified live in the editor session: op FINISHED, `pil_live_available()`
+  True in the SAME session (no restart — `_pil_probe` re-imports).
+
+## BUG-M26h-013 — driving a live editor: three timer/handler mechanisms that silently do nothing
+
+* In the UPBGE 0.50 GUI: `bpy.app.timers` registered from a `--python`
+  startup script never fire (no window exists yet); `load_post` does not
+  fire for the CLI file argument; a modal operator's `event_timer_add`
+  started at script time never sees TIMER events. All three fail SILENTLY.
+* Working mechanism: a `SpaceView3D` POST_PIXEL draw handler polls a JSONL
+  command queue on every viewport redraw; force redraws with harmless
+  numpad view keys. Shipped as `tools/editor_queue_driver.py` +
+  `tools/editor_drive.sh` (which auto-sources the desktop env — a fresh
+  shell has no DISPLAY and `xdotool` errors were being swallowed by
+  `2>/dev/null`, leaving commands sitting in the queue).
+* Related signature: while the embedded game runs (P), the editor does NOT
+  redraw at all — the game owns the window. Read `UPVN_HEARTBEAT` for game
+  state instead of waiting for editor redraws.
