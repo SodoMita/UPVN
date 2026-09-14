@@ -33,6 +33,14 @@ to main contains everything. Resolution highlights and follow-up fixes:
   walkthrough all states green incl. M26d backlog/rewind; editor round:
   all operators FINISHED, Wiring 29/29, P → start → menu → "Ask her
   chosen." → Esc → editor alive (screenshots/consolidation/).
+- Live-update UI path verified in a real editor session (M26h): file
+  replaced on disk (0.6.15 -> 0.6.99), `upvn.reload_addon` clicked ->
+  version property reports 0.6.99, check_engine/check_wiring still
+  FINISHED, UPVN_Prefs + panel + addon-enable intact. The background path
+  was already test-covered; the timer-deferred UI path now is too.
+- QA driver shipped as tools/editor_queue_driver.py + editor_drive.sh
+  (draw-handler queue pump; survives sandbox resets now). BUGS.md
+  BUG-M26h-010..013 document this round's finds.
 - QA driver note: in the UPBGE 0.50 GUI, bpy.app.timers registered from a
   --python startup script never pump (window does not exist yet) and
   load_post does not fire for the CLI file argument — a SpaceView3D
