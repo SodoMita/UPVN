@@ -697,6 +697,10 @@ def main(cont=None):
                 # the rewind/history counters a harness needs to assert on.
                 "speaker": _payload.get("speaker"),
                 "dialogue": _payload.get("dialogue"),
+                # M26i: speaking Character color (float RGBA) + the speaker
+                # object's ACTUAL tint — payload vs scene ground truth.
+                "speaker_color": (list(_payload.get("speaker_color"))
+                                  if _payload.get("speaker_color") else None),
                 "dialogue_visible": bool(_payload.get("dialogue_visible")),
                 "history": len(getattr(_st, "history", []) or []),
                 "history_open": bool(_sm and _sm.is_overlay_visible("history"))
@@ -727,6 +731,12 @@ def main(cont=None):
                             _hb_data[_k + "_scale"] = [round(float(v), 4) for v in _bo.scale]
                             _hb_data[_k + "_font"] = round(float(getattr(_d, "size", 1.0)), 4) if _d is not None else None
                             _hb_data[_k + "_wpos"] = [round(float(v), 3) for v in _bo.location]
+                            # M26i: what the object is actually tinted with
+                            # (colored speaker / dark shadows assertions).
+                            try:
+                                _hb_data[_k + "_color"] = [round(float(c), 3) for c in _bo.color]
+                            except Exception:
+                                pass
                             # dims==0 with a non-empty body = the curve produced
                             # no geometry (invisible text, no error anywhere)
                             _hb_data[_k + "_dim"] = [round(float(v), 3) for v in _bo.dimensions]
