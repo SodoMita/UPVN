@@ -9,6 +9,7 @@ from __future__ import annotations
 import importlib.util
 import os
 import subprocess
+import re
 import sys
 import tempfile
 import zipfile
@@ -121,7 +122,12 @@ def test_m17_package_addon_zip_single_folder():
         assert "engine/script/parser.py" not in names          # no zip-root dup
         assert "bge_frontend/frontend.py" not in names
         assert not any(n.endswith(".pyc") for n in names)
-        assert "upvn_editor_addon_v0.6.15.zip" in zpath.name
+        # version-agnostic: the zip must be named after the addon's CURRENT
+        # bl_info version (hardcoding broke on every bump)
+        _vm = re.search(r'"version":\s*\(([^)]*)\)',
+                        ADDON_SRC.read_text(encoding="utf-8"))
+        _v = ".".join(x.strip() for x in _vm.group(1).split(","))
+        assert zpath.name == f"upvn_editor_addon_v{_v}.zip"
 
         # simulate Blender's UI install: extract into a fake addons dir
         addons_dir = Path(td) / "addons"
