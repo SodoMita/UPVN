@@ -33,11 +33,18 @@ ADDON_SRC = REPO / "blend" / "upvn_editor_addon.py"
 
 def _latest_addon_zip() -> Path:
     """Newest dist zip - the live-update flow must test what we actually SHIP
-    (a hardcoded v0.6.15 path meant every version bump broke this test)."""
-    zips = sorted((REPO / "dist").glob("upvn_editor_addon_v*.zip"),
-                  key=lambda p: tuple(int(x) for x in
-                                      re.findall(r"\d+", p.stem)[-3:]))
-    assert zips, "no addon zip in dist/ - run tools/package_addon.py"
+    (a hardcoded v0.6.15 path meant every version bump broke this test).
+    Self-healing: dist/ is ephemeral in some sandboxes (snapshot exclusion),
+    so rebuild the zip from source when it is missing."""
+    def _glob():
+        return sorted((REPO / "dist").glob("upvn_editor_addon_v*.zip"),
+                      key=lambda p: tuple(int(x) for x in
+                                          re.findall(r"\d+", p.stem)[-3:]))
+    if not _glob():
+        import tools.package_addon as pkg
+        pkg.build_addon_zip(REPO / "dist", with_template=True)
+    zips = _glob()
+    assert zips, "no addon zip in dist/ even after rebuild"
     return zips[-1]
 
 
