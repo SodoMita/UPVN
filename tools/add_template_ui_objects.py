@@ -149,7 +149,8 @@ def _ghost(ob):
         pass
 
 
-def ensure_font(scene, name, loc, em):
+def ensure_font(scene, name, loc, em, bold=False, shear=None, shadow=None,
+                shadow_color=(0.02, 0.03, 0.08, 1.0)):
     import bpy
     ob = bpy.data.objects.get(name)
     if ob is None:
@@ -181,6 +182,46 @@ def ensure_font(scene, name, loc, em):
             except Exception:
                 pass
         _ghost(ob)
+    # M26i (always, also on EXISTING objects — this tool exists to repair
+    # older templates): real typeface + extrude/bevel, optional italic shear.
+    # Only NOTE (and thereby save) when something actually changed — the
+    # tool's idempotence contract: a second run must report CLEAN.
+    try:
+        # Load the REPO's contract module BY FILE PATH: an enabled add-on
+        # snapshot in ~/.config bundles its own engine/ as a REGULAR package
+        # while this repo's engine/ is a namespace package — and a regular
+        # package found ANYWHERE on sys.path beats earlier namespace
+        # portions, so no sys.path ordering can select the repo copy
+        # (measured: import engine resolved to ~/.config with the repo at
+        # sys.path[0]). Explicit loading ignores all of that.
+        import importlib.util as _ilu, pathlib as _pl
+        _root = _pl.Path(__file__).resolve().parents[1]
+        _spec = _ilu.spec_from_file_location(
+            "_upvn_bake_contract", str(_root / "engine" / "render" / "contract.py"))
+        _contract = _ilu.module_from_spec(_spec)
+        _spec.loader.exec_module(_contract)
+        style_font_curve = _contract.style_font_curve
+        d = ob.data
+        before = (getattr(d, "font", None), getattr(d, "extrude", None),
+                  getattr(d, "bevel_depth", None), getattr(d, "shear", None))
+        style_font_curve(d, bold=bold, shear=shear)
+        after = (getattr(d, "font", None), getattr(d, "extrude", None),
+                 getattr(d, "bevel_depth", None), getattr(d, "shear", None))
+        if before != after:
+            _note("styled", name)
+    except Exception:
+        pass
+    # drop-shadow twin: create when missing, then ALWAYS style + tint it
+    # (a shadow authored before M26i must be repaired exactly like its main)
+    if shadow is not None:
+        created = bpy.data.objects.get(shadow) is None
+        sh = ensure_font(scene, shadow, loc, em)
+        try:
+            _tint(sh, shadow_color)
+            if created:
+                _note("shadow", shadow)
+        except Exception:
+            pass
     return ob
 
 
@@ -192,10 +233,23 @@ def main():
     # this tool is repairing templates authored by an earlier version (wrong
     # mesh size, missing tint) — both are invisible failures in the player.
     ensure_plane(scene, HISTORY_PLANE, (0.03, 0.04, 0.09, 1.0))
-    for name, loc, em in ((HISTORY_TEXT, (-6.0, -0.5, 3.4), 0.20),
-                          (REWIND_TEXT, (-6.0, -0.5, 4.4), 0.17)):
-        ob = ensure_font(scene, name, loc, em)
+    for name, loc, em, kw in ((HISTORY_TEXT, (-6.0, -0.5, 3.4), 0.20, {}),
+                              (REWIND_TEXT, (-6.0, -0.5, 4.4), 0.17,
+                               {"shear": 0.18})):
+        ob = ensure_font(scene, name, loc, em, **kw)
         _tint(ob, (0.92, 0.93, 1.0, 1.0))
+    # M26i: style the dialogue/choice text too (bold speaker + choice labels,
+    # regular body) and make sure the drop-shadow twins exist — this is the
+    # repair path for every template authored before M26i.
+    for name, loc, em, kw in (("Speaker_Text", (-3.6, -0.55, -2.55), 0.28,
+                               {"bold": True, "shadow": "Speaker_Shadow"}),
+                              ("Dialogue_Text", (-3.6, -0.55, -3.15), 0.26,
+                               {"shadow": "Dialogue_Shadow"})):
+        ensure_font(scene, name, loc, em, **kw)
+    for i in range(9):
+        loc = (0.0 - 2.8, -0.55, 2.4 - i * 0.7 + 0.08)
+        ensure_font(scene, f"choice_{i}_text", loc, 0.24, bold=True,
+                   shadow=f"choice_{i}_shadow")
     if _CHANGES:
         print("UPVN_UI_OBJECTS_CHANGED " + ",".join(_CHANGES))
     else:
