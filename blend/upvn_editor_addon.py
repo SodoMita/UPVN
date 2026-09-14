@@ -1368,14 +1368,26 @@ except Exception:
             _tint(ob, (0.92, 0.93, 1.0, 1.0))
             _static_ghost(ob)
             # M26i drop-shadow twin: same text every frame (world_ui writes
-            # it), fixed dark tint, offset behind the main object.
-            if shadow is not None and scene.objects.get(shadow) is None:
-                sh = _data_text(shadow, body="", size=size, loc=loc, rot=PLANE_ROTATION)
-                scene.collection.objects.link(sh)
-                collections["VN_UI"].objects.link(sh)
+            # it), fixed dark tint, offset behind the main object. Created
+            # when missing and REPAIRED when pre-existing (a pre-M26i
+            # shadow must get the typeface like its main — same rule as the
+            # bake tool).
+            if shadow is not None:
+                created = scene.objects.get(shadow) is None
+                sh = scene.objects.get(shadow)
+                if sh is None:
+                    sh = _data_text(shadow, body="", size=size, loc=loc,
+                                    rot=PLANE_ROTATION)
+                    scene.collection.objects.link(sh)
+                    collections["VN_UI"].objects.link(sh)
                 try:
                     if not sh.data.materials:
                         sh.data.materials.append(mat_font)
+                except Exception:
+                    pass
+                try:
+                    from engine.render.contract import style_font_curve
+                    style_font_curve(sh.data, bold=False, shear=None)
                 except Exception:
                     pass
                 _tint(sh, (0.02, 0.03, 0.08, 1.0))
