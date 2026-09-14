@@ -45,7 +45,7 @@ Headless fallback: when bpy unavailable (CI), the module still imports and expos
 bl_info = {
     "name": "UPVN — Visual Novel Editor",
     "author": "UPVN",
-    "version": (0, 6, 15),
+    "version": (0, 6, 16),
     "blender": (4, 2, 0),
     "location": "View3D > Sidebar > UPVN, Text Editor > Sidebar > UPVN",
     "description": "Create Ren'Py-like visual novel inside UPBGE with minimal coding — self-contained engine, one-click scene setup, characters, scenes, dialogue, menus, arbitrary saves, preview",
@@ -1342,7 +1342,8 @@ except Exception:
             DIALOGUE_TEXT_LOCATION = (-3.6, -0.55, -3.15)
             CHOICE_COUNT, CHOICE_PREFIX = 9, "choice_"
 
-        def _ensure_font(name, loc, size=0.32):
+        def _ensure_font(name, loc, size=0.32, bold=False, shear=None,
+                         shadow=None):
             ob = scene.objects.get(name)
             if ob is None:
                 ob = _data_text(name, body="", size=size, loc=loc, rot=PLANE_ROTATION)
@@ -1356,12 +1357,37 @@ except Exception:
                     ob.data.materials.append(mat_font)
             except Exception:
                 pass
+            # M26i: real typeface + extrude/bevel 3D shape (baked into the
+            # .blend; the player only reads the data). Degrades to the
+            # current font when no TTF is found.
+            try:
+                from engine.render.contract import style_font_curve
+                style_font_curve(ob.data, bold=bold, shear=shear)
+            except Exception:
+                pass
             _tint(ob, (0.92, 0.93, 1.0, 1.0))
             _static_ghost(ob)
+            # M26i drop-shadow twin: same text every frame (world_ui writes
+            # it), fixed dark tint, offset behind the main object.
+            if shadow is not None and scene.objects.get(shadow) is None:
+                sh = _data_text(shadow, body="", size=size, loc=loc, rot=PLANE_ROTATION)
+                scene.collection.objects.link(sh)
+                collections["VN_UI"].objects.link(sh)
+                try:
+                    if not sh.data.materials:
+                        sh.data.materials.append(mat_font)
+                except Exception:
+                    pass
+                _tint(sh, (0.02, 0.03, 0.08, 1.0))
+                _static_ghost(sh)
             return ob
 
-        _ensure_font(SPEAKER_TEXT, SPEAKER_LOCATION, size=0.28)
-        _ensure_font(DIALOGUE_TEXT, DIALOGUE_TEXT_LOCATION, size=0.26)
+        # M26i: bold speaker name + colored at runtime by Character color;
+        # body text regular. Both get drop-shadow twins.
+        _ensure_font(SPEAKER_TEXT, SPEAKER_LOCATION, size=0.28, bold=True,
+                     shadow="Speaker_Shadow")
+        _ensure_font(DIALOGUE_TEXT, DIALOGUE_TEXT_LOCATION, size=0.26,
+                     shadow="Dialogue_Shadow")
 
         # --- backlog + rewind objects (M26d) ---------------------------------
         # engine/ui/world_ui.py writes these when H is pressed / the player is
@@ -1391,7 +1417,9 @@ except Exception:
             # no-op in UPBGE 0.50).
         # FONT text grows down from its origin → anchor at the panel top
         _ensure_font(HISTORY_TEXT, (-6.0, -0.5, 3.4), size=0.20)
-        _ensure_font(REWIND_TEXT, (-6.0, -0.5, 4.4), size=0.17)
+        # M26i: the rewind marker leans (shear) — visually distinct from
+        # ordinary dialogue lines, like Ren'Py's italic rollback notice.
+        _ensure_font(REWIND_TEXT, (-6.0, -0.5, 4.4), size=0.17, shear=0.18)
 
         for i in range(CHOICE_COUNT):
             z = 2.4 - i * 0.7
@@ -1408,7 +1436,10 @@ except Exception:
                 _tint(ch, (0.12, 0.18, 0.32, 1.0))
                 _static_ghost(ch)
                 tname = cname + "_text"
-                _ensure_font(tname, (loc[0] - 2.8, loc[1] - 0.05, loc[2] + 0.08), size=0.24)
+                # M26i: choice labels bold (numbers read faster) + shadow
+                _ensure_font(tname, (loc[0] - 2.8, loc[1] - 0.05, loc[2] + 0.08),
+                             size=0.24, bold=True,
+                             shadow=cname + "_shadow")
             except Exception as exc:
                 print(f"[UPVN] choice {cname} create failed: {exc}")
 

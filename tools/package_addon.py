@@ -109,10 +109,19 @@ def build_addon_zip(out_path: pathlib.Path, with_template: bool = True):
                 shutil.copytree(src, addon_dir / tree, ignore=IGNORED)
                 _inject_init(addon_dir / tree)
 
-        # 3) template + license + readme
+        # 3) template + fonts + license + readme
         if with_template and BLEND_SRC.exists():
             (addon_dir / "blend").mkdir(parents=True, exist_ok=True)
             shutil.copy2(BLEND_SRC, addon_dir / "blend" / "UPVN_Template.blend")
+        # M26i: the UI typefaces travel with the add-on so Setup Scene can
+        # bake DejaVu into any .blend without depending on host fonts (the
+        # .blend embeds the font afterwards, so the game itself needs nothing).
+        fonts_src = ROOT / "blend" / "fonts"
+        if fonts_src.is_dir():
+            (addon_dir / "blend" / "fonts").mkdir(parents=True, exist_ok=True)
+            for f in fonts_src.iterdir():
+                if f.is_file():
+                    shutil.copy2(f, addon_dir / "blend" / "fonts" / f.name)
         shutil.copy2(LICENSE_SRC, addon_dir / "LICENSE")
         readme = (
             "UPVN editor add-on v%s — self-contained install zip\n"
