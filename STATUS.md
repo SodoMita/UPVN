@@ -300,3 +300,14 @@ Pillow-on-lib-only-tarball).
   Pillow-on-lib-only-tarball, editor-driving mechanisms).
 - Sandbox reset survived: remote re-added, exec bits + dist zip restored,
   desktop stack re-bootstrapped from tools/desktop_sway.sh alone.
+
+## M26i — merged to MAIN (2026-09-14)
+
+- The consolidated desktop-gui lineage is on `main`: PR #2 brought
+  d98a04a, direct merge f7a5740 added the four follow-up commits (QA
+  driver tools, live-reload UI verification, Pillow-optional M27 test,
+  screenshot mkdir + README zip refresh). `agent/desktop-gui-run-fixes`
+  fast-forwarded to match.
+- Fresh-clone verification of main: suite 366 passed / 16 skipped,
+  tools/package_addon.py builds the zip from a clean tree, exec bits
+  intact, addon v0.6.15.
