@@ -88,6 +88,19 @@ else:
         except RuntimeError as _e:
             assert "Pillow" in str(_e) or "PIL" in str(_e), (_op, _e)
 
+# M26i: Setup Scene must leave REAL styled type behind (not just FINISHED)
+_fonts = [o for o in bpy.data.objects if o.type == "FONT"]
+_unstyled = [o.name for o in _fonts
+             if o.data.font is None or o.data.font.name == "Bfont Regular"
+             or o.data.extrude <= 0 or o.data.bevel_depth <= 0]
+_shadows = [o for o in _fonts if "hadow" in o.name]
+_rw = bpy.data.objects.get("Rewind_Text")
+print("SETUP_FONTS", len(_fonts), "unstyled:", _unstyled)
+print("SETUP_SHADOWS", len(_shadows))
+print("SETUP_REWIND_SHEAR", round(_rw.data.shear, 3) if _rw else "missing")
+assert not _unstyled, _unstyled
+assert len(_shadows) >= 11, len(_shadows)
+assert _rw and abs(_rw.data.shear - 0.18) < 0.01
 print("ALL_OPERATORS_SUCCESS")
 """
 
@@ -99,6 +112,10 @@ print("ALL_OPERATORS_SUCCESS")
     )
 
     assert "ALL_OPERATORS_SUCCESS" in res.stdout, f"Addon operators failed:\nSTDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}"
+    assert "SETUP_FONTS" in res.stdout and "unstyled: []" in res.stdout, (
+        "Setup Scene left unstyled fonts:\n" + res.stdout[-1500:])
+    assert "SETUP_SHADOWS 11" in res.stdout, res.stdout[-800:]
+    assert "SETUP_REWIND_SHEAR 0.18" in res.stdout, res.stdout[-800:]
 
     # Verify script content
     assert test_script_path.exists()
