@@ -5,11 +5,11 @@ Reproduces the user-visible bug: installing a new addon version over a
 running UPBGE used to need uninstall + restart (register() aborted on the
 first already-registered class, so the new code never bound). Locked in:
 1. enable OLD 0.6.14 (from git HEAD before this change) in a live session;
-2. install the NEW 0.6.15 zip over it (operator flow when the background
+2. install the NEW shipped zip over it (operator flow when the background
    context allows it, else Blender's install semantics replicated: disable →
    replace files → modules_refresh → enable);
 3. WITHOUT any restart: the new code must be live — `Scene.upvn_addon_version`
-   reports 0.6.15 (0.6.14 had no such property at all) and the new operator
+   reports the new version (0.6.14 had no such property at all) and the new operator
    class exists;
 4. the `upvn.reload_addon` operator applies a file-replaced update
    (bl_info bumped to 0.6.99 on disk) in the same session.
@@ -22,12 +22,34 @@ import tempfile
 import zipfile
 from pathlib import Path
 
+import re
+
 import pytest
 
 REPO = Path(__file__).resolve().parents[1]
 BIN = Path("/opt/upbge/upbge-0.50-linux-x64/blender")
 ADDON_SRC = REPO / "blend" / "upvn_editor_addon.py"
-ZIP15 = REPO / "dist" / "upvn_editor_addon_v0.6.15.zip"
+
+
+def _latest_addon_zip() -> Path:
+    """Newest dist zip - the live-update flow must test what we actually SHIP
+    (a hardcoded v0.6.15 path meant every version bump broke this test)."""
+    zips = sorted((REPO / "dist").glob("upvn_editor_addon_v*.zip"),
+                  key=lambda p: tuple(int(x) for x in
+                                      re.findall(r"\d+", p.stem)[-3:]))
+    assert zips, "no addon zip in dist/ - run tools/package_addon.py"
+    return zips[-1]
+
+
+def _addon_version():
+    """The "0.6.16" and "(0, 6, 16)" forms of the addon bl_info version."""
+    m = re.search(r'"version":\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)',
+                  ADDON_SRC.read_text(encoding="utf-8"))
+    assert m, "no bl_info version in the addon source"
+    return ".".join(m.groups()), "(" + ", ".join(m.groups()) + ")"
+
+
+ZIP15 = _latest_addon_zip()   # kept name: the "NEW" zip installed over the old
 
 HAVE_BIN = BIN.exists()
 pytestmark = pytest.mark.skipif(not HAVE_BIN, reason="UPBGE binary not present")
@@ -59,8 +81,9 @@ def enable(name):
 
 # ---------- 1) OLD 0.6.14 (as committed before M26g) ----------
 # argv (after --): [old_addon.py, new_zip]
-old_src = open(sys.argv[-2], encoding="utf-8").read()  # old addon via argv
-ZIP15 = sys.argv[-1]
+old_src = open(sys.argv[-3], encoding="utf-8").read()  # old addon via argv
+ZIP15 = sys.argv[-2]
+NEW_VER = sys.argv[-1]
 assert '"version": (0, 6, 14)' in old_src, "old fixture must be 0.6.14"
 assert zipfile.is_zipfile(ZIP15), ZIP15
 mod_dir = os.path.join(addons_dir(), "upvn_editor_addon")
@@ -106,8 +129,8 @@ print("STEP3 blinfo_version:", bl.get("version"))
 ver = getattr(bpy.context.scene, "upvn_addon_version", "<missing>")
 print("STEP3 live_version_prop:", ver)
 print("STEP3 reload_op_exists:", hasattr(bpy.types, "UPVN_OT_reload_addon"))
-assert bl.get("version") == (0, 6, 15), bl
-assert ver == "0.6.15", f"live version prop wrong after update: {ver}"
+assert bl.get("version") == tuple(int(x) for x in NEW_VER.split(".")), bl
+assert ver == NEW_VER, f"live version prop wrong after update: {ver}"
 assert hasattr(bpy.types, "UPVN_OT_reload_addon")
 
 # registration integrity: an existing operator is still invocable (poll ok)
@@ -117,7 +140,9 @@ assert res == {'FINISHED'}
 
 # ---------- 4) the reload operator applies a file-replaced update ----------
 src = open(os.path.join(mod_dir, "__init__.py"), encoding="utf-8").read()
-src99 = src.replace('"version": (0, 6, 15),', '"version": (0, 6, 99),')
+import re as _re99
+src99 = _re99.sub(r'"version":\s*\(\s*\d+,\s*\d+,\s*\d+\s*\),',
+                  '"version": (0, 6, 99),', src)   # bump-safe on-disk update
 assert src99 != src
 p99 = os.path.join(mod_dir, "__init__.py")
 open(p99, "w", encoding="utf-8").write(src99)
@@ -152,7 +177,8 @@ def session(tmp_path_factory):
            "XDG_CONFIG_HOME": str(home / ".config")}
     proc = subprocess.run(
         [str(BIN), "--background", "--factory-startup", "--python",
-         str(session_py), "--", str(old_py), str(ZIP15)],
+         str(session_py), "--", str(old_py), str(ZIP15),
+         _addon_version()[0]],
         capture_output=True, text=True, timeout=900, env=env)
     out = proc.stdout
     steps = {}
@@ -172,13 +198,14 @@ def test_session_runs(session):
 
 
 def test_update_over_running_install(session):
-    """The 0.6.15 zip installed OVER a live 0.6.14 session must activate the
-    new code with NO restart (version prop + new operator class)."""
+    """The current shipped zip installed OVER a live 0.6.14 session must
+    activate the new code with NO restart (version prop + new operator)."""
     _, out, steps = session
+    ver_dot, ver_tuple = _addon_version()
     assert steps["STEP1 has_version_prop"] == "False"
-    assert steps["STEP3 live_version_prop"] == "0.6.15", out[-2000:]
+    assert steps["STEP3 live_version_prop"] == ver_dot, out[-2000:]
     assert steps["STEP3 reload_op_exists"] == "True"
-    assert steps["STEP3 blinfo_version"] == "(0, 6, 15)"
+    assert steps["STEP3 blinfo_version"] == ver_tuple
 
 
 def test_install_path_reported(session):
@@ -207,5 +234,6 @@ def test_register_purges_before_binding():
         "for cls in classes:"), (
         "register() must purge stale registrations before binding")
     assert "upvn_addon_version" in body
-    assert '"version": (0, 6, 15)' in src
+    _vm = re.search(r'"version":\s*\((\d+), (\d+), (\d+)\)', src)
+    assert _vm and _vm.group(0) in src  # bl_info version present (bump-safe)
     assert "upvn.reload_addon" in src
