@@ -34,6 +34,14 @@
 #   /opt/upbge/.../blender --window-geometry 0 0 1280 720 \
 #       --python tools/editor_queue_driver.py blend/UPVN_Template.blend
 #   tools/editor_drive.sh '{"id":"v","op":"eval","kwargs":{"expr":"1+1"}}'
+#
+# GOTCHA (M26i live run): on a FRESH editor start the SPLASH SCREEN owns
+# the input — the driver installs and the startup heartbeat ticks a few
+# times, then everything freezes (keys go to the splash, no viewport
+# redraws, queue never drains). Dismiss it right after launch:
+#   sleep 6 && DISPLAY=:0 xdotool mousemove 640 400 click 1
+# (then optionally xdotool key Escape). Cheap insurance even when the
+# splash is already gone — a viewport click is harmless.
 import bpy
 import json
 import os
