@@ -287,3 +287,16 @@ incl. M26d backlog+rewind; live editor round green (all ops, wiring
 screenshots/consolidation/). See CHANGELOG 0.6.15 (cont.) for the merge
 decisions and the three follow-up fixes (test import, skip guard,
 Pillow-on-lib-only-tarball).
+
+### M26h addendum (same day, second round)
+
+- Live-update UI path of `upvn.reload_addon` verified in the running
+  editor (0.6.15 -> 0.6.99 via on-disk edit + click; operators + prefs +
+  panel intact after). Was the only untested M26g path.
+- QA driver committed: tools/editor_queue_driver.py + tools/editor_drive.sh
+  (draw-handler pump; the three silently-dead timer/handler mechanisms are
+  documented in the header and BUG-M26h-013).
+- BUGS.md BUG-M26h-010..013 (stale-module test import, missing skip guard,
+  Pillow-on-lib-only-tarball, editor-driving mechanisms).
+- Sandbox reset survived: remote re-added, exec bits + dist zip restored,
+  desktop stack re-bootstrapped from tools/desktop_sway.sh alone.

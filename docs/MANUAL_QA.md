@@ -14,6 +14,13 @@ twin: `tools/smoke_walkthrough.sh` (self-verifying, retry-until-state).
 - [ ] `pytest tests/ -q` green (366 passed / 16 skipped after the
       desktop-gui consolidation merge; binary tests need /opt/upbge —
       otherwise they skip).
+- [ ] Driving the live editor (blind-agent QA):
+      `blender --window-geometry 0 0 1280 720 --python
+      tools/editor_queue_driver.py blend/UPVN_Template.blend`, then
+      `tools/editor_drive.sh '<json cmd>'`. The editor only redraws on
+      interaction — drive.sh forces it with numpad view keys. See the
+      driver file header for the quirks (bpy.app.timers / load_post /
+      embedded-game-owns-the-window).
 - [ ] `bash tools/desktop_sway.sh` (bootstrap: sway + UPBGE + 3 GB swap) and
       `source /tmp/wl-upvn/env.sh`. After a sandbox reprovision this is the
       FIRST thing to re-run: apt packages, `/opt/upbge`, the swapfile and
@@ -38,6 +45,13 @@ twin: `tools/smoke_walkthrough.sh` (self-verifying, retry-until-state).
 - [ ] Install Pillow → Preview renders `screenshots/upvn_preview.png`.
 - [ ] Press P: game plays inside the editor; Space/menu/digits work; Esc
       returns to the editor (needs swap on small hosts).
+- [ ] **Live update (no restart)**: with the editor running, edit the
+      installed `~/.config/upbge/5.0/scripts/addons/upvn_editor_addon/__init__.py`
+      (e.g. bump `"version"`), wait >1 s (stale .pyc guard), then click
+      **Apply Update (reload add-on)** — `bpy.context.scene.upvn_addon_version`
+      must report the new version and operators must stay FINISHED.
+      Verified live in M26h (0.6.15 → 0.6.99 in-session; prefs class, panel
+      and addon-enable intact afterwards).
 - [ ] **Old .blend files** (any file baked before the backlog existed) need the
       three UI objects added, or the overlay has nothing to draw into:
 

@@ -40,7 +40,7 @@ Expected: all 4 examples + *The Question* parse and trace cleanly. No YAML.
 1. Extract `~/upbge-0.50-linux-x64.tar.xz`
 2. **Install the add-on (v0.6.8+, one file — engine is bundled):**
    Edit → Preferences → Add-ons → **Install from Disk…** (older UI: Install…) → select
-   `dist/upvn_editor_addon_v0.6.13.zip` (or the raw `blend/upvn_editor_addon.py` when
+   `dist/upvn_editor_addon_v0.6.15.zip` (or the raw `blend/upvn_editor_addon.py` when
    working from the repo) → enable **"UPVN — Visual Novel Editor"**.
    The UPVN tab (3D View or Text Editor sidebar, `N`) shows **✓ Engine: OK** when ready —
    if it ever shows ✗, press *Locate Engine…* / *Re-check* (or *Copy engine next to add-on*).
