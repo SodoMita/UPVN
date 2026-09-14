@@ -68,6 +68,92 @@ SPEAKER_LOCATION = (-3.6, -0.55, -2.55)
 DIALOGUE_TEXT_LOCATION = (-3.6, -0.55, -3.15)
 SPRITE_SCALE = (1.8, 3.2, 1.0)  # local XY after rot X=90 → world X / Z height
 
+# --- M26i: stylized, colored 3D text ---------------------------------------
+# Typeface + 3D shape + drop shadows for the FONT objects. Blender's built-in
+# Bfont is thin and ugly at UI sizes; DejaVu Sans (blend/fonts/, Bitstream
+# Vera license — redistribution allowed) reads much better on the dialogue
+# band and in the backlog. The extrude+bevel give the glyphs real 3D
+# geometry (visible in the editor viewport); the in-game depth cue is the
+# drop-shadow twin each main text gets (see *_SHADOW below).
+UI_FONT_REGULAR = "DejaVuSans.ttf"
+UI_FONT_BOLD = "DejaVuSans-Bold.ttf"
+TEXT_EXTRUDE = 0.16          # fraction of one em (curve size is normalised to 1.0)
+TEXT_BEVEL = 0.035
+TEXT_BEVEL_RESOLUTION = 2
+REWIND_SHEAR = 0.18          # italic slant for the rewind marker
+# drop-shadow twins: same body every frame, fixed dark color, offset behind.
+# world_ui tolerates them being absent (older .blends) — they are NOT part of
+# the required wiring check on purpose (check_wiring must not fail old files).
+SPEAKER_SHADOW = "Speaker_Shadow"
+DIALOGUE_SHADOW = "Dialogue_Shadow"
+CHOICE_SHADOW_SUFFIX = "_shadow"
+SHADOW_OFFSET = (0.045, 0.04, -0.05)   # x=right, y=behind main text, z=down
+SHADOW_COLOR = (0.02, 0.03, 0.08, 1.0)
+DEFAULT_TEXT_COLOR = (0.92, 0.93, 1.0, 1.0)
+
+
+def find_ui_font(filename: str = UI_FONT_REGULAR):
+    """Locate a UI typeface for BAKING (bpy-capable contexts only).
+
+    Search order: the repo/addon layout (engine/render/ -> up two levels ->
+    blend/fonts/), UPBGE's own datafiles, the system dejavu dir. Returns an
+    absolute path str or None (caller keeps the current font — usually the
+    built-in Bfont — so a missing file degrades instead of failing Setup).
+    """
+    try:
+        from pathlib import Path
+        here = Path(__file__).resolve()
+        cands = [here.parent.parent.parent / "blend" / "fonts" / filename]
+        try:
+            import bpy
+            base = Path(bpy.app.binary_path).resolve().parent
+            cands += [base / "5.0" / "datafiles" / "fonts" / filename,
+                      base / "datafiles" / "fonts" / filename]
+        except Exception:
+            pass
+        cands.append(Path("/usr/share/fonts/truetype/dejavu") / filename)
+        for c in cands:
+            if c.exists():
+                return str(c)
+    except Exception:
+        pass
+    return None
+
+
+def style_font_curve(data, bold: bool = False, shear: float | None = None) -> str:
+    """Apply the M26i text style to a bpy FONT curve: real typeface,
+    extrude+bevel (3D shape), optional italic shear. Safe no-op anywhere:
+    returns a short status for logs ('dejavu' | 'font-not-found' | 'skipped').
+
+    bpy contexts only (Setup Scene / template bake); the PLAYER never calls
+    this — the style is baked into the .blend and survives as data.
+    """
+    if data is None:
+        return "skipped"
+    status = "font-not-found"
+    try:
+        fn = find_ui_font(UI_FONT_BOLD if bold else UI_FONT_REGULAR)
+        if fn:
+            import bpy
+            font = bpy.data.fonts.load(fn, check_existing=True)
+            if font is not None:
+                data.font = font
+                status = "dejavu"
+    except Exception:
+        pass
+    try:
+        data.extrude = TEXT_EXTRUDE
+        data.bevel_depth = TEXT_BEVEL
+        data.bevel_resolution = TEXT_BEVEL_RESOLUTION
+    except Exception:
+        pass
+    if shear is not None:
+        try:
+            data.shear = shear
+        except Exception:
+            pass
+    return status
+
 # UPBGE world positions (X = screen X, Y = depth toward camera, Z = screen Y).
 # Camera_UI at (0,-10,0) looking +Y, ortho_scale=15.
 POSITIONS = {

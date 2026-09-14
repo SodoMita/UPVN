@@ -1,0 +1,6 @@
+DejaVu fonts (https://dejavu-fonts.github.io/), license: Bitstream Vera
+Font License + (c) 2003 Bitstream, Inc. + (c) 2006-2025 the DejaVu project
+contributors. Permission is granted to copy, distribute and modify these
+fonts under the terms of the license — full text at the URL above. The
+copies here ship with the UPVN template so baked .blend files do not depend
+on a font being installed on the host.
