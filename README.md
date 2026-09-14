@@ -67,6 +67,18 @@ Expected: all 4 examples + *The Question* parse and trace cleanly. No YAML.
    (legacy `//game/script.rpy`, `//script.rpy`, `//examples/…` are fallbacks).
 7. Press `P` to play. **Controls:** click / Space / Enter advance; **`1`–`9` pick a menu choice** (in-engine input, no extra wiring); `H` history, `Q` quick menu, `Ctrl+S` save, `Ctrl+L` load (arbitrary slots 1..∞, `←`/`→` page, `Esc` close), `S` skip, `A` auto, mouse wheel rollback, **`F1` console state dump, `F12` in-game screenshot** to `//screenshots/upvn_ingame_*.png` (QA/debug helpers).
 
+## Styled 3D text (M26i)
+
+The UI type is real 3D type, baked into the template and any scene via
+**Setup Scene**: DejaVu Sans (Book + Bold, shipped in `blend/fonts/` and the
+add-on zip — the game itself needs no fonts installed), extrude 0.16 +
+bevel 0.035 for depth, an italic shear on the rewind marker, and dark
+drop-shadow twins behind speaker/dialogue/choices. Speaker names carry the
+character's color (`Character(color="#c8ffc8")` → green "Eileen") in the
+player, headless stills and previews alike; history/rewind stay flat white.
+Old `.blends` without shadows or typefaces still run — the wiring check
+never requires them.
+
 ## Texture-free by default; images opt-in (M26)
 
 The template and every sample scene play **without image textures**: stages
