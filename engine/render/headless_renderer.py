@@ -56,6 +56,18 @@ def hex_rgb(h: str):
     h = h.lstrip("#")
     return tuple(int(h[i:i+2], 16) for i in (0,2,4))
 
+
+def fill_rgb(c, default=(230, 245, 255)):
+    """Normalize a speaker/UI color to a 0-255 fill tuple.
+
+    Interpreter events carry hex strings ("#c8ffc8"); world-UI payloads
+    carry float rgba tuples (parse_hex_color output). Both must paint."""
+    if not c:
+        return default
+    if isinstance(c, str):
+        return hex_rgb(c)
+    return tuple(max(0, min(255, round(v * 255))) for v in c[:3])
+
 # ---------------------------------------------------------------- bg
 def draw_bg(img: Image.Image, draw: ImageDraw.ImageDraw, scene: str | None):
     s = scene or "black"
@@ -354,10 +366,10 @@ def draw_dialogue(img: Image.Image, draw: ImageDraw.ImageDraw, speaker, speaker_
         tw=draw.textlength(speaker, font=F_Name)
         nx,ny=58, box_y0+4
         draw.rounded_rectangle([nx,ny,nx+tw+28,ny+26], radius=13, fill=(18,42,48,255), outline=(0,184,195,110), width=1)
-        draw.ellipse([nx+10,ny+8,nx+20,ny+18], fill=hex_rgb(speaker_color or "#7eeaff"))
+        draw.ellipse([nx+10,ny+8,nx+20,ny+18], fill=fill_rgb(speaker_color, (126, 234, 255)))
         # M26i parity with the 3D world UI: the NAME carries the Character's
         # color there, so it must here too (was neutral white before).
-        draw.text((nx+28,ny+5), speaker, fill=hex_rgb(speaker_color or "#e6f5ff"), font=F_Name)
+        draw.text((nx+28,ny+5), speaker, fill=fill_rgb(speaker_color), font=F_Name)
         text_y=box_y0+44
     else:
         text_y=box_y0+30
@@ -868,7 +880,11 @@ def render_state(state, event, out_path: Path | None = None, transition_alpha: f
         draw_menu(img, draw, event.get("caption"), [c["text"] for c in event.get("choices",[])])
     elif event and event.get("type") == "say":
         speaker = event.get("who_name") or (state.get_character_name(event["who"]) if event.get("who") else None)
-        col = event.get("color") or (state.characters[event["who"]].color if event.get("who") in state.characters else None)
+        # speaker_color = the resolved world-UI payload key; color = the raw
+        # interpreter event key — accept both so either pipeline works
+        col = (event.get("speaker_color") or event.get("color")
+               or (state.characters[event["who"]].color
+                   if event.get("who") in state.characters else None))
         draw_dialogue(img, draw, speaker, col, event.get("text",""))
     elif event and event.get("type") == "pause":
         pass
