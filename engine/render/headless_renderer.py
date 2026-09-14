@@ -355,7 +355,9 @@ def draw_dialogue(img: Image.Image, draw: ImageDraw.ImageDraw, speaker, speaker_
         nx,ny=58, box_y0+4
         draw.rounded_rectangle([nx,ny,nx+tw+28,ny+26], radius=13, fill=(18,42,48,255), outline=(0,184,195,110), width=1)
         draw.ellipse([nx+10,ny+8,nx+20,ny+18], fill=hex_rgb(speaker_color or "#7eeaff"))
-        draw.text((nx+28,ny+5), speaker, fill=(230,245,255), font=F_Name)
+        # M26i parity with the 3D world UI: the NAME carries the Character's
+        # color there, so it must here too (was neutral white before).
+        draw.text((nx+28,ny+5), speaker, fill=hex_rgb(speaker_color or "#e6f5ff"), font=F_Name)
         text_y=box_y0+44
     else:
         text_y=box_y0+30

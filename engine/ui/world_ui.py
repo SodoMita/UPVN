@@ -129,6 +129,7 @@ def build_world_ui(event: Optional[dict], ui_mgr=None, diag=None,
     speaker = ""
     dialogue = ""
     dialogue_on = False
+    speaker_color = None
     if diag:
         speaker = "UPVN"
         dialogue = "\n".join(str(x) for x in list(diag)[:8])
@@ -139,9 +140,11 @@ def build_world_ui(event: Optional[dict], ui_mgr=None, diag=None,
             if ui_mgr is not None:
                 speaker = ui_mgr.current_who or ""
                 dialogue = wrap_text(ui_mgr.revealed_text() or "")
+                speaker_color = getattr(ui_mgr, "current_color", None)
             else:
                 speaker = event.get("who_name") or event.get("who") or ""
                 dialogue = wrap_text(event.get("display_text") or event.get("text") or "")
+                speaker_color = event.get("color")
             dialogue_on = True
         elif t == "menu":
             cap = event.get("caption") or event.get("text") or ""
@@ -163,6 +166,9 @@ def build_world_ui(event: Optional[dict], ui_mgr=None, diag=None,
     rewind_visible = bool(rewind_depth)
     return {
         "speaker": speaker,
+        # M26i: the speaking Character's color (parsed float RGBA) — None
+        # means "no character / no color" and the neutral tint is used.
+        "speaker_color": parse_hex_color(speaker_color),
         "dialogue": dialogue,
         "dialogue_visible": dialogue_on,
         "choices": choices,
@@ -172,6 +178,29 @@ def build_world_ui(event: Optional[dict], ui_mgr=None, diag=None,
         "rewind": (f"« rewound {rewind_depth} — Page Down resumes"
                    if rewind_visible else ""),
     }
+
+
+def parse_hex_color(value):
+    """'#rrggbb' / '#rgb' / 'rrggbb' -> (r, g, b, 1.0) floats, else None.
+
+    Character colors come from the script (`Character("Eileen",
+    color="#c8ffc8")`) and are hex strings; the 3D UI needs them as the
+    float RGBA that obj.color eats. Anything malformed -> None (caller
+    falls back to the neutral template tint) — a bad color must not take
+    the dialogue down with it.
+    """
+    if not value:
+        return None
+    s = str(value).strip().lstrip("#")
+    if len(s) == 3:
+        s = "".join(c + c for c in s)
+    if len(s) != 6:
+        return None
+    try:
+        return (int(s[0:2], 16) / 255.0, int(s[2:4], 16) / 255.0,
+                int(s[4:6], 16) / 255.0, 1.0)
+    except ValueError:
+        return None
 
 
 def set_font_text(obj: Any, text: str) -> None:
@@ -254,6 +283,34 @@ def _set_scale(obj: Any, scl) -> None:
     except Exception:
         try:
             obj.localScale = scl
+        except Exception:
+            pass
+
+
+def _set_font_color(obj: Any, rgba) -> None:
+    """Tint a text object (M26i: colored speaker names, dark shadows).
+
+    The M26 material graph multiplies obj.color into emission, so this is
+    the same mechanism the panels use — no material juggling. Guarded like
+    set_font_text: change-cached (the layout ticks every frame) and a
+    no-op on doubles. Also mirrors onto blenderObject so the EDITOR viewport
+    shows the same tint the player will.
+    """
+    if obj is None or rgba is None:
+        return
+    rgba = tuple(round(float(c), 4) for c in rgba)
+    cached = getattr(obj, "_upvn_color", None)
+    if cached is not None and tuple(cached) == rgba:
+        return
+    try:
+        obj.color = rgba
+        obj._upvn_color = rgba
+    except Exception:
+        return
+    bo = getattr(obj, "blenderObject", None)
+    if bo is not None:
+        try:
+            bo.color = rgba
         except Exception:
             pass
 
@@ -434,21 +491,72 @@ def layout_screen_ui(get_obj: Callable[[str], Any], payload: dict, ortho: float 
         _set_scale(plane, (half * 0.70 * bump, half * 0.045 * bump, 1.0))
         _set_pos(text_obj, (-half * 0.60, y_ui, z + half_v * 0.01))
         set_font_size(text_obj, half * 0.042)
+    # --- M26i drop shadows: same text, offset behind, fixed dark tint -----
+    # The offset is screen-space (x right, z down) plus a small +Y step so
+    # the shadow never z-fights its own main text ("coplanar quads lose
+    # text to depth precision" — the measured backlog lesson).
+    try:
+        from engine.render.contract import (SPEAKER_SHADOW, DIALOGUE_SHADOW,
+                                            CHOICE_SHADOW_SUFFIX, SHADOW_OFFSET)
+    except Exception:
+        SPEAKER_SHADOW, DIALOGUE_SHADOW = "Speaker_Shadow", "Dialogue_Shadow"
+        CHOICE_SHADOW_SUFFIX, SHADOW_OFFSET = "_shadow", (0.045, 0.04, -0.05)
+    ox, oy, oz = SHADOW_OFFSET
+    ssp = get_obj(SPEAKER_SHADOW)
+    sdt = get_obj(DIALOGUE_SHADOW)
+    if ssp is not None:
+        _set_pos(ssp, (-half * 0.80 + ox, y_ui + oy, -half_v * 0.55 + oz))
+        set_font_size(ssp, half * 0.055)
+    if sdt is not None:
+        _set_pos(sdt, (-half * 0.80 + ox, y_ui + oy, -half_v * 0.72 + oz))
+        set_font_size(sdt, half * 0.048)
+    for i, ch in enumerate(payload.get("choices", [])):
+        if not ch.get("visible"):
+            continue
+        z = half_v * 0.42 - i * (half_v * 0.12)
+        stext = get_obj(ch["name"] + CHOICE_SHADOW_SUFFIX)
+        if stext is not None:
+            _set_pos(stext, (-half * 0.60 + ox, y_ui + oy, z + half_v * 0.01 + oz))
+            set_font_size(stext, half * 0.042)
     _ = vis_n
 
 
 def apply_world_ui(get_obj: Callable[[str], Any], payload: dict, ortho: float | None = None,
                    hovered: str | None = None) -> None:
     """Write payload onto named scene objects. `get_obj(name) -> obj|None`."""
+    try:
+        from engine.render.contract import (SPEAKER_SHADOW, DIALOGUE_SHADOW,
+                                            CHOICE_SHADOW_SUFFIX, SHADOW_COLOR,
+                                            DEFAULT_TEXT_COLOR)
+    except Exception:
+        SPEAKER_SHADOW, DIALOGUE_SHADOW = "Speaker_Shadow", "Dialogue_Shadow"
+        CHOICE_SHADOW_SUFFIX = "_shadow"
+        SHADOW_COLOR = (0.02, 0.03, 0.08, 1.0)
+        DEFAULT_TEXT_COLOR = (0.92, 0.93, 1.0, 1.0)
     speaker_obj = get_obj("Speaker_Text")
     dialogue_obj = get_obj("Dialogue_Text")
     box = get_obj("Dialogue_Box")
+    speaker_shadow = get_obj(SPEAKER_SHADOW)
+    dialogue_shadow = get_obj(DIALOGUE_SHADOW)
     set_font_text(speaker_obj, payload.get("speaker") or "")
     set_font_text(dialogue_obj, payload.get("dialogue") or "")
+    # M26i: the speaker NAME carries the speaking Character's color (Ren'Py
+    # convention); everything else keeps the neutral template tint. The
+    # heartbeat exposes both for assertions.
+    _set_font_color(speaker_obj, payload.get("speaker_color") or DEFAULT_TEXT_COLOR)
     vis = bool(payload.get("dialogue_visible"))
     _set_visible(speaker_obj, vis)
     _set_visible(dialogue_obj, vis)
     _set_visible(box, vis or any(c.get("visible") for c in payload.get("choices", [])))
+    # shadows track their mains: same text, same visibility, fixed dark tint
+    if speaker_shadow is not None:
+        set_font_text(speaker_shadow, payload.get("speaker") or "")
+        _set_font_color(speaker_shadow, SHADOW_COLOR)
+        _set_visible(speaker_shadow, vis)
+    if dialogue_shadow is not None:
+        set_font_text(dialogue_shadow, payload.get("dialogue") or "")
+        _set_font_color(dialogue_shadow, SHADOW_COLOR)
+        _set_visible(dialogue_shadow, vis)
     # backlog overlay (M26d): without these two writes H opened a screen the
     # player never drew — headless traces had history, the GUI never did.
     # Order matters twice over: a KX FONT rebuilds its glyph mesh when `body`
@@ -471,10 +579,15 @@ def apply_world_ui(get_obj: Callable[[str], Any], payload: dict, ortho: float | 
     for ch in payload.get("choices", []):
         plane = get_obj(ch["name"])
         text_obj = get_obj(ch["name"] + "_text")
+        shadow_obj = get_obj(ch["name"] + CHOICE_SHADOW_SUFFIX)
         on = bool(ch.get("visible"))
         _set_visible(plane, on)
         _set_visible(text_obj, on)
         set_font_text(text_obj, ch.get("text") or "")
+        if shadow_obj is not None:
+            set_font_text(shadow_obj, ch.get("text") or "")
+            _set_font_color(shadow_obj, SHADOW_COLOR)
+            _set_visible(shadow_obj, on)
     if ortho is not None:
         layout_screen_ui(get_obj, payload, ortho=ortho, hovered=hovered)
 
