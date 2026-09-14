@@ -13,6 +13,7 @@ import pytest
 from engine.ui.world_ui import (apply_world_ui, build_world_ui,
                                 parse_hex_color, _set_font_color)
 from engine.render import contract
+from engine.core.vn_state import VNState
 
 
 # ---------------------------------------------------------------- helpers
@@ -171,3 +172,26 @@ def test_template_carries_styled_text_and_shadows():
     assert val("CHOICE_BOLD") == "True"
     assert int(val("N_SHADOW")) == 11
     assert val("SHADOW_DARK") == "True"
+
+
+def test_headless_still_tints_speaker_name(tmp_path):
+    """Headless parity with the 3D world UI: the speaker badge (dot + name)
+    carries the Character color; a colorless speaker stays neutral pale."""
+    from PIL import Image
+    from engine.render.headless_renderer import render_state, W, H
+
+    def badge_colors(speaker_color):
+        event = {"type": "say", "wait": True, "who": "e", "who_name": "Eileen",
+                 "text": "hello", "speaker_color": speaker_color}
+        p = tmp_path / f"still_{speaker_color}.png"
+        render_state(VNState(), event, p)
+        im = Image.open(p).convert("RGB")
+        # badge geometry from draw_dialogue: nx=58, ny=box_y0+4 (box_y0=538)
+        return {im.getpixel((x, y)) for y in range(542, 570)
+                for x in range(58, 200)}
+
+    green = badge_colors((200 / 255, 1.0, 200 / 255, 1.0))
+    assert (200, 255, 200) in green, "colored speaker did not tint the badge"
+
+    neutral = badge_colors(None)
+    assert (200, 255, 200) not in neutral, "neutral speaker must stay pale"

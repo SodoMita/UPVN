@@ -202,3 +202,24 @@ python3 tools/desktop_qa.py wheel up 2                        # mouse-wheel rewi
 * Related signature: while the embedded game runs (P), the editor does NOT
   redraw at all — the game owns the window. Read `UPVN_HEARTBEAT` for game
   state instead of waiting for editor redraws.
+
+## BUG-M26i-014 — sys.path cannot beat a regular package with a namespace package
+
+* Symptom: inside `blender --background` (bake tool), even with the repo at
+  `sys.path[0]` AND a purge of cached `engine*` modules, `import engine`
+  resolved to the ENABLED add-on snapshot in `~/.config` — whose bundled
+  engine/ lacks the new `style_font_curve`, so styling silently no-op'd
+  (first bake run even SAVED with shadows but zero styling, and only a
+  direct `--python-expr` + traceback grep surfaced it).
+* Root cause: the repo `engine/` is a NAMESPACE package (no `__init__.py`)
+  while the add-on zip's bundled `engine/` is a REGULAR package (the
+  packager injects `__init__.py` trees). Python's rule: a regular package
+  found ANYWHERE on sys.path wins over earlier namespace portions. No
+  sys.path ordering, and no module purge, can select the repo copy.
+* Fix: `tools/add_template_ui_objects.py` loads the repo contract BY FILE
+  PATH (`importlib.util.spec_from_file_location`) — immune to whatever is
+  installed in `~/.config`. Same pattern the M27 test already uses
+  (BUG-M26h-010) for the same class of problem.
+* Guard style rule that fell out of this: a guarded `try: import … except:
+  pass` that silently degrades is a bug factory — when the import fails,
+  nothing in the output says so. The tool now fails loudly instead.
