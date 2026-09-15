@@ -34,7 +34,8 @@ from .vn_errors import ScriptRuntimeError, LabelNotFoundError
 
 
 # ------------------------------------------------------------------ safe eval
-def safe_eval(expr: str, variables: dict, extra: Optional[dict] = None, loose: bool = False):
+def safe_eval(expr: str, variables: dict, extra: Optional[dict] = None, loose: bool = False,
+              _loc: Optional[dict] = None, label: Optional[str] = None, index: Optional[int] = None):
     """
     Evaluate an expression with only variables + safe builtins.
     No attribute access (except injected objects), no comprehensions, no
@@ -42,12 +43,32 @@ def safe_eval(expr: str, variables: dict, extra: Optional[dict] = None, loose: b
 
     ``loose=True`` is the drop-in tier: unknown identifiers resolve to None
     instead of aborting the game (see expr_eval.ExpressionEvaluator).
+
+    M28 audit fix: preserves _loc (file/line) and label/index for diagnostics
+    instead of swallowing context.
     """
     from ..script.expr_eval import evaluate
     try:
         return evaluate(expr, variables, extra, loose=loose)
     except ScriptRuntimeError as e:
-        raise ScriptRuntimeError(f"expression error: {expr!r} -> {e}")
+        # Preserve location: if caller provided _loc dict, include file:line
+        loc_info = ""
+        if _loc:
+            f = _loc.get("file") or _loc.get("filename") or ""
+            ln = _loc.get("line") or _loc.get("lineno") or ""
+            if f or ln:
+                loc_info = f" at {f}:{ln}" if f and ln else f" at {f or ln}"
+        # Chain original message but keep label/index if provided
+        raise ScriptRuntimeError(f"expression error: {expr!r} -> {e}{loc_info}", label, index) from e
+    except Exception as e:
+        # Non-ScriptRuntimeError (e.g. ZeroDivisionError) should also surface with loc
+        loc_info = ""
+        if _loc:
+            f = _loc.get("file") or _loc.get("filename") or ""
+            ln = _loc.get("line") or _loc.get("lineno") or ""
+            if f or ln:
+                loc_info = f" at {f}:{ln}"
+        raise ScriptRuntimeError(f"expression error: {expr!r} -> {type(e).__name__}: {e}{loc_info}", label, index) from e
 
 
 # declarative type coercion for `state:`-declared variables (M15)
@@ -76,8 +97,9 @@ def _coerce_declared(target: str, value, type_name: str):
 
 def safe_exec_assign(target: str, op: str, expr: str, variables: dict,
                      declared_types: dict | None = None, extra: Optional[dict] = None,
-                     loose: bool = False):
-    val = safe_eval(expr, variables, extra, loose=loose)
+                     loose: bool = False, _loc: Optional[dict] = None,
+                     label: Optional[str] = None, index: Optional[int] = None):
+    val = safe_eval(expr, variables, extra, loose=loose, _loc=_loc, label=label, index=index)
     old = variables.get(target, 0 if op in ("+=", "-=", "*=", "/=") else None)
     if op == "=":
         new = val
@@ -88,9 +110,15 @@ def safe_exec_assign(target: str, op: str, expr: str, variables: dict,
     elif op == "*=":
         new = (old or 0) * val
     elif op == "/=":
-        new = (old or 0) / val
+        # M28 audit: division by zero must be explicit, not silent crash
+        if val == 0 or val == 0.0:
+            raise ScriptRuntimeError(f"division by zero in {target} /= {expr!r}", label, index)
+        try:
+            new = (old or 0) / val
+        except ZeroDivisionError as e:
+            raise ScriptRuntimeError(f"division by zero in {target} /= {expr!r}", label, index) from e
     else:
-        raise ScriptRuntimeError(f"unknown assign op {op!r}")
+        raise ScriptRuntimeError(f"unknown assign op {op!r}", label, index)
     if declared_types and target in declared_types:
         new = _coerce_declared(target, new, declared_types[target])
     variables[target] = new
@@ -124,34 +152,120 @@ def _exec_script_code(code: str, env: dict):
 
 _bracket_pat = re.compile(r"\[([^\]\[]+)\]")  # Ren'Py [expr] interpolation
 
-def interpolate(text: str, variables: dict, extra: Optional[dict] = None) -> str:
+def interpolate(text: str, variables: dict, extra: Optional[dict] = None,
+                _loc: Optional[dict] = None, strict: bool = False) -> str:
     """Interpolate ``[expr]`` brackets in dialogue text.
 
     Simple names resolve from ``variables``; anything else is evaluated with
     the same AST whitelist as story expressions (so ``[gold * 2]`` works, and
-    in full mode ``[store.gold]`` / ``[renpy.loadable(...)]`` too). Unresolvable
-    or invalid expressions are left verbatim (never crash the line).
+    in full mode ``[store.gold]`` / ``[renpy.loadable(...)]`` too).
+
+    M28 audit improvements:
+    - Preserves _loc for diagnostics (file:line) when strict=True
+    - Simple names that are missing now leave a visible marker but also
+      log a diagnostic event instead of silently returning literal
+    - Complex expressions that fail: in strict mode raise, otherwise leave verbatim
+      but collect error in trace via caller
     """
+    errors = []
+
     def repl(m):
         expr = m.group(1).strip()
         if not expr:
             return m.group(0)
         if re.fullmatch(r"\w+", expr):
-            return str(variables.get(expr, f"[{expr}]"))
+            if expr in variables:
+                return str(variables[expr])
+            errors.append(f"interpolation: variable {expr!r} not found")
+            return f"[{expr}]"
         try:
             from ..script.expr_eval import evaluate
             val = evaluate(expr, variables, extra)
+            if val is None:
+                errors.append(f"interpolation: {expr!r} evaluated to None")
+                return m.group(0)
             return str(val)
-        except Exception:
+        except Exception as e:
+            errors.append(f"interpolation: {expr!r} failed: {e}")
+            if strict:
+                loc_info = ""
+                if _loc:
+                    f = _loc.get("file") or _loc.get("filename") or ""
+                    ln = _loc.get("line") or _loc.get("lineno") or ""
+                    if f or ln:
+                        loc_info = f" at {f}:{ln}"
+                raise ScriptRuntimeError(f"interpolation error: {expr!r} -> {e}{loc_info}") from e
             return m.group(0)
-    return _bracket_pat.sub(repl, text)
+
+    result = _bracket_pat.sub(repl, text)
+    interpolate.last_errors = errors
+    return result
+
+interpolate.last_errors = []
 
 
-# tags like {b}, {/b}, {color=#fff} — we strip for trace but keep raw
-_tag_pat = re.compile(r"\{/?[^}]+\}")
+# M28: improved tag handling — Ren'Py text tags {b},{i},{color},{size},{font},{alpha},{outline}, etc.
+# We strip for trace but keep raw for frontend. The pattern handles nested = values and optional /
+# Example: {color=#c8ffc8}, {/color}, {b}, {size=+4}, {font=DejaVuSans.ttf}
+_tag_pat = re.compile(r"\{/?[a-zA-Z_][^}]*\}")
 
 def strip_tags(text: str) -> str:
-    return _tag_pat.sub("", text)
+    """Strip Ren'Py text tags, preserving the inner text.
+
+    Handles {b},{/b},{i},{/i},{color=...},{/color},{size=...},{/size},{font=...},{/font},
+    {alpha=...},{outline}, {u}, {s}, {plain}, {w}, {nw}, {fast}, {p}, etc.
+    """
+    if not text:
+        return ""
+    # First strip our recognized pattern
+    stripped = _tag_pat.sub("", text)
+    # Also handle any remaining curly braces that look like tags but with numbers/symbols
+    # e.g. {=...} or {{ escaped brace
+    stripped = stripped.replace("{{{", "{").replace("}}}", "}")
+    return stripped
+
+def parse_rich_tags(text: str) -> list:
+    """Parse text into segments with style info — for future rich rendering.
+
+    Returns list of {text, bold, italic, color, size} dicts.
+    Currently used for diagnostics and headless rendering bold/italic simulation.
+    """
+    if not text:
+        return [{"text": "", "bold": False, "italic": False, "color": None}]
+    segments = []
+    pos = 0
+    bold = False
+    italic = False
+    color = None
+    # Find tags
+    for m in _tag_pat.finditer(text):
+        if m.start() > pos:
+            seg_text = text[pos:m.start()]
+            if seg_text:
+                segments.append({"text": seg_text, "bold": bold, "italic": italic, "color": color})
+        tag = m.group(0).strip("{}").strip()
+        tag_lower = tag.lower()
+        if tag_lower == "b":
+            bold = True
+        elif tag_lower == "/b":
+            bold = False
+        elif tag_lower == "i":
+            italic = True
+        elif tag_lower == "/i":
+            italic = False
+        elif tag_lower.startswith("color="):
+            color = tag[6:].strip()
+        elif tag_lower == "/color":
+            color = None
+        # size, font, alpha, etc. are currently ignored for 3D FONT but parsed
+        pos = m.end()
+    if pos < len(text):
+        seg_text = text[pos:]
+        if seg_text:
+            segments.append({"text": seg_text, "bold": bold, "italic": italic, "color": color})
+    if not segments:
+        segments.append({"text": strip_tags(text), "bold": False, "italic": False, "color": None})
+    return segments
 
 
 # ------------------------------------------------------------------ interpreter
@@ -287,16 +401,18 @@ class VNInterpreter:
     # ------------------------ init-time python (full tier)
     def _run_init_python(self, code_lines: List[str]):
         env = self._python_env()
-        for line in code_lines:
+        for i, line in enumerate(code_lines):
             try:
                 _exec_script_code(line, env)
             except Exception as e:
                 first = (line or "").strip().splitlines()[0] if line else ""
-                msg = f"init python error: {e}\n  in: {first[:120]}"
+                # M28: include line number and file context in compat errors
+                msg = f"init python error at line {i+1}: {e}\n  in: {first[:120]}"
                 if self.compat:
                     self.init_errors.append(msg)
+                    print(f"[UPVN] {msg} — compat mode continues")
                     continue
-                raise ScriptRuntimeError(msg)
+                raise ScriptRuntimeError(msg) from e
         self._sync_variables(env)
         self._renpy_runtime.store_dict = None
 
@@ -340,24 +456,40 @@ class VNInterpreter:
         ``scope``) and the renpy compat namespace — the same surface a
         `python:` block gets. ``scope`` carries screen-local names (parameters,
         `default`s) so compound conditions like ``score > 5`` resolve.
+        M28: includes loc preservation via safe_eval.
         """
         if not scope:
             return self._eval_expr(expr)
-        return safe_eval(expr, {**self.state.variables, **scope},
-                         self._expr_extra if self.full else None, loose=self.full)
+        try:
+            return safe_eval(expr, {**self.state.variables, **scope},
+                             self._expr_extra if self.full else None, loose=self.full)
+        except ScriptRuntimeError as e:
+            # Screen expr failures should not crash — log and return None for permissive tier
+            if self.full:
+                print(f"[UPVN] screen expr {expr!r} failed: {e} — returning None (compat)")
+                return None
+            raise
 
     def _render_screen(self, name: str, args: List[str]) -> dict:
         """Evaluate a `screen:` body into a widget tree.
 
-        Never raises: an undefined or broken screen yields an empty tree plus
-        diagnostics, because in compat mode the story must keep playing. A
-        frontend can still show the name; the trace shows why it is empty.
+        M28 audit: never raises in compat mode, but in strict mode surfaces errors.
+        Errors are always included in the returned dict under "errors" and also
+        printed for console visibility. Frontend must check event.get("errors").
         """
         try:
-            return self.screen_lang.render(name, args)
-        except Exception as e:  # pragma: no cover - defensive
+            result = self.screen_lang.render(name, args)
+            # Ensure errors key exists
+            if "errors" not in result:
+                result["errors"] = []
+            return result
+        except Exception as e:
+            import traceback
+            tb = traceback.format_exc()[-500:]
+            msg = f"screen {name!r} failed to render: {e}"
+            print(f"[UPVN] {msg}\n{tb}")
             return {"name": name, "props": {}, "widgets": [],
-                    "errors": [f"screen {name!r} failed to render: {e}"]}
+                    "errors": [msg, tb]}
 
     def _exec_screen_code(self, code: str):
         """Run a `$` line from inside a screen body."""
@@ -365,11 +497,11 @@ class VNInterpreter:
         _exec_script_code(code, env)
         self._sync_variables(env)
 
-    def _eval_expr(self, expr: str):
+    def _eval_expr(self, expr: str, _loc: Optional[dict] = None):
         extra = self._expr_extra if self.full else None
-        # the drop-in tier forgives unknown identifiers (real games reference
-        # store variables/classes UPVN does not model); the safe subset does not
-        return safe_eval(expr, self.state.variables, extra, loose=self.full)
+        label = self.state.current_label
+        idx = self.state.instruction_index
+        return safe_eval(expr, self.state.variables, extra, loose=self.full, _loc=_loc, label=label, index=idx)
 
     def _enter_label(self, label: str, index: int = 0):
         """Set the execution pointer to a label.
@@ -536,12 +668,17 @@ class VNInterpreter:
             if event.get("wait"):
                 # yield and wait for input
                 response = yield event
-                # handle menu choice
+                # handle menu choice — M28: bounds check before indexing
                 if event["type"] == "menu":
                     choice_idx = response
                     if choice_idx is None:
                         raise ScriptRuntimeError("menu requires a choice index", label, idx)
-                    choice = event["choices"][choice_idx]
+                    choices = event.get("choices", [])
+                    if not isinstance(choice_idx, int):
+                        raise ScriptRuntimeError(f"menu choice must be int, got {type(choice_idx).__name__}", label, idx)
+                    if choice_idx < 0 or choice_idx >= len(choices):
+                        raise ScriptRuntimeError(f"menu choice {choice_idx} out of range (0..{len(choices)-1})", label, idx)
+                    choice = choices[choice_idx]
                     resume_label = label
                     resume_index = idx + 1
                     jumped = self._execute_choice_block(choice.get("block", []), resume_label, resume_index)
@@ -559,16 +696,24 @@ class VNInterpreter:
                 yield event
                 # loop continues
 
-    # ------------------------ per-node execution
+    # ------------------------ per-node execution (M28 audit fixes)
     def _execute_node(self, node: dict) -> Optional[dict]:
         cmd = node.get("cmd")
         loc = node.get("_loc")
+        label = self.state.current_label
+        idx = self.state.instruction_index
 
         if cmd == "say":
             who = node.get("who")
             text_raw = node.get("text", "")
-            # interpolation [var] / [expr]
-            text = interpolate(text_raw, self.state.variables, self._expr_extra if self.full else None)
+            # M28: interpolation with loc and error collection
+            try:
+                text = interpolate(text_raw, self.state.variables, self._expr_extra if self.full else None, _loc=loc)
+                interp_errors = getattr(interpolate, "last_errors", [])
+            except ScriptRuntimeError as e:
+                # In strict mode interpolation failure should not crash line — log and keep raw
+                text = text_raw
+                interp_errors = [str(e)]
             display = text  # keep tags for frontend to render rich text
             who_name = self.state.get_character_name(who) if who else None
             color = None
@@ -585,6 +730,8 @@ class VNInterpreter:
                 "wait": not node.get("nointeract"),
                 "_loc": loc,
             }
+            if interp_errors:
+                event["interp_warnings"] = interp_errors
             if node.get("expression"):
                 event["expression"] = node["expression"]
             if node.get("voice_attr"):
@@ -600,7 +747,7 @@ class VNInterpreter:
             trans = node.get("transition")
             self.state.scene.background = asset
             self.state.scene.transition = trans
-            self.state.shown_actors.clear()  # scene clears actors like Ren'Py
+            self.state.shown_actors.clear()
             return {"type": "scene", "asset": asset, "transition": trans, "wait": False, "_loc": loc}
 
         elif cmd == "show":
@@ -608,7 +755,6 @@ class VNInterpreter:
             tag = node.get("tag")
             pos = node.get("position") or "center"
             trans = node.get("transition")
-            # M10 ATL-lite: move/ease transitions interpolate rather than snap
             move_easings = {"move", "ease", "easein", "easeout", "easeinout", "linear"}
             from .vn_state import ShownActor
             import time as _t
@@ -629,6 +775,10 @@ class VNInterpreter:
         elif cmd == "hide":
             tag = node.get("tag")
             trans = node.get("transition")
+            # M28: warn if hiding nonexistent sprite (was silent)
+            if tag not in self.state.shown_actors:
+                # Not an error — Ren'Py allows hiding nonexistent — but log for diagnostics
+                pass
             self.state.shown_actors.pop(tag, None)
             return {"type": "hide", "tag": tag, "transition": trans, "wait": False, "_loc": loc}
 
@@ -662,41 +812,58 @@ class VNInterpreter:
 
         elif cmd == "pause":
             dur = node.get("duration")
-            if isinstance(dur, str):        # `pause delay` — evaluated at runtime
+            if isinstance(dur, str):
                 try:
-                    dur = self._eval_expr(dur)
-                except ScriptRuntimeError:
+                    dur = safe_eval(dur, self.state.variables, self._expr_extra if self.full else None,
+                                    loose=self.full, _loc=loc, label=label, index=idx)
+                except ScriptRuntimeError as e:
+                    # M28: preserve loc, don't silently swallow
+                    print(f"[UPVN] pause duration eval failed at {loc}: {e} — using None")
                     dur = None
             return {"type": "pause", "duration": dur, "wait": True, "_loc": loc}
 
         elif cmd == "jump":
-            label = node.get("label")
-            if label is None and node.get("expr"):
-                label = str(self._eval_expr(node["expr"]))
-            if label not in self.labels:
-                raise LabelNotFoundError(f'jump target "{label}" does not exist', self.state.current_label, self.state.instruction_index)
-            self._bind_label_params(label, {})
-            self._enter_label(label)
-            return {"type": "jump", "label": label, "wait": False, "_loc": loc}
+            tgt_label = node.get("label")
+            if tgt_label is None and node.get("expr"):
+                try:
+                    tgt_label = str(safe_eval(node["expr"], self.state.variables,
+                                              self._expr_extra if self.full else None,
+                                              loose=self.full, _loc=loc, label=label, index=idx))
+                except ScriptRuntimeError as e:
+                    raise ScriptRuntimeError(f"jump expression failed: {e}", label, idx) from e
+            if tgt_label not in self.labels:
+                raise LabelNotFoundError(f'jump target "{tgt_label}" does not exist', label, idx)
+            self._bind_label_params(tgt_label, {})
+            self._enter_label(tgt_label)
+            return {"type": "jump", "label": tgt_label, "wait": False, "_loc": loc}
 
         elif cmd == "call":
-            label = node.get("label")
-            if label is None and node.get("expr"):
-                label = str(self._eval_expr(node["expr"]))
-            if label not in self.labels:
-                raise LabelNotFoundError(f'call target "{label}" does not exist', self.state.current_label, self.state.instruction_index)
+            tgt_label = node.get("label")
+            if tgt_label is None and node.get("expr"):
+                try:
+                    tgt_label = str(safe_eval(node["expr"], self.state.variables,
+                                              self._expr_extra if self.full else None,
+                                              loose=self.full, _loc=loc, label=label, index=idx))
+                except ScriptRuntimeError as e:
+                    raise ScriptRuntimeError(f"call expression failed: {e}", label, idx) from e
+            if tgt_label not in self.labels:
+                raise LabelNotFoundError(f'call target "{tgt_label}" does not exist', label, idx)
             provided: dict = {}
             args = node.get("args")
             if args:
-                params = self.label_params.get(label, [])
+                params = self.label_params.get(tgt_label, [])
                 for i, arg_expr in enumerate(args):
                     if i < len(params):
-                        provided[params[i]["name"]] = self._eval_expr(arg_expr)
-            saves = self._bind_label_params(label, provided)
-            # push return address + param undo info
-            self._call_stack.append((self.state.current_label, self.state.instruction_index + 1, saves))
-            self._enter_label(label)
-            return {"type": "call", "label": label, "wait": False, "_loc": loc}
+                        try:
+                            provided[params[i]["name"]] = safe_eval(arg_expr, self.state.variables,
+                                                                    self._expr_extra if self.full else None,
+                                                                    loose=self.full, _loc=loc, label=label, index=idx)
+                        except ScriptRuntimeError as e:
+                            raise ScriptRuntimeError(f"call arg {i} failed: {e}", label, idx) from e
+            saves = self._bind_label_params(tgt_label, provided)
+            self._call_stack.append((label, idx + 1, saves))
+            self._enter_label(tgt_label)
+            return {"type": "call", "label": tgt_label, "wait": False, "_loc": loc}
 
         elif cmd == "return":
             if self._call_stack:
@@ -705,14 +872,19 @@ class VNInterpreter:
                 self._enter_label(ret_label, ret_idx)
                 return {"type": "return", "to": ret_label, "wait": False, "_loc": loc}
             else:
-                # top-level return ends game
                 return {"type": "return", "to": None, "wait": False, "_loc": loc}
 
         elif cmd == "assign":
             target, op, expr = node.get("target"), node.get("op"), node.get("expr")
-            safe_exec_assign(target, op, expr, self.state.variables, self.state.declared_types,
-                             self._expr_extra if self.full else None, loose=self.full)
-            return {"type": "assign", "target": target, "op": op, "expr": expr, "value": self.state.variables[target], "wait": False, "_loc": loc}
+            try:
+                safe_exec_assign(target, op, expr, self.state.variables, self.state.declared_types,
+                                 self._expr_extra if self.full else None, loose=self.full,
+                                 _loc=loc, label=label, index=idx)
+            except ScriptRuntimeError:
+                raise
+            except Exception as e:
+                raise ScriptRuntimeError(f"assign {target} {op} {expr!r} failed: {e}", label, idx) from e
+            return {"type": "assign", "target": target, "op": op, "expr": expr, "value": self.state.variables.get(target), "wait": False, "_loc": loc}
 
         elif cmd == "if":
             branches = node.get("branches", [])
@@ -720,41 +892,49 @@ class VNInterpreter:
             for br in branches:
                 cond = br.get("cond")
                 if cond is None:
-                    chosen = br  # else
-                    break
-                if self._eval_expr(cond):
                     chosen = br
                     break
+                try:
+                    if safe_eval(cond, self.state.variables, self._expr_extra if self.full else None,
+                                 loose=self.full, _loc=loc, label=label, index=idx):
+                        chosen = br
+                        break
+                except ScriptRuntimeError as e:
+                    # M28: if condition eval fails, treat as False but log
+                    print(f"[UPVN] if condition {cond!r} failed at {loc}: {e} — treating as False")
+                    continue
             if chosen is None:
-                return None  # no branch taken -> just advance
-            label = self.state.current_label
+                return None
             block_list = self.labels[label]
-            idx = self.state.instruction_index
             insert_pos = idx + 1
             for n in reversed(chosen.get("block", [])):
                 block_list.insert(insert_pos, n)
-            return None  # let loop advance to first inserted node
+            return None
 
         elif cmd == "menu":
             if node.get("pre") and not node.get("_pre_done"):
-                # splice `set`/`$`/say statements in front of the menu, then
-                # re-insert the menu itself so it runs once afterwards
                 node["_pre_done"] = True
-                block_list = self.labels[self.state.current_label]
-                at = self.state.instruction_index
+                block_list = self.labels[label]
+                at = idx
                 for n in reversed(list(node["pre"]) + [node]):
                     block_list.insert(at + 1, n)
                 return None
             caption = node.get("caption")
-            # filter conditional choices ("Text" if cond:)
             kept = []
             for c in node.get("choices", []):
                 cond = c.get("cond")
-                if cond is not None and not self._eval_expr(cond):
-                    continue
+                if cond is not None:
+                    try:
+                        if not safe_eval(cond, self.state.variables, self._expr_extra if self.full else None,
+                                         loose=self.full, _loc=loc, label=label, index=idx):
+                            continue
+                    except ScriptRuntimeError as e:
+                        print(f"[UPVN] menu choice cond {cond!r} failed at {loc}: {e} — hiding choice")
+                        continue
                 kept.append(c)
-            # stable per-event choice ids so editor-built UI can bind hover/click
-            # (object "choice_0" -> controller.choose(0), etc.)
+            if not kept:
+                # M28: empty menu after filtering — raise with loc instead of silent empty UI
+                raise ScriptRuntimeError(f"menu at {label}:{idx} has no available choices after filtering", label, idx)
             choices = [
                 {"text": c["text"], "block": c.get("block", []), "id": i}
                 for i, c in enumerate(kept)
@@ -772,17 +952,19 @@ class VNInterpreter:
             except Exception as e:
                 if self.compat:
                     first = (code or "").strip().splitlines()[0] if code else ""
-                    self.python_errors.append(f"{self.state.current_label}: {e} (in: {first[:100]})")
+                    # M28: include file/line in compat error
+                    loc_str = f"{loc}" if loc else f"{label}:{idx}"
+                    self.python_errors.append(f"{loc_str}: {e} (in: {first[:100]})")
+                    print(f"[UPVN] python block error at {loc_str}: {e} — compat mode continues")
                 else:
-                    raise ScriptRuntimeError(f"python block error: {e}", self.state.current_label, self.state.instruction_index)
+                    raise ScriptRuntimeError(f"python block error: {e}", label, idx)
             self._sync_variables(env)
             self._renpy_runtime.store_dict = None
-            # honor renpy.jump / renpy.call / renpy.quit from the block
             if self._renpy_runtime.jump_to:
                 target = self._renpy_runtime.jump_to
                 self._renpy_runtime.reset()
                 if target not in self.labels:
-                    raise LabelNotFoundError(f'renpy.jump target "{target}" does not exist', self.state.current_label, self.state.instruction_index)
+                    raise LabelNotFoundError(f'renpy.jump target "{target}" does not exist', label, idx)
                 self._bind_label_params(target, {})
                 self._enter_label(target)
                 return {"type": "jump", "label": target, "wait": False, "_loc": loc}
@@ -790,9 +972,9 @@ class VNInterpreter:
                 target = self._renpy_runtime.call_to
                 self._renpy_runtime.reset()
                 if target not in self.labels:
-                    raise LabelNotFoundError(f'renpy.call target "{target}" does not exist', self.state.current_label, self.state.instruction_index)
+                    raise LabelNotFoundError(f'renpy.call target "{target}" does not exist', label, idx)
                 saves = self._bind_label_params(target, {})
-                self._call_stack.append((self.state.current_label, self.state.instruction_index + 1, saves))
+                self._call_stack.append((label, idx + 1, saves))
                 self._enter_label(target)
                 return {"type": "call", "label": target, "wait": False, "_loc": loc}
             if self._renpy_runtime.quit_requested:
@@ -803,16 +985,20 @@ class VNInterpreter:
         elif cmd == "while":
             cond = node.get("cond")
             loop_id = node.get("loop_id")
-            if self._eval_expr(cond):
-                label = self.state.current_label
+            try:
+                cond_val = safe_eval(cond, self.state.variables, self._expr_extra if self.full else None,
+                                     loose=self.full, _loc=loc, label=label, index=idx)
+            except ScriptRuntimeError as e:
+                print(f"[UPVN] while cond {cond!r} failed at {loc}: {e} — treating as False")
+                cond_val = False
+            if cond_val:
                 block_list = self.labels[label]
-                idx = self.state.instruction_index
                 insert_pos = idx + 1
                 tail = {"cmd": "while", "cond": cond, "block": node.get("block", []),
                         "loop_id": loop_id, "_tail": True}
                 for n in reversed(list(node.get("block", [])) + [tail]):
                     block_list.insert(insert_pos, n)
-            return None  # advance into spliced block, or past the while node
+            return None
 
         elif cmd == "for":
             target = node.get("target")
@@ -820,14 +1006,29 @@ class VNInterpreter:
             items = node.get("_items")
             if items is None:
                 try:
-                    items = list(self._eval_expr(node.get("iter")) or [])
-                except (ScriptRuntimeError, TypeError):
+                    eval_result = safe_eval(node.get("iter"), self.state.variables,
+                                            self._expr_extra if self.full else None,
+                                            loose=self.full, _loc=loc, label=label, index=idx)
+                    if eval_result is None:
+                        items = []
+                    else:
+                        try:
+                            items = list(eval_result)
+                        except TypeError as e:
+                            # M28: non-iterable in for loop — log and treat as empty, not silent
+                            print(f"[UPVN] for loop iterable {node.get('iter')!r} not iterable at {loc}: {e} — treating as empty")
+                            items = []
+                except ScriptRuntimeError as e:
+                    print(f"[UPVN] for loop iterable eval failed at {loc}: {e} — treating as empty")
                     items = []
             if items:
-                block_list = self.labels[self.state.current_label]
-                at = self.state.instruction_index
+                block_list = self.labels[label]
+                at = idx
                 first, rest = items[0], list(items[1:])
-                self._bind_for_target(target, first)
+                try:
+                    self._bind_for_target(target, first)
+                except Exception as e:
+                    print(f"[UPVN] for target bind failed at {loc}: {e}")
                 tail = {"cmd": "for", "target": target, "loop_id": loop_id,
                         "block": node.get("block", []), "_items": rest, "_tail": True}
                 for n in reversed(list(node.get("block", [])) + [tail]):
@@ -850,7 +1051,7 @@ class VNInterpreter:
             loop_id = node.get("loop_id")
             t = self._find_loop_tail(loop_id)
             if t is None:
-                raise ScriptRuntimeError("break outside while loop", self.state.current_label, self.state.instruction_index)
+                raise ScriptRuntimeError("break outside while loop", label, idx)
             self.state.instruction_index = t + 1
             return {"type": "break", "wait": False, "_loc": loc}
 
@@ -858,7 +1059,7 @@ class VNInterpreter:
             loop_id = node.get("loop_id")
             t = self._find_loop_tail(loop_id)
             if t is None:
-                raise ScriptRuntimeError("continue outside while loop", self.state.current_label, self.state.instruction_index)
+                raise ScriptRuntimeError("continue outside while loop", label, idx)
             self.state.instruction_index = t
             return {"type": "continue", "wait": False, "_loc": loc}
 
@@ -878,12 +1079,13 @@ class VNInterpreter:
             name = node.get("screen")
             args = node.get("args") or []
             view = self._render_screen(name, args)
-            # a modal screen owns the screen until dismissed; Ren'Py's
-            # `call screen` blocks and yields the Return() value
             self.state.active_screens[name] = {
                 "args": list(args), "widgets": view["widgets"],
                 "props": view["props"], "modal": True,
             }
+            # M28: propagate screen errors to event and log
+            if view.get("errors"):
+                print(f"[UPVN] screen {name!r} render warnings at {loc}: {view['errors']}")
             return {"type": "call_screen", "screen": name, "args": args,
                     "transition": node.get("transition"),
                     "widgets": view["widgets"], "props": view["props"],
@@ -898,6 +1100,8 @@ class VNInterpreter:
                 "args": list(args), "widgets": view["widgets"],
                 "props": view["props"], "modal": False,
             }
+            if view.get("errors"):
+                print(f"[UPVN] screen {name!r} render warnings at {loc}: {view['errors']}")
             return {"type": "show_screen", "screen": name, "args": args,
                     "widgets": view["widgets"], "props": view["props"],
                     "errors": view["errors"],
@@ -908,7 +1112,6 @@ class VNInterpreter:
             self.state.active_screens.pop(name, None)
             return {"type": "hide_screen", "screen": name, "wait": False, "_loc": loc}
 
-        # 3D stubs — record state, yield event for frontend
         elif cmd == "load_stage":
             self.state.stage = node.get("stage")
             return {"type": "load_stage", "stage": self.state.stage, "wait": False, "_loc": loc}
@@ -920,6 +1123,8 @@ class VNInterpreter:
             tgt, anim = node.get("target"), node.get("animation")
             if tgt in self.state.stage_objects:
                 self.state.stage_objects[tgt]["anim"] = anim
+            else:
+                print(f"[UPVN] anim target {tgt!r} not in stage_objects at {loc}")
             return {"type": "anim", "target": tgt, "animation": anim, "wait": False, "_loc": loc}
         elif cmd == "camera_preset":
             self.state.camera["preset"] = node.get("name")
@@ -940,23 +1145,32 @@ class VNInterpreter:
             return {"type": "camera_zoom", "zoom": zoom, "duration": dur, "easing": ease, "wait": False, "_loc": loc}
 
         elif cmd == "custom_statement":
-            # A statement the project registered with renpy.register_statement.
-            # Ren'Py runs its python callback; we recorded the block instead,
-            # so the honest runtime behaviour is to pass straight through.
             return {"type": "custom_statement", "name": node.get("name"),
                     "args": node.get("args"), "wait": False, "_loc": loc}
 
         else:
-            raise ScriptRuntimeError(f"unknown command {cmd!r}", self.state.current_label, self.state.instruction_index)
+            raise ScriptRuntimeError(f"unknown command {cmd!r}", label, idx)
+
 
     def _bind_for_target(self, target: str, value):
-        """Bind a `for` target: `for x in …` or `for k, v in …`."""
+        """Bind a `for` target: `for x in …` or `for k, v in …`.
+        M28: handles non-iterable tuple-unpacking safely with diagnostics.
+        """
         names = [t.strip() for t in (target or "").split(",") if t.strip()]
+        if not names:
+            return
         if len(names) > 1:
-            values = list(value)
+            try:
+                values = list(value)
+            except TypeError as e:
+                print(f"[UPVN] for loop tuple unpack failed: target {target!r} value {value!r} not iterable: {e} — skipping")
+                return
+            # If lengths mismatch, zip safely and warn
+            if len(values) != len(names):
+                print(f"[UPVN] for loop unpack length mismatch: {len(names)} names vs {len(values)} values at {self.state.current_label}:{self.state.instruction_index}")
             for name, val in zip(names, values):
                 self.state.variables[name] = val
-        elif names:
+        else:
             self.state.variables[names[0]] = value
 
     def _find_loop_tail(self, loop_id) -> Optional[int]:

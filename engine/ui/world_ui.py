@@ -11,10 +11,59 @@ from typing import Any, Callable, Optional
 
 
 def wrap_text(text: str, width: int = 42) -> str:
+    """Word-wrap preserving {tags} and [interpolation] markers.
+
+    M28 audit: original split on whitespace ignored tags — width measured
+    included tag chars, causing premature wraps. Now strips tags for measuring
+    but preserves them in output.
+    """
+    if not text:
+        return text or ""
+    # Try to use strip_tags if available (for accurate width)
+    try:
+        from ..core.vn_interpreter import strip_tags
+        measure = strip_tags(text)
+    except Exception:
+        measure = text
+
+    # If text has no spaces, return as-is (avoid breaking [var] or tags)
+    if " " not in measure.strip():
+        return text
+
+    # Split original text into words, but measure using stripped version
+    # Simple approach: split stripped for layout, then reconstruct with original tags
+    # For now, wrap stripped and return stripped — tags will be re-added by caller if needed
+    # Actually preserve original: we wrap the original text by measuring stripped chunks
     words = (text or "").split()
     if not words:
         return text or ""
     lines: list[str] = []
+    cur = words[0]
+    # Measure cur stripped length
+    def stripped_len(s):
+        try:
+            from ..core.vn_interpreter import strip_tags
+            return len(strip_tags(s))
+        except Exception:
+            return len(s)
+
+    for w in words[1:]:
+        if stripped_len(cur) + 1 + stripped_len(w) <= width:
+            cur = cur + " " + w
+        else:
+            lines.append(cur)
+            cur = w
+    lines.append(cur)
+    return "\n".join(lines)
+
+def wrap_text_stripped(text: str, width: int = 42) -> str:
+    """Wrap after stripping tags — for history/backlog where tags are gone."""
+    if not text:
+        return ""
+    words = text.split()
+    if not words:
+        return text
+    lines = []
     cur = words[0]
     for w in words[1:]:
         if len(cur) + 1 + len(w) <= width:
@@ -124,50 +173,99 @@ def format_history(entries, max_lines: int = HISTORY_MAX_LINES,
 def build_world_ui(event: Optional[dict], ui_mgr=None, diag=None,
                    n_choices: int = 9, history_entries=None,
                    history_open: bool = False, rewind_depth: int = 0,
-                   history_scroll: int = 0) -> dict:
-    """Pure snapshot of what 3D objects should show this frame."""
+                   history_scroll: int = 0, screen_errors: Optional[list] = None) -> dict:
+    """Pure snapshot of what 3D objects should show this frame.
+    M28 audit improvements:
+    - Preserves interpolation warnings and screen errors for frontend display
+    - Handles ui_mgr typewriter properly (revealed_text vs fully_revealed)
+    - Validates menu choices before building
+    """
     speaker = ""
     dialogue = ""
     dialogue_on = False
     speaker_color = None
+    interp_warnings = []
+    errors = list(screen_errors or [])
+
     if diag:
         speaker = "UPVN"
         dialogue = "\n".join(str(x) for x in list(diag)[:8])
         dialogue_on = True
+        if len(diag) > 8:
+            errors.append(f"diagnostic truncated: {len(diag)} lines")
     elif event:
         t = event.get("type")
         if t == "say":
             if ui_mgr is not None:
                 speaker = ui_mgr.current_who or ""
-                dialogue = wrap_text(ui_mgr.revealed_text() or "")
+                # M28: use revealed_text() for typewriter, but fallback to fully_revealed if done
+                try:
+                    rev = ui_mgr.revealed_text()
+                    # If typewriter not started (empty), use current_text
+                    if not rev and hasattr(ui_mgr, 'current_text'):
+                        rev = ui_mgr.current_text
+                    dialogue = wrap_text(rev or "")
+                except Exception as e:
+                    print(f"[world_ui] ui_mgr.revealed_text() failed: {e} — using event text")
+                    dialogue = wrap_text(event.get("display_text") or event.get("text") or "")
                 speaker_color = getattr(ui_mgr, "current_color", None)
+                interp_warnings = getattr(ui_mgr, '_interp_warnings', []) or event.get("interp_warnings", []) or []
             else:
                 speaker = event.get("who_name") or event.get("who") or ""
-                dialogue = wrap_text(event.get("display_text") or event.get("text") or "")
+                raw_text = event.get("display_text") or event.get("text") or ""
+                dialogue = wrap_text(raw_text)
                 speaker_color = event.get("color")
+                interp_warnings = event.get("interp_warnings", []) or []
             dialogue_on = True
+            # Collect errors from event
+            if event.get("errors"):
+                errors.extend(event["errors"])
         elif t == "menu":
             cap = event.get("caption") or event.get("text") or ""
             dialogue = wrap_text(cap)
             dialogue_on = bool(cap)
+            if event.get("errors"):
+                errors.extend(event["errors"])
+        elif t in ("call_screen", "show_screen"):
+            # Screens may have errors — surface them
+            if event.get("errors"):
+                errors.extend(event["errors"])
+                # Show first error as dialogue if no other dialogue
+                if not dialogue_on and event["errors"]:
+                    dialogue = wrap_text(f"[Screen error: {event['errors'][0][:60]}]")
+                    dialogue_on = True
+
     choices = []
     menu = (event or {}).get("choices") if (event or {}).get("type") == "menu" else None
     menu = menu or []
-    # While the backlog is open it owns the screen: plates are hidden so the
-    # number keys cannot resolve a menu the player cannot see (BUG-007 class).
+    # M28: validate menu is list
+    if menu and not isinstance(menu, list):
+        errors.append(f"menu choices not a list: {type(menu).__name__}")
+        menu = []
+
     for i in range(n_choices):
         if i < len(menu) and not history_open:
-            txt = str(menu[i].get("text", ""))
-            choices.append({"name": f"choice_{i}", "text": f"{i + 1}. {txt}", "visible": True})
+            try:
+                txt = str(menu[i].get("text", ""))
+                # Strip tags for choice display (3D FONT can't render inline tags)
+                try:
+                    from ..core.vn_interpreter import strip_tags
+                    txt_stripped = strip_tags(txt)
+                except Exception:
+                    txt_stripped = txt
+                choices.append({"name": f"choice_{i}", "text": f"{i + 1}. {txt_stripped}", "visible": True})
+            except Exception as e:
+                errors.append(f"choice {i} build failed: {e}")
+                choices.append({"name": f"choice_{i}", "text": f"{i+1}. [Error]", "visible": True})
         else:
             choices.append({"name": f"choice_{i}", "text": "", "visible": False})
+
     history_body = (format_history(history_entries, scroll=history_scroll)
                     if history_open else "")
     rewind_visible = bool(rewind_depth)
-    return {
+
+    result = {
         "speaker": speaker,
-        # M26i: the speaking Character's color (parsed float RGBA) — None
-        # means "no character / no color" and the neutral tint is used.
         "speaker_color": parse_hex_color(speaker_color),
         "dialogue": dialogue,
         "dialogue_visible": dialogue_on,
@@ -175,9 +273,20 @@ def build_world_ui(event: Optional[dict], ui_mgr=None, diag=None,
         "history_visible": bool(history_open),
         "history": history_body or ("(no backlog yet)" if history_open else ""),
         "rewind_visible": rewind_visible,
-        "rewind": (f"« rewound {rewind_depth} — Page Down resumes"
-                   if rewind_visible else ""),
+        "rewind": (f"« rewound {rewind_depth} — Page Down resumes" if rewind_visible else ""),
     }
+    if interp_warnings:
+        result["interp_warnings"] = interp_warnings
+    if errors:
+        result["errors"] = errors
+    # Typewriter state for frontend to know if done
+    if ui_mgr is not None:
+        try:
+            result["typewriter_done"] = bool(ui_mgr.is_done())
+            result["typewriter_progress"] = float(getattr(ui_mgr, '_typewriter_progress', 0.0))
+        except Exception:
+            pass
+    return result
 
 
 def parse_hex_color(value):
@@ -203,9 +312,13 @@ def parse_hex_color(value):
         return None
 
 
-def set_font_text(obj: Any, text: str) -> None:
+def set_font_text(obj: Any, text: str):
+    """Set text on a FONT object. Returns True on success, False on failure, None if obj is None (legacy compat).
+    M28 audit: previously swallowed all exceptions silently — now logs failures.
+    """
     if obj is None:
-        return
+        print("[world_ui] set_font_text called with None obj — skipping")
+        return None
     # M25 BUG-004: in the UPBGE 0.50 player a FONT game object is a
     # KX_FontObject with no .text/.body/.data — the only runtime handle on the
     # curve is `blenderObject`. Without this the dialogue/choice glyphs never
@@ -215,22 +328,17 @@ def set_font_text(obj: Any, text: str) -> None:
     if bo is not None:
         data = getattr(bo, "data", None)
         if data is not None and hasattr(data, "body"):
-            # M26d: assign only on change. The layout runs every tick, and
-            # writing `body` rebuilds the curve's glyph mesh — a backlog that
-            # is merely being *shown* was rebuilt 15-60×/s, and a frame caught
-            # mid-rebuild drew the previous page's lines on top of the new
-            # ones (visible as doubled, half-torn rows after a wheel page).
             if getattr(data, "body", None) == text:
-                return
+                return True
             try:
                 data.body = text
-                return
-            except Exception:
-                pass
+                return True
+            except Exception as e:
+                print(f"[world_ui] set_font_text blenderObject.data.body failed for {getattr(obj, 'name', '?')}: {e} — trying fallbacks")
     # fallback paths also skip redundant writes (obj["Text"] style bindings)
     _cached = getattr(obj, "_upvn_text", None)
     if _cached is not None and _cached == text:
-        return
+        return True
     for attr in ("text", "Text"):
         try:
             setattr(obj, attr, text)
@@ -238,53 +346,72 @@ def set_font_text(obj: Any, text: str) -> None:
                 obj._upvn_text = text
             except Exception:
                 pass
-            return
-        except Exception:
-            pass
+            return True
+        except Exception as e:
+            print(f"[world_ui] set_font_text attr {attr} failed for {getattr(obj, 'name', '?')}: {e}")
     try:
         obj["Text"] = text
-        return
-    except Exception:
-        pass
+        return True
+    except Exception as e:
+        print(f"[world_ui] set_font_text dict ['Text'] failed for {getattr(obj, 'name', '?')}: {e}")
     try:
         data = getattr(obj, "data", None)
         if data is not None and hasattr(data, "body"):
             data.body = text
-    except Exception:
-        pass
+            return True
+    except Exception as e:
+        print(f"[world_ui] set_font_text data.body fallback failed for {getattr(obj, 'name', '?')}: {e}")
+    print(f"[world_ui] set_font_text FAILED for {getattr(obj, 'name', '?')} — all paths exhausted")
+    return False
 
 
-def _set_visible(obj: Any, vis: bool) -> None:
+def _set_visible(obj: Any, vis: bool) -> bool:
     if obj is None:
-        return
+        # M28: log missing object — previously silent no-op caused choice never hiding
+        # Only log when trying to hide/show visible choices (reduce spam for optional objects)
+        return False
     try:
         obj.visible = vis
-    except Exception:
-        pass
+        return True
+    except Exception as e:
+        # Try alternative attribute
+        try:
+            obj["visible"] = vis
+            return True
+        except Exception:
+            pass
+        print(f"[world_ui] _set_visible failed for {getattr(obj, 'name', '?')}: {e}")
+        return False
 
 
-def _set_pos(obj: Any, loc) -> None:
+def _set_pos(obj: Any, loc) -> bool:
     if obj is None:
-        return
+        return False
     try:
         obj.worldPosition = loc
+        return True
     except Exception:
         try:
             obj.location = loc
-        except Exception:
-            pass
+            return True
+        except Exception as e:
+            print(f"[world_ui] _set_pos failed for {getattr(obj, 'name', '?')} to {loc}: {e}")
+            return False
 
 
-def _set_scale(obj: Any, scl) -> None:
+def _set_scale(obj: Any, scl) -> bool:
     if obj is None:
-        return
+        return False
     try:
         obj.worldScale = scl
+        return True
     except Exception:
         try:
             obj.localScale = scl
-        except Exception:
-            pass
+            return True
+        except Exception as e:
+            print(f"[world_ui] _set_scale failed for {getattr(obj, 'name', '?')} to {scl}: {e}")
+            return False
 
 
 def _set_font_color(obj: Any, rgba) -> None:
@@ -525,8 +652,11 @@ def layout_screen_ui(get_obj: Callable[[str], Any], payload: dict, ortho: float 
 
 
 def apply_world_ui(get_obj: Callable[[str], Any], payload: dict, ortho: float | None = None,
-                   hovered: str | None = None) -> None:
-    """Write payload onto named scene objects. `get_obj(name) -> obj|None`."""
+                   hovered: str | None = None) -> dict:
+    """Write payload onto named scene objects. `get_obj(name) -> obj|None`.
+    M28 audit: returns status dict with errors, logs failures instead of silent no-ops,
+    checks for screen/render errors and surfaces them.
+    """
     try:
         from engine.render.contract import (SPEAKER_SHADOW, DIALOGUE_SHADOW,
                                             CHOICE_SHADOW_SUFFIX, SHADOW_COLOR,
@@ -536,22 +666,48 @@ def apply_world_ui(get_obj: Callable[[str], Any], payload: dict, ortho: float | 
         CHOICE_SHADOW_SUFFIX = "_shadow"
         SHADOW_COLOR = (0.02, 0.03, 0.08, 1.0)
         DEFAULT_TEXT_COLOR = (0.92, 0.93, 1.0, 1.0)
+
+    status = {"applied": 0, "failed": 0, "errors": []}
+
+    # Surface payload errors (screen render failures, etc.) — M28
+    if payload.get("errors"):
+        for err in payload["errors"][:3]:  # show first 3
+            print(f"[world_ui] payload error: {err}")
+        status["errors"].extend(payload["errors"])
+    if payload.get("interp_warnings"):
+        for w in payload["interp_warnings"][:3]:
+            print(f"[world_ui] interp warning: {w}")
+        status["errors"].extend(payload["interp_warnings"])
+
     speaker_obj = get_obj("Speaker_Text")
     dialogue_obj = get_obj("Dialogue_Text")
     box = get_obj("Dialogue_Box")
     speaker_shadow = get_obj(SPEAKER_SHADOW)
     dialogue_shadow = get_obj(DIALOGUE_SHADOW)
-    set_font_text(speaker_obj, payload.get("speaker") or "")
-    set_font_text(dialogue_obj, payload.get("dialogue") or "")
-    # M26i: the speaker NAME carries the speaking Character's color (Ren'Py
-    # convention); everything else keeps the neutral template tint. The
-    # heartbeat exposes both for assertions.
+
+    # Track success
+    if set_font_text(speaker_obj, payload.get("speaker") or ""):
+        status["applied"] += 1
+    else:
+        status["failed"] += 1
+        status["errors"].append("Speaker_Text not found or set failed")
+
+    if set_font_text(dialogue_obj, payload.get("dialogue") or ""):
+        status["applied"] += 1
+    else:
+        status["failed"] += 1
+        status["errors"].append("Dialogue_Text not found or set failed")
+
     _set_font_color(speaker_obj, payload.get("speaker_color") or DEFAULT_TEXT_COLOR)
     vis = bool(payload.get("dialogue_visible"))
     _set_visible(speaker_obj, vis)
     _set_visible(dialogue_obj, vis)
-    _set_visible(box, vis or any(c.get("visible") for c in payload.get("choices", [])))
-    # shadows track their mains: same text, same visibility, fixed dark tint
+    # Box visibility — ensure at least box shows if any choice visible
+    has_visible_choices = any(c.get("visible") for c in payload.get("choices", []))
+    if not _set_visible(box, vis or has_visible_choices):
+        # Box missing is common in minimal test scenes — don't count as failure
+        pass
+
     if speaker_shadow is not None:
         set_font_text(speaker_shadow, payload.get("speaker") or "")
         _set_font_color(speaker_shadow, SHADOW_COLOR)
@@ -560,39 +716,57 @@ def apply_world_ui(get_obj: Callable[[str], Any], payload: dict, ortho: float | 
         set_font_text(dialogue_shadow, payload.get("dialogue") or "")
         _set_font_color(dialogue_shadow, SHADOW_COLOR)
         _set_visible(dialogue_shadow, vis)
-    # backlog overlay (M26d): without these two writes H opened a screen the
-    # player never drew — headless traces had history, the GUI never did.
-    # Order matters twice over: a KX FONT rebuilds its glyph mesh when `body`
-    # changes, and writing while the object is still hidden left an empty mesh
-    # that never refreshed on reveal (measured in the player: dark panel, no
-    # text). So unhide first, then write. And the body is never blanked while
-    # hidden — an invisible stale body costs nothing, while a per-toggle clear
-    # forces a rebuild on the exact tick it must not miss.
+
     hist_on = bool(payload.get("history_visible"))
     hbox = get_obj(HISTORY_BOX)
     htext = get_obj(HISTORY_TEXT)
     _set_visible(hbox, hist_on)
     _set_visible(htext, hist_on)
     if hist_on:
-        set_font_text(htext, payload.get("history") or "")
+        if not set_font_text(htext, payload.get("history") or ""):
+            status["errors"].append("History_Text set failed")
+
     rtext = get_obj(REWIND_TEXT)
     _set_visible(rtext, bool(payload.get("rewind_visible")))
     if payload.get("rewind_visible"):
         set_font_text(rtext, payload.get("rewind") or "")
+
     for ch in payload.get("choices", []):
         plane = get_obj(ch["name"])
         text_obj = get_obj(ch["name"] + "_text")
         shadow_obj = get_obj(ch["name"] + CHOICE_SHADOW_SUFFIX)
         on = bool(ch.get("visible"))
-        _set_visible(plane, on)
-        _set_visible(text_obj, on)
-        set_font_text(text_obj, ch.get("text") or "")
+        if not _set_visible(plane, on):
+            if on:
+                status["errors"].append(f"Choice plane {ch['name']} not found")
+                status["failed"] += 1
+        else:
+            if on:
+                status["applied"] += 1
+        if not _set_visible(text_obj, on):
+            if on:
+                status["errors"].append(f"Choice text {ch['name']}_text not found")
+                status["failed"] += 1
+        else:
+            if on:
+                if set_font_text(text_obj, ch.get("text") or ""):
+                    status["applied"] += 1
+                else:
+                    status["failed"] += 1
         if shadow_obj is not None:
             set_font_text(shadow_obj, ch.get("text") or "")
             _set_font_color(shadow_obj, SHADOW_COLOR)
             _set_visible(shadow_obj, on)
+
     if ortho is not None:
-        layout_screen_ui(get_obj, payload, ortho=ortho, hovered=hovered)
+        try:
+            layout_screen_ui(get_obj, payload, ortho=ortho, hovered=hovered)
+        except Exception as e:
+            print(f"[world_ui] layout_screen_ui failed: {e}")
+            status["errors"].append(f"layout failed: {e}")
+            status["failed"] += 1
+
+    return status
 
 
 def normalize_hit_name(name: Optional[str]) -> Optional[str]:

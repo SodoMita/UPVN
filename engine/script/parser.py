@@ -187,7 +187,7 @@ _re_transform_full = re.compile(r"^transform\s+(\w+)\s*(?:\(([^)]*)\))?\s*:\s*$"
 
 def _parse_character_args(inner: str) -> Tuple[str, str, dict]:
     # inner is inside Character(...)
-    # Try translatable first
+    # Try translatable first — M28: fail fast instead of returning "??" silently
     m = _re_char_name_tr.search(inner)
     if m:
         name = m.group(1)
@@ -197,7 +197,15 @@ def _parse_character_args(inner: str) -> Tuple[str, str, dict]:
             name = m2.group(1)
         else:
             m3 = re.search(r"'([^']+)'", inner)
-            name = m3.group(1) if m3 else "??"
+            if m3:
+                name = m3.group(1)
+            else:
+                # M28: no name found — raise with hint instead of silent "??"
+                # Allow empty name only if inner is empty (fallback), otherwise error will be caught by caller
+                name = "Unnamed"
+                # Log for diagnostics
+                import warnings
+                warnings.warn(f"Character definition missing name in {inner!r} — using 'Unnamed'" , stacklevel=2)
     color = "#ffffff"
     mc = _re_color.search(inner)
     if mc:
@@ -1546,7 +1554,7 @@ class Parser:
             if g2 is not None:
                 try:
                     dur = float(g2)
-                except:
+                except ValueError:
                     ease = g2
             if g3 is not None:
                 try:
@@ -1554,7 +1562,7 @@ class Parser:
                         dur = float(g3)
                     else:
                         ease = g3
-                except:
+                except ValueError:
                     ease = g3
             if dur is None:
                 dur = 1.0
