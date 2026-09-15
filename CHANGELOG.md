@@ -1,5 +1,46 @@
 # Changelog
 
+## 0.7.1 — M28: Audit Fixes & Reliability Hardening (no silent failures)
+
+Full engine/UI/frontend/addon hardening — previously silent no-ops now log and degrade gracefully, per M28 audit checklist.
+
+### vn_interpreter.py (1000+ lines hardened)
+- _execute_node loc-aware: say uses interpolate with _loc and collects interp_warnings, pause dur eval safe_eval(_loc) with logged fallback to 0.5, jump/call expr eval with _loc, assign safe_exec_assign _loc + div-zero guard, if cond eval failure logged as False, menu filters cond with safe_eval _loc, raises ScriptRuntimeError if no choices after filtering, caption preserved, for loop safe_eval iterable _loc + handles non-iterable via list() try/except treating as empty with log, _bind_for_target validates tuple unpack with try/except TypeError and length mismatch warning, python block errors include loc in compat message and _loc in strict, screen render errors propagated to event and logged, camera_zoom/move easing handled, anim target missing logged.
+- run() menu choice now validates isinstance int and bounds 0..len-1 before indexing (previously only run_headless did), raises ScriptRuntimeError on bad choice.
+- _eval_expr signature (_loc) with label/index, _eval_screen_expr returns None in full tier with log instead of crash, _render_screen returns errors dict with traceback snippet and prints, _run_init_python logs line number i+1 in compat errors.
+
+### parser.py
+- bare except -> except ValueError at camera_zoom dur parsing (lines 1549/1557) — prevents swallowing KeyboardInterrupt/SystemExit.
+- Character fallback "??" replaced with "Unnamed" + warnings.warn for visibility (was silent).
+
+### world_ui.py
+- wrap_text tag-aware using strip_tags for measuring (was counting tag chars causing premature wraps), added wrap_text_stripped for history/backlog.
+- set_font_text returns None for None obj (legacy compat) else bool and logs all fallback failures (blenderObject and fallbacks).
+- _set_visible/_set_pos/_set_scale return bool and log failures, handle missing obj.
+- build_world_ui new signature includes screen_errors, collects interp_warnings, payload errors, validates menu list, strips tags for choice display (FONT can't render inline tags), returns errors/interp_warnings/typewriter_done/progress.
+- apply_world_ui returns status dict {applied,failed,errors} and logs payload errors, counts applied/failed, handles missing choice planes/text as errors.
+
+### dialogue_box.py (fully wired typewriter)
+- show(event dict) strips tags via strip_tags, resets progress, logs interp_warnings.
+- update_typewriter(dt,cps) advances float progress (40 cps default), returns done.
+- instant_reveal(), revealed_text() maps stripped count to original preserving {tags} via _tag_pat search loop (previously stubbed pass), revealed_stripped(), is_done(), get_warnings(), fully_revealed().
+- Wired to VNController.update (ticks typewriter) and world_ui.build_world_ui (revealed_text fallback).
+
+### bge_frontend/frontend.py
+- _sync_world_ui collects interp.init_errors+python_errors as screen_errors, passes to build_world_ui, logs event errors with loc, logs UI apply status once via _upvn_ui_failed_logged, stores _upvn_last_ui_status.
+- heartbeat JSON now includes init_errors[:5], python_errors[:5], payload_errors[:5], interp_warnings[:5], typewriter_done, ui_status for QA harness.
+
+### blend/upvn_editor_addon.py (v0.7.1)
+- register() resets _engine_api=None, ENGINE_AVAILABLE=False to force rediscovery on every reload (fixes stale cache bug where second reload kept old engine path), reads prefs engine_path into _PREF_OVERRIDE, logs search details, version string includes M28 audit fixes.
+- _rewrite_unlit now logs every failure path (use_nodes, nodes.clear, core nodes creation, tex mix link fallback, HQ fresnel, emission inputs, object color link, output link, blend_method/shadow_method/backface) instead of silent except: pass that produced black objects (BUG M26b).
+- Version bumped to 0.7.1, dist zip 1007KB 41 entries (was 1002KB).
+
+### Reliability
+- 363 passed / 30 skipped (6 warnings: Pillow getdata deprecation + Unnamed char warn), no new syntax (M25 freeze intact).
+- Headless traces verified: interpolation with warnings, menu filtering, for non-iterable empty, typewriter tag-preserving, screen errors, init/python errors in heartbeat.
+
+## 0.7.0 — M27: HQ No-Code Workflow (declarative builder, HQ scene)
+
 ## 0.7.0 — M27: HQ No-Code Workflow (declarative builder, HQ scene)
 
 Higher quality scene + less Python coding, reliability kept. No new Ren'Py syntax (M25 freeze — only existing declarative forms).

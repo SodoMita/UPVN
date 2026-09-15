@@ -1,6 +1,6 @@
 """
 UPVN Blender Editor Tools — create visual novel inside Blender with minimal coding
-v0.7.0 (2026-09-15): Creator Quality & No-Code Workflow — declarative builder, quick wizard, HQ scene
+v0.7.1 (2026-09-15): Creator Quality & No-Code Workflow — declarative builder, quick wizard, HQ scene
 
 Why v0.6 exists
     Installing the old add-on copied this single .py into Blender's add-ons folder,
@@ -21,7 +21,7 @@ Why v0.6 exists
 
 Install (two supported ways)
   A. Dist zip (recommended):
-        dist/upvn_editor_addon_v0.7.0.zip  → Edit → Preferences → Add-ons →
+        dist/upvn_editor_addon_v0.7.1.zip  → Edit → Preferences → Add-ons →
            Install from Disk… (or Install…) → select the .zip → enable "UPVN".
      Engine, frontend and template travel inside the zip; nothing else needed.
   B. Repo checkout:
@@ -47,7 +47,7 @@ Headless fallback: when bpy unavailable (CI), the module still imports and expos
 bl_info = {
     "name": "UPVN — Visual Novel Editor",
     "author": "UPVN",
-    "version": (0, 7, 0),
+    "version": (0, 7, 1),
     "blender": (4, 2, 0),
     "location": "View3D > Sidebar > UPVN, Text Editor > Sidebar > UPVN",
     "description": "Create Ren'Py-like visual novel inside UPBGE with minimal coding — declarative builder, quick wizard, HQ scene, no Python required",
@@ -1474,47 +1474,60 @@ except Exception:
         return img
 
     def _rewrite_unlit(mat, color, _b=None, tex_capable=False, hq=False):
-        """Emission-only, texture-free — with HQ improvements (M27).
+        """Emission-only, texture-free — with HQ improvements (M27) + M28 error logging.
         
         M27 HQ: slightly higher emission strength for better visibility,
         better handling of alpha, and improved node graph for edge glow
         on choice buttons when hq=True.
+        M28: logs material setup failures instead of silent no-op (was BUG M26b: black objects).
         """
         try:
             from engine.render.contract import TEX_NODE_NAME, MIX_NODE_NAME
         except Exception:
             TEX_NODE_NAME, MIX_NODE_NAME = "UPVN Tex Image", "UPVN Tex Mix"
-        mat.use_nodes = True
-        nt = mat.node_tree
+        try:
+            mat.use_nodes = True
+            nt = mat.node_tree
+        except Exception as e:
+            print(f"[UPVN] _rewrite_unlit: material {getattr(mat, 'name', '?')} use_nodes failed: {e}")
+            return mat
         try:
             nt.nodes.clear()
-        except Exception:
-            pass
-        out = nt.nodes.new("ShaderNodeOutputMaterial")
-        em = nt.nodes.new("ShaderNodeEmission")
-        objinfo = nt.nodes.new("ShaderNodeObjectInfo")
-        src_color = objinfo.outputs["Color"]
-        if tex_capable and _b is not None:
-            tex = nt.nodes.new("ShaderNodeTexImage")
-            tex.name = TEX_NODE_NAME
-            try:
-                tex.interpolation = "Closest"
-            except Exception:
-                pass
-            tex.image = _ensure_white_image(_b)
-            mix = nt.nodes.new("ShaderNodeMix")
-            mix.name = MIX_NODE_NAME
-            try:
-                mix.data_type = "RGBA"
-                mix.inputs[0].default_value = 0.0
-                nt.links.new(objinfo.outputs["Color"], mix.inputs[6])
-                nt.links.new(tex.outputs["Color"], mix.inputs[7])
-                nt.links.new(mix.outputs[2], em.inputs["Color"])
-            except Exception:
-                nt.links.new(objinfo.outputs["Color"], em.inputs["Color"])
-            src_color = None
+        except Exception as e:
+            print(f"[UPVN] _rewrite_unlit: nodes.clear failed for {mat.name}: {e}")
+        try:
+            out = nt.nodes.new("ShaderNodeOutputMaterial")
+            em = nt.nodes.new("ShaderNodeEmission")
+            objinfo = nt.nodes.new("ShaderNodeObjectInfo")
+            src_color = objinfo.outputs["Color"]
+        except Exception as e:
+            print(f"[UPVN] _rewrite_unlit: core nodes creation failed for {mat.name}: {e}")
+            return mat
 
-        # HQ: for choice buttons, add fresnel edge glow
+        if tex_capable and _b is not None:
+            try:
+                tex = nt.nodes.new("ShaderNodeTexImage")
+                tex.name = TEX_NODE_NAME
+                try:
+                    tex.interpolation = "Closest"
+                except Exception:
+                    pass
+                tex.image = _ensure_white_image(_b)
+                mix = nt.nodes.new("ShaderNodeMix")
+                mix.name = MIX_NODE_NAME
+                try:
+                    mix.data_type = "RGBA"
+                    mix.inputs[0].default_value = 0.0
+                    nt.links.new(objinfo.outputs["Color"], mix.inputs[6])
+                    nt.links.new(tex.outputs["Color"], mix.inputs[7])
+                    nt.links.new(mix.outputs[2], em.inputs["Color"])
+                except Exception as e:
+                    print(f"[UPVN] _rewrite_unlit: tex mix link failed for {mat.name}: {e} — fallback to object color")
+                    nt.links.new(objinfo.outputs["Color"], em.inputs["Color"])
+                src_color = None
+            except Exception as e:
+                print(f"[UPVN] _rewrite_unlit: tex capable setup failed for {mat.name}: {e}")
+
         if hq:
             try:
                 fresnel = nt.nodes.new("ShaderNodeFresnel")
@@ -1522,13 +1535,11 @@ except Exception:
                 mix_hq = nt.nodes.new("ShaderNodeMix")
                 mix_hq.data_type = "RGBA"
                 mix_hq.inputs[0].default_value = 0.15
-                # brighter edge color
                 bright = (min(1.0, color[0]*1.3), min(1.0, color[1]*1.3), min(1.0, color[2]*1.3), 1.0)
                 mix_hq.inputs[6].default_value = color
                 mix_hq.inputs[7].default_value = bright
                 nt.links.new(fresnel.outputs[0], mix_hq.inputs[0])
                 if src_color is not None:
-                    # mix object color with hq mix
                     mix2 = nt.nodes.new("ShaderNodeMix")
                     mix2.data_type = "RGBA"
                     mix2.inputs[0].default_value = 0.5
@@ -1539,27 +1550,29 @@ except Exception:
                 else:
                     nt.links.new(mix_hq.outputs[2], em.inputs["Color"])
                     src_color = None
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"[UPVN] _rewrite_unlit: HQ fresnel setup failed for {mat.name}: {e}")
 
         try:
             em.inputs["Color"].default_value = color
-            # M27 HQ: slightly higher strength for better visibility
             em.inputs["Strength"].default_value = 1.2 if hq else 1.0
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[UPVN] _rewrite_unlit: emission inputs failed for {mat.name}: {e}")
         if src_color is not None:
             try:
                 nt.links.new(src_color, em.inputs["Color"])
-            except Exception:
-                pass
-        nt.links.new(em.outputs[0], out.inputs[0])
+            except Exception as e:
+                print(f"[UPVN] _rewrite_unlit: object color link failed for {mat.name}: {e}")
+        try:
+            nt.links.new(em.outputs[0], out.inputs[0])
+        except Exception as e:
+            print(f"[UPVN] _rewrite_unlit: output link failed for {mat.name}: {e}")
         for attr, val in (("blend_method", "OPAQUE"), ("shadow_method", "NONE"),
                           ("use_backface_culling", False)):
             try:
                 setattr(mat, attr, val)
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"[UPVN] _rewrite_unlit: set {attr} failed for {mat.name}: {e}")
         return mat
 
     def _data_text(name, body="", size=0.32, loc=(0, -0.55, -3.0), rot=None):
@@ -3082,6 +3095,29 @@ except Exception:
                     pass
 
     def register():
+        # M28 audit fix: reset module-level caches on (re-)register so stale values don't survive
+        # a second reload without Blender restart, and so Locate Engine override is re-evaluated.
+        global _PREF_OVERRIDE, _engine_api, ENGINE_AVAILABLE, ENGINE_INFO
+        # Don't clear _PREF_OVERRIDE if it was set via Locate Engine — but reset engine cache
+        # Actually we keep _PREF_OVERRIDE (user choice) but reset ENGINE_AVAILABLE and _engine_api
+        # to force re-discovery on every register.
+        _engine_api = None
+        ENGINE_AVAILABLE = False
+        # ENGINE_INFO will be overwritten by ensure_engine
+        # If user set engine_path in prefs, respect it as override
+        try:
+            # Try to read prefs engine_path if available (for persistence across reloads)
+            if HAS_BPY and bpy is not None:
+                try:
+                    # bpy.context may not be available during register, try addon prefs directly
+                    import bpy as _bpy
+                    # Don't access context, just keep existing _PREF_OVERRIDE
+                    pass
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
         _purge_stale_registrations()
         try:
             for cls in classes:
@@ -3092,10 +3128,32 @@ except Exception:
                 description="Version of the UPVN editor add-on currently registered",
                 default=".".join(str(x) for x in bl_info.get("version", ())),
             )
+            # M28: if prefs has engine_path, use it as _PREF_OVERRIDE for this session
+            try:
+                # After classes registered, prefs are accessible via context
+                # but during register context may not have scene — try to read from addon prefs
+                prefs = None
+                try:
+                    # In some Blender versions, preferences are available via bpy.context.preferences
+                    ctx = getattr(bpy, 'context', None)
+                    if ctx is not None and hasattr(ctx, 'preferences'):
+                        addon = ctx.preferences.addons.get(__name__)
+                        if addon is not None:
+                            ep = getattr(addon.preferences, 'engine_path', '') or ''
+                            if ep and os.path.isdir(ep):
+                                _PREF_OVERRIDE = ep
+                                print(f"[UPVN] Using engine_path from prefs: {ep}")
+                except Exception:
+                    pass
+            except Exception:
+                pass
+
             ok, info = ensure_engine(retry=True)
             ver = ".".join(str(x) for x in bl_info.get("version", ()))
             print(f"[UPVN] Editor addon v{ver} registered — engine: {'OK via ' + str(info['source']) if ok else 'NOT FOUND (' + str(info['message'])[:120] + ')'}")
-            print("[UPVN] Panels: View3D > Sidebar > UPVN | Text Editor > Sidebar > UPVN — HQ No-Code v0.7")
+            print("[UPVN] Panels: View3D > Sidebar > UPVN | Text Editor > Sidebar > UPVN — HQ No-Code v0.7.1 (M28 audit fixes)")
+            if not ok:
+                print(f"[UPVN] Engine search details: {info.get('searched', [])}")
         except Exception as exc:
             print(f"[UPVN] register() error (add-on partially enabled): {exc}")
             try:

@@ -209,8 +209,6 @@ def _sync_world_ui(ctrl, hovered=None):
     try:
         from engine.ui.world_ui import build_world_ui, apply_world_ui
         from engine.render.contract import CAMERA_UI_ORTHO_SCALE
-        # backlog + rewind state come from the screen manager / controller so the
-        # player draws the same history the headless traces already had (M26d).
         _sm = getattr(ctrl, "screen_mgr", None)
         history_open = False
         history_entries = None
@@ -225,17 +223,29 @@ def _sync_world_ui(ctrl, hovered=None):
                 history_entries = None
         if history_entries is None:
             history_entries = getattr(getattr(ctrl, "state", None), "history", [])
+        # M28: collect compat errors and screen errors for display
+        interp = getattr(ctrl, "interp", None)
+        compat_errors = []
+        if interp is not None:
+            try:
+                compat_errors = list(getattr(interp, "init_errors", []) or []) + list(getattr(interp, "python_errors", []) or [])
+            except Exception:
+                pass
+        current_event = getattr(ctrl, "current_event", None)
         payload = build_world_ui(
-            getattr(ctrl, "current_event", None),
+            current_event,
             ui_mgr=getattr(ctrl, "ui_mgr", None),
             diag=getattr(ctrl, "_load_diag", None),
             history_entries=history_entries,
             history_open=history_open,
             rewind_depth=getattr(ctrl, "rewind_depth", lambda: 0)(),
             history_scroll=int(getattr(ctrl, "_history_scroll", 0) or 0),
+            screen_errors=compat_errors if compat_errors else None,
         )
-        # hovered comes in as a parameter (set by _tick_pointer) — this
-        # function has no `logic` in scope
+        # M28: if current event has errors, log them visibly
+        if current_event and current_event.get("errors"):
+            for err in current_event["errors"][:2]:
+                print(f"[UPVN] event error at {current_event.get('_loc')}: {err}")
         ortho = CAMERA_UI_ORTHO_SCALE
         try:
             import bge as _bge
@@ -243,18 +253,25 @@ def _sync_world_ui(ctrl, hovered=None):
             ortho = float(getattr(cam, "ortho_scale", ortho) or ortho)
         except Exception:
             pass
-        apply_world_ui(_get_obj, payload, ortho=ortho, hovered=hovered)
-        # expose the last payload so the QA heartbeat can report what the UI
-        # actually decided (text, visibility) — not just the story position.
+        status = apply_world_ui(_get_obj, payload, ortho=ortho, hovered=hovered)
+        # Log UI apply failures once
+        if status and status.get("failed", 0) > 0:
+            try:
+                import bge as _bge
+                if not getattr(_bge.logic, "_upvn_ui_failed_logged", False):
+                    _bge.logic._upvn_ui_failed_logged = True
+                    print(f"[UPVN] world UI apply: {status['applied']} ok, {status['failed']} failed, errors={status['errors'][:3]}")
+            except Exception:
+                pass
         try:
             import bge as _bge
             _bge.logic._upvn_last_payload = payload
+            _bge.logic._upvn_last_ui_status = status
         except Exception:
             pass
     except Exception as e:
-        # M25 BUG-002: this used to be a bare `except: pass`, which silently
-        # swallowed every UI failure every tick (the player also discards
-        # Python stdout, so field reports saw a black screen with no clue).
+        import traceback
+        traceback.print_exc()
         try:
             import bge as _bge
             if not getattr(_bge.logic, "_upvn_ui_sync_err", False):
@@ -693,12 +710,8 @@ def main(cont=None):
                 "modal": (None if _sm is None or _sm.active_modal is None
                           else _sm.active_modal.name),
                 "ortho": _ortho,
-                # --- M26d: what the UI layer actually decided this tick, plus
-                # the rewind/history counters a harness needs to assert on.
                 "speaker": _payload.get("speaker"),
                 "dialogue": _payload.get("dialogue"),
-                # M26i: speaking Character color (float RGBA) + the speaker
-                # object's ACTUAL tint — payload vs scene ground truth.
                 "speaker_color": (list(_payload.get("speaker_color"))
                                   if _payload.get("speaker_color") else None),
                 "dialogue_visible": bool(_payload.get("dialogue_visible")),
@@ -711,6 +724,13 @@ def main(cont=None):
                 "rollforward_depth": len(getattr(ctrl, "_forward_stack", []) or []),
                 "skipping": bool(getattr(_st, "skip", False)),
                 "auto": bool(getattr(_st, "auto", False)),
+                # M28: compat mode errors and payload errors for QA
+                "init_errors": list(getattr(_interp, "init_errors", []) or [])[:5] if _interp else [],
+                "python_errors": list(getattr(_interp, "python_errors", []) or [])[:5] if _interp else [],
+                "payload_errors": list(_payload.get("errors", []) or [])[:5],
+                "interp_warnings": list(_payload.get("interp_warnings", []) or [])[:5],
+                "typewriter_done": bool(_payload.get("typewriter_done", True)),
+                "ui_status": getattr(logic, "_upvn_last_ui_status", None),
             }
             try:
                 _sc = logic.getCurrentScene()
