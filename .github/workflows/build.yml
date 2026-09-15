@@ -1,0 +1,57 @@
+name: Build Dist
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build-addon:
+    name: Build add-on zip + validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run tests (quick gate)
+        run: python -m pytest tests/ -q
+
+      - name: Build add-on zip
+        run: |
+          python tools/package_addon.py dist
+          ls -lh dist/
+          unzip -l dist/*.zip | head -n 100
+
+      - name: Validate zip can be imported (self-containment proof)
+        run: |
+          python - << 'PY'
+          import zipfile, pathlib, sys, tempfile, os
+          zips=list(pathlib.Path('dist').glob('upvn_editor_addon_v*.zip'))
+          if not zips:
+              raise SystemExit("no addon zip found")
+          z=zips[-1]
+          print(f"Checking {z}")
+          with zipfile.ZipFile(z) as zf:
+              names=zf.namelist()
+              assert any(n.endswith('__init__.py') for n in names), "missing __init__.py"
+              assert any('engine/script/parser.py' in n for n in names), "missing engine/script/parser.py"
+              assert any('bge_frontend/frontend.py' in n for n in names), "missing frontend"
+              print(f"OK {len(names)} entries")
+          PY
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: upvn-addon-dist
+          path: dist/*.zip
+          if-no-files-found: error
