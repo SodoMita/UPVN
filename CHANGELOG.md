@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.7.0 — M27: HQ No-Code Workflow (declarative builder, HQ scene)
+
+Higher quality scene + less Python coding, reliability kept. No new Ren'Py syntax (M25 freeze — only existing declarative forms).
+
+### HQ Scene
+- build_vn_scene: emission 1.2 HQ, Fresnel edge glow for choice buttons (LayerWeight→Emission), dark gradient world (0.015,0.018,0.032) 0.6 strength, soft SUN_Soft (0.8 energy warm) kept for 3D depth, dialogue box darker (0.03,0.05,0.12), choice buttons larger 3.4x0.32 spacing 0.75→0.78, hover 1.08→1.12
+- make_template: _mat_hq PBR for 3D, Emission for UI; classroom HQ — walls back+left+right, 2 windows with glass highlights, 3 ceiling lights, 11 desks (was 9) + 4 chairs, blackboard larger + frame 4 sides, 5 markers (added left/right), 5 presets (added dramatic low), taller capsules 0.28 radius 1.5 height
+- headless_renderer: HQ BGs — classroom warmer gradient + glass highlights + center glow + vignette 140px, lecturehall light rays varying alpha + audience silhouettes, meadow flowers + 3 cloud layers, black radial glow 2 layers; stage HQ richer with frame/shadow/highlights/markers; dialogue HQ darker box 8,12,26 inner highlight text shadow; menu HQ larger 480x62 edge glow outer rect text shadow 16px spacing
+- world_ui: HOVER_SCALE 1.12, CHOICE_SPACING_EM 0.78, WIDTH 0.74, HEIGHT 0.052, layout better spacing
+
+### No-Code Workflow
+- UPVN_GameBuilder declarative-first: state_vars, images/audios/stages, add_state_var(name,type,value), add_image/audio/stage_asset, add_set(target,op,expr) canonical set not $, add_if/elif/else/end with indent stack, add_choice(text,jump,cond) declarative, add_jump/call/return/pause/play_music/sound/camera_zoom/preset/side_image/narration, create_quick_wizard(title,theme) one-click full game 2 endings affection/book/3D stage, create_starter_declarative HQ starter with state/characters/menu/if, preview_all_paths QA screenshots all choice paths. Emits state:, character id:, image/audio/stage, label, set, choice, if/else/end, jump, return. Non-destructive write handles define+character, state insertion, asset insertion, placeholder cleaning, before-return insertion
+- Blender Panels M27: UPVN_SceneProps new fields var_name/type/value, if_cond, jump_target, label_name, pause_duration, audio_name/file, camera_zoom/duration/easing, wizard_title/theme, set_target/op/expr; 13 new operators — Add Variable (State), Add Set, Add If/Else/End, Add Jump/Label, Add Pause, Add Music/Sound, Add Camera Zoom, Quick VN Wizard, Export Package, Script Outline, Preview All Paths; Main Panel boxed sections Project/HQ Scene/Characters/Variables/Scene/Dialogue/Logic/Menu/Extras/Tools; tooltips all new ops; asset browser copies BG/sprite/audio to assets/ with mkdir reports path
+- upvn_game_creator: quick_game use_wizard=True one-call full game no .rpy typing, emits declarative HQ validates previews all paths; example 99_hq_wizard 3406 bytes declarative HQ validates OK
+- Tests: test_arbitrary_saves updated for declarative, added test_blender_builder_declarative_hq, test_m26g_builder_write updated for declarative forms; wizard early-return bug fixed (add_menu/add_choice placeholder ["chosen" "return"] + ensure_label clears placeholder if only chosen)
+
+### Reliability
+- 363 passed / 30 skipped, 4 warnings Pillow getdata, contract unchanged, headless traces HQ, no new syntax
+
+# Changelog
+
 ## 0.6.16 — M26i: stylized, colored 3D text
 
 The UI type is now real 3D type instead of flat Bfont curves:

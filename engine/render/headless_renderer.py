@@ -70,154 +70,196 @@ def fill_rgb(c, default=(230, 245, 255)):
 
 # ---------------------------------------------------------------- bg
 def draw_bg(img: Image.Image, draw: ImageDraw.ImageDraw, scene: str | None):
+    """M27 HQ backgrounds — more polished, better colors, subtle gradients, details."""
     s = scene or "black"
     if s == "bg classroom":
+        # HQ: warmer, more detailed classroom with better lighting
         for y in range(H):
             t=y/H
-            r=int(235 - 15*t)
-            g=int(225 - 20*t)
-            b=int(195 - 30*t)
+            r=int(240 - 18*t)
+            g=int(230 - 22*t)
+            b=int(200 - 28*t)
             draw.line([(0,y),(W,y)], fill=(r,g,b))
+        # windows with HQ glow
         for wx in [70, 460, 850]:
-            draw.rounded_rectangle([wx, 60, wx+320, 320], radius=6, fill=(135,175,215), outline=(90,110,140), width=3)
-            draw.line([(wx+160,60),(wx+160,320)], fill=(90,110,140), width=3)
-            draw.line([(wx,190),(wx+320,190)], fill=(90,110,140), width=3)
-            draw.rounded_rectangle([wx+8, 68, wx+312, 182], radius=4, fill=(200,225,255,90))
-        draw.rectangle([0,520,W,524], fill=(120,100,80))
+            draw.rounded_rectangle([wx, 60, wx+320, 320], radius=8, fill=(125,165,205), outline=(80,100,130), width=3)
+            draw.line([(wx+160,60),(wx+160,320)], fill=(80,100,130), width=3)
+            draw.line([(wx,190),(wx+320,190)], fill=(80,100,130), width=3)
+            # glass highlight
+            draw.rounded_rectangle([wx+10, 70, wx+150, 180], radius=5, fill=(200,230,255,120))
+            draw.rounded_rectangle([wx+170, 70, wx+310, 180], radius=5, fill=(190,220,245,100))
+            draw.rounded_rectangle([wx+10, 200, wx+150, 310], radius=5, fill=(180,210,235,80))
+            draw.rounded_rectangle([wx+170, 200, wx+310, 310], radius=5, fill=(170,200,225,70))
+        # floor line with shadow
+        draw.rectangle([0,520,W,526], fill=(110,90,70))
+        draw.rectangle([0,526,W,530], fill=(0,0,0,25))
+        # vignette HQ
         overlay = Image.new("RGBA", (W,H), (0,0,0,0))
         od = ImageDraw.Draw(overlay)
-        for i in range(120):
-            a = int(35*(1-i/120))
+        for i in range(140):
+            a = int(30*(1-i/140))
             od.rectangle([i,i,W-i-1,H-i-1], outline=(0,0,0,a))
+        # subtle center glow
+        od.ellipse([W//2-500, H//2-350, W//2+500, H//2+350], fill=(255,255,220,8))
         img.alpha_composite(overlay, (0,0))
     elif s == "bg lecturehall":
+        # HQ: darker, more atmospheric
         for y in range(H):
             t=y/H
-            r=int(42 - 12*t); g=int(52 - 10*t); b=int(84 - 14*t)
+            r=int(38 - 10*t); g=int(48 - 8*t); b=int(80 - 12*t)
             draw.line([(0,y),(W,y)], fill=(r,g,b))
+        # light rays HQ
         for x in [220, 640, 1060]:
-            draw.rectangle([x-2, 0, x+2, 360], fill=(255,240,180,10))
-        draw.rectangle([0,480,W,540], fill=(28,32,48))
-        draw.rectangle([W//2-140,450,W//2+140,480], fill=(42,48,70), outline=(65,72,95), width=1)
-        draw.ellipse([W//2-180,520,W//2+180,560], fill=(0,0,0,35))
+            for w in range(4):
+                a = int(12 - w*2)
+                draw.rectangle([x-2-w, 0, x+2+w, 360], fill=(255,240,180,a))
+        draw.rectangle([0,480,W,540], fill=(24,28,42))
+        draw.rectangle([W//2-140,450,W//2+140,480], fill=(38,44,66), outline=(60,68,90), width=1)
+        draw.ellipse([W//2-180,520,W//2+180,560], fill=(0,0,0,45))
+        # HQ: add subtle audience silhouettes
+        for x in range(100, W-100, 80):
+            draw.ellipse([x-15, 470, x+15, 490], fill=(0,0,0,30))
     elif s == "bg meadow":
+        # HQ: more vibrant, better clouds, flowers
         for y in range(H):
             t=y/H
             if t<0.52:
                 tt=t/0.52
-                r=int(135+60*tt); g=int(185+40*tt); b=int(235-20*tt)
+                r=int(135+70*tt); g=int(190+45*tt); b=int(240-15*tt)
             else:
                 tt=(t-0.52)/0.48
-                r=int(75-20*tt); g=int(135-15*tt); b=int(75-10*tt)
+                r=int(85-15*tt); g=int(145-20*tt); b=int(80-15*tt)
             draw.line([(0,y),(W,y)], fill=(r,g,b))
-        draw.ellipse([-300,380,800,620], fill=(85,145,85))
-        draw.ellipse([500,400,1450,650], fill=(70,125,70))
+        draw.ellipse([-300,380,800,620], fill=(90,150,90))
+        draw.ellipse([500,400,1450,650], fill=(75,130,75))
+        # HQ flowers
+        for fx, fy in [(200, 600), (400, 620), (900, 610), (1100, 630)]:
+            draw.ellipse([fx-6, fy-6, fx+6, fy+6], fill=(255,220,80))
+            draw.ellipse([fx-3, fy-3, fx+3, fy+3], fill=(255,240,150))
         for cx,cy in [(260,110),(620,90),(980,120)]:
-            draw.ellipse([cx-90,cy-30,cx+90,cy+30], fill=(255,255,255,95))
-            draw.ellipse([cx-60,cy-45,cx+60,cy+10], fill=(255,255,255,85))
+            draw.ellipse([cx-90,cy-30,cx+90,cy+30], fill=(255,255,255,110))
+            draw.ellipse([cx-60,cy-45,cx+60,cy+10], fill=(255,255,255,95))
+            draw.ellipse([cx-30,cy-35,cx+30,cy+5], fill=(255,255,255,80))
     elif s == "bg uni":
         for y in range(H):
             t=y/H
-            r=int(60+30*t); g=int(95+35*t); b=int(145+20*t)
+            r=int(65+35*t); g=int(100+40*t); b=int(150+25*t)
             draw.line([(0,y),(W,y)], fill=(r,g,b))
-        draw.rectangle([0,360,W,560], fill=(35,45,65))
+        draw.rectangle([0,360,W,560], fill=(38,48,68))
         for x in range(60,W,170):
-            draw.rectangle([x,300,x+110,360], fill=(50,60,80), outline=(70,80,100), width=2)
+            draw.rectangle([x,300,x+110,360], fill=(55,65,85), outline=(75,85,105), width=2)
             for wy in [315,335]:
-                draw.rectangle([x+12,wy,x+98,wy+14], fill=(255,235,160))
+                draw.rectangle([x+12,wy,x+98,wy+14], fill=(255,240,170))
+                draw.rectangle([x+14,wy+2,x+96,wy+6], fill=(255,255,200,180))
         for x in [120,340,760,1020]:
-            draw.ellipse([x-35,340,x+35,385], fill=(45,90,45))
-            draw.rectangle([x-6,385,x+6,410], fill=(70,50,30))
+            draw.ellipse([x-35,340,x+35,385], fill=(50,95,50))
+            draw.ellipse([x-20,345,x+20,380], fill=(60,110,60))
+            draw.rectangle([x-6,385,x+6,410], fill=(75,55,35))
     elif s == "bg hallway":
         for y in range(H):
             t=y/H
-            r=int(115-35*t); g=int(95-25*t); b=int(65-15*t)
+            r=int(120-30*t); g=int(100-22*t); b=int(70-12*t)
             draw.line([(0,y),(W,y)], fill=(r,g,b))
-        draw.polygon([(0,0),(340,0),(260,H),(0,H)], fill=(125,105,75))
-        draw.polygon([(W,0),(W-340,0),(W-260,H),(W,H)], fill=(115,95,68))
+        draw.polygon([(0,0),(340,0),(260,H),(0,H)], fill=(130,110,80))
+        draw.polygon([(W,0),(W-340,0),(W-260,H),(W,H)], fill=(120,100,73))
         for y in range(380,H,70):
             w=int((y-380)*0.9+90)
-            draw.polygon([(W//2-w//2,y),(W//2+w//2,y),(W//2+w//2+40,y+70),(W//2-w//2-40,y+70)], outline=(90,75,55), width=1, fill=(135,115,85) if (y//70)%2==0 else (125,105,78))
+            draw.polygon([(W//2-w//2,y),(W//2+w//2,y),(W//2+w//2+40,y+70),(W//2-w//2-40,y+70)], outline=(90,75,55), width=1, fill=(140,120,90) if (y//70)%2==0 else (130,110,83))
         for x in [30,170,1010,1150]:
-            draw.rectangle([x,120,x+100,380], fill=(60,85,105), outline=(40,60,80), width=2)
-            draw.ellipse([x+70,240,x+78,248], fill=(200,200,180))
+            draw.rectangle([x,120,x+100,380], fill=(65,90,110), outline=(45,65,85), width=2)
+            draw.ellipse([x+70,240,x+78,248], fill=(210,210,190))
+            # door handle highlight
+            draw.ellipse([x+72,242,x+76,246], fill=(255,255,255,120))
     elif s == "black" or s is None:
-        for y in range(H):
-            draw.line([(0,y),(W,y)], fill=(6,8,14))
-        overlay=Image.new("RGBA",(W,H),(0,0,0,0))
-        od=ImageDraw.Draw(overlay)
-        od.ellipse([W//2-400,H//2-300,W//2+400,H//2+300], fill=(20,30,55,45))
-        img.alpha_composite(overlay,(0,0))
-    else:
+        # HQ: dark with subtle radial glow, not flat
         for y in range(H):
             t=y/H
-            r=int(18+10*t); g=int(22+12*t); b=int(38+15*t)
+            r=int(8+6*t); g=int(10+8*t); b=int(18+12*t)
             draw.line([(0,y),(W,y)], fill=(r,g,b))
+        overlay=Image.new("RGBA",(W,H),(0,0,0,0))
+        od=ImageDraw.Draw(overlay)
+        od.ellipse([W//2-450,H//2-320,W//2+450,H//2+320], fill=(25,35,65,55))
+        od.ellipse([W//2-250,H//2-180,W//2+250,H//2+180], fill=(35,50,85,35))
+        img.alpha_composite(overlay,(0,0))
+    else:
+        # generic HQ with gradient
+        for y in range(H):
+            t=y/H
+            r=int(20+12*t); g=int(24+14*t); b=int(42+18*t)
+            draw.line([(0,y),(W,y)], fill=(r,g,b))
+        # subtle vignette
+        overlay=Image.new("RGBA",(W,H),(0,0,0,0))
+        od=ImageDraw.Draw(overlay)
+        for i in range(80):
+            a=int(20*(1-i/80))
+            od.rectangle([i,i,W-i-1,H-i-1], outline=(0,0,0,a))
+        img.alpha_composite(overlay,(0,0))
 
 def draw_stage(img: Image.Image, draw: ImageDraw.ImageDraw, state):
-    """M13 hybrid 3D stage — perspective floor + markers for show3d"""
+    """M27 HQ 3D stage — richer classroom with lighting, depth, better markers."""
     stage = state.stage or "unknown_stage"
-    # if no scene bg, fill top with stage environment instead of black
-    # we already drew bg (black) earlier; overwrite top 0-320 with stage sky
-    # check state's scene background
     bg = state.scene.background if hasattr(state, "scene") else None
     if bg is None or bg == "black":
         for y in range(0, 320):
             t = y/320
-            r=int(55 + 20*t); g=int(65 + 15*t); b=int(85 + 10*t)
+            r=int(60 + 25*t); g=int(70 + 20*t); b=int(90 + 15*t)
             draw.line([(0,y),(W,y)], fill=(r,g,b))
-        # also draw simple backdrop wall
-        draw.rectangle([W//2 - 300, 60, W//2 + 300, 320], fill=(45,55,75), outline=(70,80,100), width=1)
-        for wx in [W//2-280, W//2-90, W//2+110]:
-            draw.rectangle([wx, 80, wx+160, 300], fill=(70,85,110), outline=(90,110,140), width=1)
-    # floor
+        draw.rectangle([W//2 - 320, 60, W//2 + 320, 320], fill=(50,60,80), outline=(75,85,105), width=1)
+        for wx in [W//2-300, W//2-100, W//2+120]:
+            draw.rectangle([wx, 80, wx+160, 300], fill=(75,90,115), outline=(95,115,145), width=1)
+            # window light
+            draw.rectangle([wx+10, 90, wx+150, 290], fill=(200,225,255,25))
+    # floor HQ — perspective with better shading
     for y in range(320, H-110):
         t = (y-320)/(H-110-320)
-        r=int(38 - 10*t); g=int(45 - 8*t); b=int(60 - 10*t)
+        r=int(42 - 12*t); g=int(48 - 10*t); b=int(65 - 12*t)
         draw.line([(0,y),(W,y)], fill=(r,g,b))
-    for i in range(-2, 3):
-        x_center = W//2 + i*140
-        draw.line([(x_center, 320), (W//2 + i*40, H-110)], fill=(70,80,95,120), width=1)
+    for i in range(-3, 4):
+        x_center = W//2 + i*150
+        draw.line([(x_center, 320), (W//2 + i*45, H-110)], fill=(75,85,100,110), width=1)
     for y in [360, 400, 450, 520]:
-        draw.line([(220,y),(W-220,y)], fill=(70,80,95,80), width=1)
-    # richer classroom_3d desks when stage is classroom_3d (polish v0.5)
+        draw.line([(200,y),(W-200,y)], fill=(75,85,100,70), width=1)
+    # HQ classroom
     if "classroom" in stage:
-        # 3 rows x 3 cols of desks (wooden) + blackboard at front
-        # blackboard
-        draw.rounded_rectangle([W//2-180, 330, W//2+180, 360], radius=4, fill=(28,55,32), outline=(90,110,90), width=1)
-        draw.text((W//2-42, 338), "BOARD", fill=(180,220,180), font=F_Small)
-        # teacher desk
-        draw.rounded_rectangle([W//2-90, 368, W//2+90, 390], radius=6, fill=(110,85,60), outline=(80,60,40), width=1)
-        draw.line([(W//2, 368), (W//2, 390)], fill=(80,60,40), width=1)
-        # student desks
-        for row, y in enumerate([420, 470, 520]):
-            for col, x in enumerate([W//2-220, W//2-70, W//2+80, W//2+230]):
-                # skip center aisle for some
+        # blackboard with frame
+        draw.rounded_rectangle([W//2-190, 325, W//2+190, 365], radius=6, fill=(32,60,36), outline=(95,115,95), width=2)
+        draw.rounded_rectangle([W//2-185, 330, W//2+185, 360], radius=4, fill=(28,55,32))
+        draw.text((W//2-45, 338), "BOARD", fill=(185,225,185), font=F_Small)
+        # teacher desk HQ
+        draw.rounded_rectangle([W//2-95, 372, W//2+95, 395], radius=7, fill=(115,90,65), outline=(85,65,45), width=1)
+        draw.line([(W//2, 372), (W//2, 395)], fill=(85,65,45), width=1)
+        draw.ellipse([W//2-70, 395, W//2+70, 405], fill=(0,0,0,20))
+        # student desks HQ — more rows, better shadows
+        for row, y in enumerate([425, 475, 525]):
+            for col, x in enumerate([W//2-240, W//2-80, W//2+80, W//2+240]):
                 if col == 2 and row == 1:
                     continue
-                # desk top
-                draw.rounded_rectangle([x-48, y-12, x+48, y+12], radius=5, fill=(125,95,65), outline=(90,70,45), width=1)
-                draw.line([(x, y-12), (x, y+12)], fill=(90,70,45), width=1)
-                # chair
-                draw.rounded_rectangle([x-22, y+18, x+22, y+32], radius=4, fill=(85,75,65), outline=(60,55,45), width=1)
-                # shadow
-                draw.ellipse([x-30, y+32, x+30, y+38], fill=(0,0,0,18))
-    txt = f"3D STAGE: {stage}"
+                draw.rounded_rectangle([x-52, y-14, x+52, y+14], radius=6, fill=(130,100,70), outline=(95,75,50), width=1)
+                draw.line([(x, y-14), (x, y+14)], fill=(95,75,50), width=1)
+                draw.rounded_rectangle([x-24, y+20, x+24, y+36], radius=5, fill=(90,80,70), outline=(65,60,50), width=1)
+                draw.ellipse([x-32, y+36, x+32, y+42], fill=(0,0,0,22))
+                # desk highlight
+                draw.line([(x-50, y-12), (x+50, y-12)], fill=(255,255,255,25), width=1)
+    # stage badge HQ
+    txt = f"3D STAGE: {stage} — HQ"
     tw = draw.textlength(txt, font=F_Small)
-    draw.rounded_rectangle([W//2 - tw//2 - 14, 340, W//2 + tw//2 +14, 360], radius=8, fill=(0,25,35,220), outline=(0,184,195,80))
-    draw.text((W//2 - tw//2, 344), txt, fill=(0,214,245), font=F_Small)
-    markers = {"marker_eileen": W//2 - 160, "marker_sylvie": W//2 + 160, "center": W//2, "marker_center": W//2}
+    draw.rounded_rectangle([W//2 - tw//2 - 16, 335, W//2 + tw//2 +16, 360], radius=9, fill=(0,28,40,230), outline=(0,200,210,90))
+    draw.text((W//2 - tw//2, 342), txt, fill=(0,220,250), font=F_Small)
+    markers = {"marker_eileen": W//2 - 160, "marker_sylvie": W//2 + 160, "center": W//2, "marker_center": W//2,
+               "marker_left": W//2 - 260, "marker_right": W//2 + 260}
     for asset, info in state.stage_objects.items():
         marker = info.get("marker") or "center"
         x = markers.get(marker, W//2)
         y_base = H-110
-        draw.ellipse([x-45, y_base-90, x+45, y_base-10], fill=(0,0,0,25))
-        draw.rounded_rectangle([x-30, 400, x+30, y_base-20], radius=8, fill=hex_rgb("#8ec8ff"), outline=(255,255,255,40))
-        draw.ellipse([x-22, 380, x+22, 410], fill=(255,225,190), outline=(0,0,0,20))
+        draw.ellipse([x-50, y_base-95, x+50, y_base-10], fill=(0,0,0,30))
+        draw.rounded_rectangle([x-32, 395, x+32, y_base-22], radius=9, fill=hex_rgb("#8ec8ff"), outline=(255,255,255,50))
+        draw.ellipse([x-24, 375, x+24, 408], fill=(255,230,195), outline=(0,0,0,25))
+        # HQ character highlight
+        draw.ellipse([x-18, 385, x-8, 395], fill=(255,255,255,80))
         lab = f"show3d {asset} @ {marker} [{info.get('anim','idle')}]"
         tw2 = draw.textlength(lab, font=F_Small)
-        draw.rounded_rectangle([x - tw2//2 -8, y_base+4, x+ tw2//2+8, y_base+22], radius=6, fill=(12,16,28,200), outline=(100,180,220,60))
-        draw.text((x - tw2//2, y_base+8), lab, fill=(200,225,255), font=F_Small)
+        draw.rounded_rectangle([x - tw2//2 -10, y_base+4, x+ tw2//2+10, y_base+24], radius=7, fill=(14,18,32,210), outline=(110,190,230,70))
+        draw.text((x - tw2//2, y_base+9), lab, fill=(210,235,255), font=F_Small)
 
 def draw_sprite_at_x(img: Image.Image, draw: ImageDraw.ImageDraw, tag: str, expr: str, x: int, color: str, progress: float = 1.0):
     y_bottom=515
@@ -355,26 +397,33 @@ def draw_sprite(img: Image.Image, draw: ImageDraw.ImageDraw, tag: str, expr: str
     draw.text((bx0+24,by0+4), txt, fill=(190,220,230), font=F_Small)
 
 def draw_dialogue(img: Image.Image, draw: ImageDraw.ImageDraw, speaker, speaker_color, text):
+    """M27 HQ dialogue — darker, more readable, better speaker badge, subtle glow."""
     box_y0=538; box_h=H-box_y0
     box=Image.new("RGBA",(W,box_h),(0,0,0,0))
     bd=ImageDraw.Draw(box,"RGBA")
-    bd.rounded_rectangle([22,14,W-22,box_h-14], radius=16, fill=(10,14,28,235), outline=(38,55,95,255), width=1)
-    bd.line([(34,20),(W-34,20)], fill=(0,184,195,55), width=1)
-    bd.line([(34,box_h-18),(W-34,box_h-18)], fill=(255,255,255,10), width=1)
+    # HQ: darker, more polished box with inner glow
+    bd.rounded_rectangle([20,12,W-20,box_h-12], radius=18, fill=(8,12,26,240), outline=(42,60,100,255), width=1)
+    bd.rounded_rectangle([22,14,W-22,box_h-14], radius=16, fill=(10,14,28,235))
+    bd.line([(34,20),(W-34,20)], fill=(0,184,195,65), width=1)
+    bd.line([(34,box_h-18),(W-34,box_h-18)], fill=(255,255,255,12), width=1)
+    # inner highlight
+    bd.line([(32,22),(W-32,22)], fill=(255,255,255,8), width=1)
     img.alpha_composite(box,(0,box_y0))
     if speaker:
         tw=draw.textlength(speaker, font=F_Name)
         nx,ny=58, box_y0+4
-        draw.rounded_rectangle([nx,ny,nx+tw+28,ny+26], radius=13, fill=(18,42,48,255), outline=(0,184,195,110), width=1)
+        # HQ speaker badge — more polished
+        draw.rounded_rectangle([nx,ny,nx+tw+32,ny+28], radius=14, fill=(16,40,50,255), outline=(0,190,200,120), width=1)
+        draw.rounded_rectangle([nx+2,ny+2,nx+tw+30,ny+26], radius=12, fill=(20,50,60,180))
         draw.ellipse([nx+10,ny+8,nx+20,ny+18], fill=fill_rgb(speaker_color, (126, 234, 255)))
-        # M26i parity with the 3D world UI: the NAME carries the Character's
-        # color there, so it must here too (was neutral white before).
+        draw.ellipse([nx+12,ny+10,nx+16,ny+14], fill=(255,255,255,120))
         draw.text((nx+28,ny+5), speaker, fill=fill_rgb(speaker_color), font=F_Name)
         text_y=box_y0+44
     else:
         text_y=box_y0+30
     if text:
         clean=re.sub(r"\{[^}]+?\}","",text)
+        # variable interpolation display
         max_w=W-150
         wrapped=[]
         for para in clean.split("\n"):
@@ -388,37 +437,48 @@ def draw_dialogue(img: Image.Image, draw: ImageDraw.ImageDraw, speaker, speaker_
             if cur: wrapped.append(cur)
         wrapped=wrapped[:3]
         for line in wrapped:
-            draw.text((74,text_y), line, fill=(232,238,247), font=F_Text); text_y+=30
+            # HQ: slight shadow for readability
+            draw.text((75,text_y+1), line, fill=(0,0,0,120), font=F_Text)
+            draw.text((74,text_y), line, fill=(235,240,250), font=F_Text)
+            text_y+=30
         draw.polygon([(W-70,H-30),(W-58,H-22),(W-46,H-30)], fill=(0,184,195))
         draw.ellipse([W//2-4,H-10,W//2+4,H-6], fill=(0,184,195,180))
-    draw.text((W-188,H-20), "click / space →", fill=(110,125,155), font=F_Small)
+    draw.text((W-190,H-20), "click / space → HQ", fill=(110,125,155), font=F_Small)
 
 def draw_menu(img: Image.Image, draw: ImageDraw.ImageDraw, caption, choices):
-    ov=Image.new("RGBA",(W,H),(6,10,22,150))
+    """M27 HQ menu — better buttons with edge glow, larger click area, polished."""
+    ov=Image.new("RGBA",(W,H),(6,10,22,160))
     img.alpha_composite(ov,(0,0))
     vig=Image.new("RGBA",(W,H),(0,0,0,0))
     vd=ImageDraw.Draw(vig)
-    for i in range(90):
-        a=int(18*(1-i/90))
-        vd.rounded_rectangle([i,i,W-i-1,H-i-1], radius=18, outline=(0,0,0,a))
+    for i in range(100):
+        a=int(22*(1-i/100))
+        vd.rounded_rectangle([i,i,W-i-1,H-i-1], radius=20, outline=(0,0,0,a))
     img.alpha_composite(vig,(0,0))
-    y_start=230
+    y_start=220
     if caption:
         tw=draw.textlength(caption, font=F_Text)
-        bw=tw+48; x0=W//2-bw//2
-        draw.rounded_rectangle([x0,y_start-18,x0+bw,y_start+34], radius=14, fill=(16,24,42,240), outline=(0,184,195,90), width=1)
-        draw.text((W//2-tw//2,y_start-4), caption, fill=(200,225,235), font=F_Text)
-        y_start+=68
+        bw=tw+56; x0=W//2-bw//2
+        # HQ caption with glow
+        draw.rounded_rectangle([x0-2,y_start-20,x0+bw+2,y_start+36], radius=16, fill=(0,184,195,30))
+        draw.rounded_rectangle([x0,y_start-18,x0+bw,y_start+34], radius=14, fill=(14,22,40,245), outline=(0,190,200,100), width=1)
+        draw.text((W//2-tw//2,y_start-4), caption, fill=(210,235,245), font=F_Text)
+        y_start+=72
     for i,ch in enumerate(choices):
-        bw,bh=460,58
-        x0=W//2-bw//2; y0=y_start+i*(bh+14); x1,y1=x0+bw,y0+bh
-        draw.rounded_rectangle([x0,y0,x1,y1], radius=14, fill=(19,33,60,250), outline=(58,85,135,255), width=1)
-        draw.rounded_rectangle([x0,y0,x0+8,y1], radius=7, fill=(0,184,195))
-        draw.ellipse([x0+18,y0+18,x0+40,y0+40], fill=(0,184,195,25), outline=(0,184,195,70))
-        draw.text((x0+24,y0+20), str(i+1), fill=(0,184,195), font=F_Small)
+        bw,bh=480,62
+        x0=W//2-bw//2; y0=y_start+i*(bh+16); x1,y1=x0+bw,y0+bh
+        # HQ button — edge glow, better contrast
+        draw.rounded_rectangle([x0-1,y0-1,x1+1,y1+1], radius=15, fill=(0,184,195,40))
+        draw.rounded_rectangle([x0,y0,x1,y1], radius=14, fill=(18,32,62,252), outline=(62,90,140,255), width=1)
+        draw.rounded_rectangle([x0,y0,x0+10,y1], radius=7, fill=(0,184,195))
+        # number badge HQ
+        draw.ellipse([x0+18,y0+18,x0+42,y0+42], fill=(0,184,195,30), outline=(0,184,195,80))
+        draw.text((x0+26,y0+22), str(i+1), fill=(0,200,210), font=F_Small)
         tw=draw.textlength(ch, font=F_Menu)
-        draw.text((W//2-tw//2+4,y0+16), ch, fill=(230,238,255), font=F_Menu)
-        draw.line([(x0+12,y0+2),(x1-12,y0+2)], fill=(255,255,255,12), width=1)
+        # text with shadow HQ
+        draw.text((W//2-tw//2+5,y0+17), ch, fill=(0,0,0,100), font=F_Menu)
+        draw.text((W//2-tw//2+4,y0+16), ch, fill=(235,242,255), font=F_Menu)
+        draw.line([(x0+14,y0+3),(x1-14,y0+3)], fill=(255,255,255,15), width=1)
 
 def draw_history_overlay(img: Image.Image, draw: ImageDraw.ImageDraw, state):
     ov = Image.new("RGBA", (W,H), (6,10,22,165))

@@ -1,3 +1,12 @@
+# Current Status — 2026-09-15 (M27: HQ No-Code Workflow, v0.7.0, declarative builder)
+
+## Last completed
+- **M27 Creator Quality & No-Code (2026-09-15, v0.7.0)**: higher quality scene + less Python coding, reliability kept.
+  - **HQ Scene**: build_vn_scene emission 1.2 + Fresnel edge glow for choices, dark gradient world, soft SUN_Soft for 3D depth (not hidden), larger dialogue (0.03,0.05,0.12) and choice buttons (3.4x0.32, spacing 0.75→0.78, hover 1.08→1.12), template classroom richer (walls, windows, lights, chairs, board frame, 5 markers/presets). Headless renderer HQ BGs (glass highlights, light rays, flowers, radial glow), stage HQ (frame, shadows, highlights), dialogue HQ (shadow), menu HQ (glow, shadow, larger). world_ui HQ spacing.
+  - **No-Code Workflow**: UPVN_GameBuilder declarative-first (state_vars, images/audios/stages, add_state_var, add_image/audio/stage_asset, add_set, add_if/elif/else/end with indent stack, add_choice, add_jump/call/return/pause/play_music/camera, create_quick_wizard one-click full game 2 endings + affection/book/3D stage + preview_all_paths, create_starter_declarative). Emits canonical `state:`, `character:`, `image/audio/stage`, `set`, `choice`, `if/else/end`. Non-destructive write handles both legacy define and declarative, state block insertion, asset insertion, placeholder cleaning. Blender panels boxed (Project, HQ Scene, Characters, Variables, Scene, Dialogue, Logic, Menu, Extras, Tools) + 13 new operators (Add Variable, Add Set, Add If/Else/End, Add Jump/Label, Add Pause, Add Audio, Add Camera, Quick Wizard, Export Package, Script Outline, Preview All Paths). Asset browser copies to assets/. upvn_game_creator quick_game use_wizard=True. Example 99_hq_wizard 3406 bytes validates OK.
+  - **Reliability**: 363 passed / 30 skipped (4 warnings Pillow getdata), contract unchanged, headless traces HQ, no new syntax (only existing declarative per M25 freeze). Dist zip v0.7.0 1002KB 41 entries.
+  - Docs: docs/M27_HQ_NOCODE.md
+
 # Current Status — 2026-09-14 (M26i: stylized colored 3D text, main, v0.6.16)
 
 ## Last completed

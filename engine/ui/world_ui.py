@@ -329,7 +329,12 @@ def aspect_wh() -> float:
     return 16.0 / 9.0
 
 
-HOVER_SCALE = 1.08   # M26c: choice plate grows 8% under the cursor
+HOVER_SCALE = 1.12   # M27 HQ: choice plate grows 12% under cursor + edge glow (more visible)
+
+# M27 HQ: improved choice spacing and layout for better readability
+CHOICE_SPACING_EM = 0.78  # was 0.75 — slightly more breathing room
+CHOICE_WIDTH_FACTOR = 0.74  # wider buttons
+CHOICE_HEIGHT_FACTOR = 0.052  # taller for easier clicking
 
 # Camera-space margins (world units, Camera_UI ortho is 15 wide). The player
 # draws every VN plane as a flat quad, so "who is in front" is decided by Y
@@ -482,15 +487,13 @@ def layout_screen_ui(get_obj: Callable[[str], Any], payload: dict, ortho: float 
         text_obj = get_obj(ch["name"] + "_text")
         if not ch.get("visible"):
             continue
-        z = half_v * 0.42 - i * (half_v * 0.12)
+        # M27 HQ: better spacing
+        z = half_v * 0.44 - i * (half_v * CHOICE_SPACING_EM * 0.16)
         _set_pos(plane, (0.0, y_ui + 0.02, z))
-        # M26c: scale-on-hover is applied HERE — layout owns choice-plane
-        # scale, so the multiplier survives camera zoom/ortho changes and
-        # cannot go stale (a cached base scale would). Re-applied each frame.
         bump = HOVER_SCALE if (hovered and ch["name"] == hovered) else 1.0
-        _set_scale(plane, (half * 0.70 * bump, half * 0.045 * bump, 1.0))
-        _set_pos(text_obj, (-half * 0.60, y_ui, z + half_v * 0.01))
-        set_font_size(text_obj, half * 0.042)
+        _set_scale(plane, (half * CHOICE_WIDTH_FACTOR * bump, half * CHOICE_HEIGHT_FACTOR * bump, 1.0))
+        _set_pos(text_obj, (-half * 0.62, y_ui, z + half_v * 0.012))
+        set_font_size(text_obj, half * 0.044)
     # --- M26i drop shadows: same text, offset behind, fixed dark tint -----
     # The offset is screen-space (x right, z down) plus a small +Y step so
     # the shadow never z-fights its own main text ("coplanar quads lose
