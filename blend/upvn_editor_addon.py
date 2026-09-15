@@ -1,6 +1,6 @@
 """
 UPVN Blender Editor Tools — create visual novel inside Blender with minimal coding
-v0.6.11 (2026-09-09): mouse visible, ortho 15, zoom-stable UI, placeholder art, no LibLoad crash
+v0.7.0 (2026-09-15): Creator Quality & No-Code Workflow — declarative builder, quick wizard, HQ scene
 
 Why v0.6 exists
     Installing the old add-on copied this single .py into Blender's add-ons folder,
@@ -21,7 +21,7 @@ Why v0.6 exists
 
 Install (two supported ways)
   A. Dist zip (recommended):
-        dist/upvn_editor_addon_v0.6.11.zip  → Edit → Preferences → Add-ons →
+        dist/upvn_editor_addon_v0.7.0.zip  → Edit → Preferences → Add-ons →
            Install from Disk… (or Install…) → select the .zip → enable "UPVN".
      Engine, frontend and template travel inside the zip; nothing else needed.
   B. Repo checkout:
@@ -32,11 +32,13 @@ Install (two supported ways)
 Then in 3D Viewport or Text Editor sidebar (N) find tab "UPVN".
 
 Minimal-coding workflow (no .rpy typing):
-    1. Create Project → writes //game/script.rpy starter
-    2. (UPBGE only) Setup Scene → wires the running scene once
-    3. Add Character / Scene / Dialogue / Show / Menu → appended to script.rpy
-    4. Validate → parser, line/col + hint;  Preview → headless screenshot
-    5. Press P to play. Saves: arbitrary slots 1..∞, pagination.
+    1. Create Project → writes //game/script.rpy starter (declarative)
+    2. Quick Wizard → full branching story with 2 endings, variables, 3D stage
+    3. (UPBGE only) Setup Scene → wires the running scene once (HQ materials)
+    4. Add Character / Variable / Scene / Dialogue / Show / Menu / If / Jump → appended to script.rpy
+    5. Validate → parser, line/col + hint;  Preview → headless screenshot
+    6. Export Package → playable zip
+    7. Press P to play. Saves: arbitrary slots 1..∞, pagination.
 
 Headless fallback: when bpy unavailable (CI), the module still imports and exposes
 `UPVN_GameBuilder` Python API used by tools/upvn_game_creator.py and tests.
@@ -45,10 +47,10 @@ Headless fallback: when bpy unavailable (CI), the module still imports and expos
 bl_info = {
     "name": "UPVN — Visual Novel Editor",
     "author": "UPVN",
-    "version": (0, 6, 16),
+    "version": (0, 7, 0),
     "blender": (4, 2, 0),
     "location": "View3D > Sidebar > UPVN, Text Editor > Sidebar > UPVN",
-    "description": "Create Ren'Py-like visual novel inside UPBGE with minimal coding — self-contained engine, one-click scene setup, characters, scenes, dialogue, menus, arbitrary saves, preview",
+    "description": "Create Ren'Py-like visual novel inside UPBGE with minimal coding — declarative builder, quick wizard, HQ scene, no Python required",
     "category": "Game Engine",
 }
 
@@ -68,15 +70,9 @@ import textwrap
 import shutil
 import re
 import zipfile
+import ast as _ast
 
 # --------------------------------------------------- contract names (module scope)
-# M26g BUGFIX: these three names used to be imported (with hardcoded
-# fallbacks) as LOCALS inside build_vn_scene — but _rewrite_unlit() and
-# _ensure_white_image() are defined at this scope level and reference them,
-# so EVERY tex_capable=True material (all sprite planes, M26b texture graph)
-# crashed with `NameError: name 'TEX_NODE_NAME' is not defined` the first
-# time Setup Scene ran in the real UPBGE GUI. Bind them once here; the
-# fallback values mirror engine/render/contract.py exactly.
 try:
     from engine.render.contract import TEX_NODE_NAME, MIX_NODE_NAME, WHITE_IMAGE_NAME
 except Exception:                      # engine not on sys.path yet — fallback
@@ -127,8 +123,6 @@ def _engine_candidates():
     except Exception:
         pass
     # 3) next to the open .blend file (project lives inside a repo/checkout)
-    #    NB: some UPBGE builds expose no bpy.data.filepath during startup
-    #    (AttributeError seen in the field) — never let this crash discovery.
     if HAS_BPY and bpy is not None and getattr(bpy, "data", None):
         try:
             fp = getattr(bpy.data, "filepath", "") or ""
@@ -156,11 +150,7 @@ def _zip_namelist_norm(path):
 
 
 def _zip_engine_member(path):
-    """Member path of engine/script/parser.py inside the zip, or None.
-
-    Returns 'engine/script/parser.py' when the engine sits at the zip root
-    (importable via zipimport), or e.g. 'upvn_editor_addon/engine/script/parser.py'
-    when it is nested in the add-on folder (needs extraction to import)."""
+    """Member path of engine/script/parser.py inside the zip, or None."""
     names = _zip_namelist_norm(path)
     if names is None:
         return None
@@ -203,13 +193,10 @@ def _import_engine_api():
 
 
 def ensure_engine(retry=False):
-    """Locate and import the engine. Idempotent; retry=True re-scans.
-    NEVER raises — returns (ok: bool, ENGINE_INFO dict) in every case.
-    Public API used by tests + operators."""
+    """Locate and import the engine. Idempotent; retry=True re-scans."""
     global ENGINE_INFO, _engine_api, ENGINE_AVAILABLE
     if ENGINE_AVAILABLE and not retry:
         return True, ENGINE_INFO
-    # forget previous partial state when retrying
     ENGINE_AVAILABLE = False
     _engine_api = None
     searched = []
@@ -218,7 +205,7 @@ def ensure_engine(retry=False):
     nested_zip_hint = None
     try:
         candidates = _engine_candidates()
-    except Exception as exc:          # discovery itself must never crash
+    except Exception as exc:
         info.update(status="error", message=f"discovery failed: {exc}")
         ENGINE_INFO = info
         return False, info
@@ -231,11 +218,11 @@ def ensure_engine(retry=False):
                     continue
                 if member != "engine/script/parser.py":
                     nested_zip_hint = nested_zip_hint or path
-                    continue          # nested engine: only importable after extraction
+                    continue
             if not _candidate_is_engine(kind, path):
                 continue
         except Exception:
-            continue                  # a broken candidate must not stop the scan
+            continue
         try:
             _add_to_syspath(kind, path)
             _p, _vc, _sm = _import_engine_api()
@@ -243,7 +230,7 @@ def ensure_engine(retry=False):
                         message=f"engine found via {desc}")
             _engine_api = (_p, _vc, _sm)
             ENGINE_AVAILABLE = True
-        except Exception as exc:      # engine present but broken (missing dep…)
+        except Exception as exc:
             info.update(status="error", root=path, source=desc,
                         message=f"engine found at {path} but import failed: {exc}")
             ENGINE_INFO = info
@@ -284,8 +271,8 @@ def engine_diag_text():
     ok, info = ENGINE_AVAILABLE, ENGINE_INFO
     lines = [f"UPVN engine status: {info['status']}"]
     if ok:
-        lines.append(f"  root:   {info['root']}")
-        lines.append(f"  source: {info['source']}")
+        lines.append(f"  root:   {info.get('root')}")
+        lines.append(f"  source: {info.get('source')}")
     else:
         lines.append(f"  reason: {info['message']}")
         for s in info.get("searched", []):
@@ -294,10 +281,7 @@ def engine_diag_text():
 
 
 def pil_live_available():
-    """Live probe for Pillow in the CURRENT interpreter. A static HAS_PIL flag
-    goes stale when the user installs Pillow mid-session (Python caches failed
-    imports at module level), so every preview attempt re-checks with a real
-    import. Returns True/False, never raises."""
+    """Live probe for Pillow in the CURRENT interpreter."""
     try:
         import PIL  # noqa: F401
         return True
@@ -314,12 +298,7 @@ def engine_parser_available():
 
 
 def bundle_engine_to_addon_dir():
-    """Copy engine/ + bge_frontend/ next to this file so the add-on is fully
-    self-contained (works even after the repo is moved/deleted).
-
-    Returns message string. Raises RuntimeError when engine is not found or the
-    add-on folder is not writable.
-    """
+    """Copy engine/ + bge_frontend/ next to this file so the add-on is fully self-contained."""
     if not ENGINE_AVAILABLE or ENGINE_INFO.get("root") is None:
         raise RuntimeError("engine not found — cannot bundle")
     src_root = ENGINE_INFO["root"]
@@ -333,7 +312,7 @@ def bundle_engine_to_addon_dir():
             continue
         dst = dest / sub
         if os.path.abspath(dst) == os.path.abspath(src):
-            continue  # already there
+            continue
         if dst.exists():
             shutil.rmtree(str(dst))
         shutil.copytree(src, str(dst),
@@ -345,25 +324,76 @@ def bundle_engine_to_addon_dir():
 
 
 # ---------------------------------------------------------------- Python API for minimal coding (works without bpy)
+# M27: declarative-first builder — less Python, higher quality starter, reliable
+
+def _infer_type_from_value(val_str: str):
+    """Infer UPVN state type from a literal string."""
+    s = val_str.strip()
+    if s in ("True", "False"):
+        return "bool"
+    if s == "None":
+        return "str"
+    if s.startswith(("[", "(")):
+        return "list"
+    if s.startswith(('"', "'")):
+        return "str"
+    try:
+        int(s)
+        return "int"
+    except Exception:
+        pass
+    try:
+        float(s)
+        return "float"
+    except Exception:
+        pass
+    return "str"
+
+def _format_literal_py(value):
+    """Format a Python value as UPVN literal."""
+    if isinstance(value, bool):
+        return "True" if value else "False"
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float):
+        return str(value)
+    if isinstance(value, str):
+        # if already quoted, keep
+        if (value.startswith('"') and value.endswith('"')) or (value.startswith("'") and value.endswith("'")):
+            return value
+        # try to detect if it's already a literal like 0 or True
+        return f'"{value}"'
+    if isinstance(value, list):
+        return repr(value)
+    return repr(value)
+
 
 class UPVN_GameBuilder:
-    """Headless Python API — also used by Blender operators. Generates .rpy with minimal coding."""
+    """Headless Python API — also used by Blender operators. Generates .rpy with minimal coding.
+    
+    M27: declarative-first (character:, state:, set, choice). Legacy define/$ still parsed
+    for backward compat, but new projects emit canonical forms. Less Python coding required.
+    """
 
-    def __init__(self, script_path: str = "game/script.rpy"):
+    def __init__(self, script_path: str = "game/script.rpy", use_declarative: bool = True):
         self.script_path = pathlib.Path(script_path)
+        self.use_declarative = use_declarative
         self.last_error: str | None = None
         self.characters = {}  # id -> {name, color}
-        self.labels = {"start": []}  # label -> list of lines
+        self.state_vars = {}  # name -> {type, literal}
+        self.images = {}  # name -> path
+        self.audios = {}  # name -> path
+        self.stages = {}  # name -> path
+        self.labels = {"start": []}  # label -> list of lines (already indented)
         self.current_label = "start"
-        self._lines = []  # raw lines for current label
-        # ensure project dirs
+        self._label_indent = {"start": 4}  # current indent per label (for if/else nesting)
+        self._indent_stack = {"start": [4]}  # stack per label
+        self._lines = []
         self.script_path.parent.mkdir(parents=True, exist_ok=True)
         self._existing_text = None
-        # if file exists, load it for preservation
         if self.script_path.exists():
             try:
                 self._existing_text = self.script_path.read_text(encoding="utf-8")
-                # try parse to populate characters/labels for preview
                 if ENGINE_AVAILABLE and _engine_api is not None:
                     try:
                         _p, _vc, _sm = _engine_api
@@ -372,89 +402,423 @@ class UPVN_GameBuilder:
                             self.characters[cid] = {"name": cdata["name"], "color": cdata.get("color", "#ffffff")}
                         # populate labels structure for internal use (keep existing)
                         self.labels = {}
+                        self._label_indent = {}
+                        self._indent_stack = {}
                         for lbl, nodes in data.get("labels", {}).items():
-                            self.labels[lbl] = []  # we keep as empty placeholders; actual lines preserved via _existing_text
+                            self.labels[lbl] = []
+                            self._label_indent[lbl] = 4
+                            self._indent_stack[lbl] = [4]
                         if "start" not in self.labels:
                             self.labels["start"] = []
+                            self._label_indent["start"] = 4
+                            self._indent_stack["start"] = [4]
+                        # state vars from defaults + types
+                        for k, v in data.get("defaults", {}).items():
+                            t = data.get("types", {}).get(k, _infer_type_from_value(repr(v)))
+                            self.state_vars[k] = {"type": t, "literal": repr(v)}
+                        for k, t in data.get("types", {}).items():
+                            if k not in self.state_vars:
+                                from engine.script.literals import type_default
+                                try:
+                                    dv = type_default(t)
+                                    self.state_vars[k] = {"type": t, "literal": repr(dv)}
+                                except Exception:
+                                    self.state_vars[k] = {"type": t, "literal": "0" if t=="int" else '""'}
+                        # assets
+                        for kind in ("images", "audio", "stages"):
+                            for n, p in data.get("assets", {}).get(kind, {}).items():
+                                if kind == "images":
+                                    self.images[n] = p
+                                elif kind == "audio":
+                                    self.audios[n] = p
+                                else:
+                                    self.stages[n] = p
                     except Exception:
                         pass
             except Exception:
                 pass
 
+    # ---------------- indent management
+    def _cur_indent(self):
+        return self._label_indent.get(self.current_label, 4)
+
+    def _push_indent(self):
+        cur = self._cur_indent()
+        self._label_indent[self.current_label] = cur + 4
+        self._indent_stack[self.current_label].append(cur + 4)
+
+    def _pop_indent(self):
+        stack = self._indent_stack.get(self.current_label, [4])
+        if len(stack) > 1:
+            stack.pop()
+            self._label_indent[self.current_label] = stack[-1]
+        else:
+            self._label_indent[self.current_label] = 4
+
+    def _line(self, text: str, indent: int | None = None):
+        ind = indent if indent is not None else self._cur_indent()
+        return " " * ind + text
+
     def ensure_label(self, label: str):
         if label not in self.labels:
             self.labels[label] = []
+            self._label_indent[label] = 4
+            self._indent_stack[label] = [4]
+        else:
+            # M27: if label currently only has auto-placeholder, clear it so real content replaces it
+            cur = self.labels[label]
+            if len(cur) <= 2 and any("chosen" in c for c in cur):
+                self.labels[label] = []
         self.current_label = label
-        # if existing text has this label, we will append to it on write
         return self
 
+    # ---------------- declarative definitions
     def add_character(self, cid: str, name: str, color: str = "#ffffff"):
         self.characters[cid] = {"name": name, "color": color}
         return self
 
+    def add_state_var(self, name: str, type_str: str = "int", value: str = "0"):
+        # normalize type
+        t = type_str.strip().lower()
+        if t == "string":
+            t = "str"
+        if t not in ("int", "float", "str", "bool", "list"):
+            t = _infer_type_from_value(value)
+        # ensure literal is valid
+        lit = value.strip()
+        # if value is python value not literal string, format
+        try:
+            # try ast.literal_eval to validate
+            _ast.literal_eval(lit)
+        except Exception:
+            # if not literal, keep as is if it's already quoted or number
+            pass
+        self.state_vars[name] = {"type": t, "literal": lit}
+        return self
+
+    def add_image(self, name: str, path: str):
+        self.images[name] = path
+        return self
+
+    def add_audio(self, name: str, path: str):
+        self.audios[name] = path
+        return self
+
+    def add_stage_asset(self, name: str, path: str):
+        self.stages[name] = path
+        return self
+
+    # ---------------- scene / show / dialogue
     def add_scene(self, bg: str, transition: str | None = None):
-        line = f"    scene {bg}" + (f" with {transition}" if transition else "")
+        line = self._line(f"scene {bg}" + (f" with {transition}" if transition else ""))
         self.labels[self.current_label].append(line)
         return self
 
     def add_show(self, asset: str, position: str = "center", transition: str | None = None):
-        line = f"    show {asset} at {position}" + (f" with {transition}" if transition else "")
+        line = self._line(f"show {asset} at {position}" + (f" with {transition}" if transition else ""))
         self.labels[self.current_label].append(line)
         return self
 
     def add_hide(self, tag: str, transition: str | None = None):
-        line = f"    hide {tag}" + (f" with {transition}" if transition else "")
+        line = self._line(f"hide {tag}" + (f" with {transition}" if transition else ""))
         self.labels[self.current_label].append(line)
         return self
 
     def add_say(self, who: str | None, text: str):
         esc = text.replace('"', '\\"')
         if who:
-            line = f'    {who} "{esc}"'
+            line = self._line(f'{who} "{esc}"')
         else:
-            line = f'    "{esc}"'
+            line = self._line(f'"{esc}"')
+        self.labels[self.current_label].append(line)
+        return self
+
+    def add_set(self, target: str, op: str = "=", expr: str = "0"):
+        # canonical set
+        line = self._line(f"set {target} {op} {expr}")
+        self.labels[self.current_label].append(line)
+        return self
+
+    def add_if(self, cond: str):
+        line = self._line(f"if {cond}:")
+        self.labels[self.current_label].append(line)
+        self._push_indent()
+        return self
+
+    def add_elif(self, cond: str):
+        self._pop_indent()
+        line = self._line(f"elif {cond}:")
+        self.labels[self.current_label].append(line)
+        self._push_indent()
+        return self
+
+    def add_else(self):
+        self._pop_indent()
+        line = self._line("else:")
+        self.labels[self.current_label].append(line)
+        self._push_indent()
+        return self
+
+    def add_end(self):
+        self._pop_indent()
+        line = self._line("end")
         self.labels[self.current_label].append(line)
         return self
 
     def add_menu(self, caption: str | None, choices: list[tuple[str, str]]):
-        """choices: list of (text, jump_label)"""
+        """choices: list of (text, jump_label) — emits declarative choice form
+        M27: creates placeholder labels for jump targets so they are always
+        reachable even if not later filled. create_quick_wizard overwrites
+        these placeholders with real content (no early return issue).
+        """
         lines = []
-        lines.append("    menu:")
+        base = self._cur_indent()
+        lines.append(" " * base + "menu:")
         if caption:
-            lines.append(f'        "{caption}"')
+            lines.append(" " * (base + 4) + f'"{caption}"')
         for txt, jump in choices:
-            lines.append(f'        "{txt}":')
-            lines.append(f'            jump {jump}')
-            # ensure jump target exists
+            if self.use_declarative:
+                lines.append(" " * (base + 4) + f'choice "{txt}":')
+                lines.append(" " * (base + 8) + f"jump {jump}")
+            else:
+                lines.append(" " * (base + 4) + f'"{txt}":')
+                lines.append(" " * (base + 8) + f"jump {jump}")
             if jump not in self.labels:
                 self.labels[jump] = [f'    "{txt} chosen."', "    return"]
+                self._label_indent[jump] = 4
+                self._indent_stack[jump] = [4]
         self.labels[self.current_label].extend(lines)
         return self
 
+    def add_choice(self, text: str, jump_label: str, condition: str | None = None):
+        base = self._cur_indent()
+        cond_str = f" if {condition}" if condition else ""
+        if self.use_declarative:
+            line = " " * base + f'choice "{text}"{cond_str}:'
+        else:
+            line = " " * base + f'"{text}"{cond_str}:'
+        self.labels[self.current_label].append(line)
+        self.labels[self.current_label].append(" " * (base + 4) + f"jump {jump_label}")
+        if jump_label not in self.labels:
+            self.labels[jump_label] = [f'    "{text} chosen."', "    return"]
+            self._label_indent[jump_label] = 4
+            self._indent_stack[jump_label] = [4]
+        return self
+
+    def _clear_placeholder_label(self, label: str):
+        """Clear auto-generated placeholder (e.g. '"X chosen." return') so real content can replace it."""
+        if label in self.labels:
+            # if only contains placeholder, clear it
+            content = self.labels[label]
+            if len(content) <= 2 and any("chosen" in c for c in content):
+                self.labels[label] = []
+                self._label_indent[label] = 4
+                self._indent_stack[label] = [4]
+
     def add_jump(self, label: str):
-        self.labels[self.current_label].append(f"    jump {label}")
+        self.labels[self.current_label].append(self._line(f"jump {label}"))
+        return self
+
+    def add_call(self, label: str):
+        self.labels[self.current_label].append(self._line(f"call {label}"))
+        return self
+
+    def add_return(self):
+        self.labels[self.current_label].append(self._line("return"))
+        return self
+
+    def add_pause(self, duration: float = 0.5):
+        self.labels[self.current_label].append(self._line(f"pause {duration}"))
+        return self
+
+    def add_play_music(self, asset: str, fadein: float | None = None):
+        extra = f" fadein {fadein}" if fadein else ""
+        self.labels[self.current_label].append(self._line(f'play music "{asset}"{extra}'))
+        return self
+
+    def add_play_sound(self, asset: str):
+        self.labels[self.current_label].append(self._line(f'play sound "{asset}"'))
         return self
 
     def add_camera_zoom(self, zoom: float, duration: float = 1.0, easing: str = "ease"):
-        self.labels[self.current_label].append(f"    camera zoom {zoom} duration {duration} with {easing}")
+        self.labels[self.current_label].append(self._line(f"camera zoom {zoom} duration {duration} with {easing}"))
+        return self
+
+    def add_camera_preset(self, preset: str):
+        self.labels[self.current_label].append(self._line(f"camera preset {preset}"))
         return self
 
     def add_stage(self, stage: str):
-        self.labels[self.current_label].append(f"    load_stage {stage}")
+        self.labels[self.current_label].append(self._line(f"load_stage {stage}"))
         return self
 
     def add_show3d(self, asset: str, marker: str = "center"):
-        self.labels[self.current_label].append(f"    show3d {asset} at {marker}")
+        self.labels[self.current_label].append(self._line(f"show3d {asset} at {marker}"))
         return self
 
     def add_side_image(self, who: str, image: str, side: str = "left"):
-        """Side image helper — shows side portrait via show with position alias"""
-        # side image convention: show <who> side at <side>
-        line = f"    show {who} {image} at {side}"
+        line = self._line(f"show {who} {image} at {side}")
         self.labels[self.current_label].append(line)
         return self
 
-    def build_rpy(self) -> str:
+    def add_narration(self, text: str):
+        return self.add_say(None, text)
+
+    # ---------------- quick wizard — one-click full game
+    def create_quick_wizard(self, title: str = "My Visual Novel", theme: str = "school"):
+        """One-click high-quality branching story with variables, 2 endings, 3D stage.
+        
+        No Python coding required — generates declarative script.
+        """
+        # reset
+        self.characters = {}
+        self.state_vars = {}
+        self.images = {}
+        self.audios = {}
+        self.stages = {}
+        self.labels = {}
+        self._label_indent = {}
+        self._indent_stack = {}
+        # characters
+        self.add_character("e", "Eileen", "#c8ffc8")
+        self.add_character("s", "Sylvie", "#c8c8ff")
+        # state
+        self.add_state_var("affection", "int", "0")
+        self.add_state_var("route", "str", '"none"')
+        self.add_state_var("has_book", "bool", "False")
+        # assets (manifest, optional)
+        self.add_image("bg classroom", "backgrounds/bg_classroom.png")
+        self.add_image("bg library", "backgrounds/bg_lecturehall.png")
+        self.add_image("bg meadow", "backgrounds/bg_meadow.png")
+        self.add_stage_asset("classroom_3d", "stages/classroom_3d.blend")
+
+        # start
+        self.ensure_label("start")
+        self.add_scene("bg classroom", "fade")
+        self.add_show("eileen", "center", "dissolve")
+        self.add_say("e", f"Welcome to {title}! This game was built with one click — no coding.")
+        self.add_say(None, "You can create your own story from the UPVN panel without typing .rpy.")
+        self.add_camera_zoom(1.2, 0.8, "ease")
+        self.add_say("e", "Let's make a choice that matters.")
+        self.add_menu("What will you do?", [("Help Eileen", "help_eileen"), ("Explore library", "explore_library")])
+
+        # help branch
+        self.ensure_label("help_eileen")
+        self.add_set("affection", "+=", "1")
+        self.add_set("route", "=", '"help"')
+        self.add_scene("bg classroom", "dissolve")
+        self.add_show("eileen happy", "center", "move")
+        self.add_say("e", "Thank you! You are so kind.")
+        self.add_say("e", "I was looking for my book...")
+        self.add_menu("Do you have it?", [("Give her the book", "give_book"), ("Say you don't", "no_book")])
+
+        self.ensure_label("give_book")
+        self.add_set("has_book", "=", "True")
+        self.add_set("affection", "+=", "2")
+        self.add_show("eileen happy", "center", "dissolve")
+        self.add_say("e", "You found it! I knew I could count on you.")
+        self.add_jump("classroom_3d_scene")
+
+        self.ensure_label("no_book")
+        self.add_say("e", "Oh... maybe I left it in the library.")
+        self.add_jump("explore_library")
+
+        # library branch
+        self.ensure_label("explore_library")
+        self.add_set("route", "=", '"library"')
+        self.add_scene("bg library", "fade")
+        self.add_camera_zoom(1.5, 1.0, "ease")
+        self.add_say(None, "The library is quiet. Rows of books stretch into the distance.")
+        self.add_show("sylvie", "right", "move")
+        self.add_say("s", "Oh, hello! Are you looking for something?")
+        self.add_say("e", "Hi Sylvie! Have you seen my book?")
+        self.add_say("s", "I think I saw one near the back...")
+        self.add_menu("Search for the book", [("Search together", "search_together"), ("Search alone", "search_alone")])
+
+        self.ensure_label("search_together")
+        self.add_set("affection", "+=", "1")
+        self.add_say("s", "Let's look together!")
+        self.add_say(None, "You and Sylvie search through the shelves...")
+        self.add_pause(0.5)
+        self.add_say("e", "Found it!")
+        self.add_set("has_book", "=", "True")
+        self.add_jump("classroom_3d_scene")
+
+        self.ensure_label("search_alone")
+        self.add_say(None, "You search alone, but can't find it.")
+        self.add_say("s", "Need help?")
+        self.add_jump("search_together")
+
+        # 3D stage
+        self.ensure_label("classroom_3d_scene")
+        self.add_scene("bg classroom", "fade")
+        self.add_stage("classroom_3d")
+        self.add_show3d("eileen", "marker_eileen")
+        self.add_camera_preset("wide")
+        self.add_say(None, "You return to the classroom. The 3D stage shows your characters in space.")
+        self.add_if("has_book")
+        self.add_say("e", "Now I can finally study! Thank you so much!")
+        self.add_set("affection", "+=", "1")
+        self.add_else()
+        self.add_say("e", "I still can't find my book... but thanks for trying.")
+        self.add_end()
+        self.add_if("affection >= 3")
+        self.add_jump("good_ending")
+        self.add_else()
+        self.add_jump("neutral_ending")
+        self.add_end()
+
+        self.ensure_label("good_ending")
+        self.add_scene("bg meadow", "fade")
+        self.add_camera_zoom(1.0, 1.0, "ease")
+        self.add_show("eileen happy", "center", "dissolve")
+        self.add_show("sylvie", "right", "dissolve")
+        self.add_say("e", "This is the best day ever!")
+        self.add_say("s", "I'm glad everything worked out.")
+        self.add_say(None, "Good Ending — Affection [affection], Route [route]")
+        self.add_return()
+
+        self.ensure_label("neutral_ending")
+        self.add_scene("bg classroom", "fade")
+        self.add_show("eileen", "center")
+        self.add_say("e", "Well, it was an okay day.")
+        self.add_say(None, "Neutral Ending — Try to get more affection next time!")
+        self.add_return()
+
+        return self
+
+    def create_starter_declarative(self):
+        """High-quality starter using declarative forms."""
+        self.characters = {}
+        self.state_vars = {}
+        self.labels = {"start": []}
+        self._label_indent = {"start": 4}
+        self._indent_stack = {"start": [4]}
+        self.images = {}
+        self.audios = {}
+        self.stages = {}
+        self.add_character("e", "Eileen", "#c8ffc8")
+        self.add_character("s", "Sylvie", "#c8c8ff")
+        self.add_state_var("affection", "int", "0")
+        self.add_state_var("route", "str", '"none"')
+        self.ensure_label("start")
+        self.add_scene("bg classroom", "fade")
+        self.add_show("eileen", "center", "dissolve")
+        self.add_say("e", "Hello from Blender! This game was created with clicks, not code.")
+        self.add_say(None, "You can add more dialogue, menus, and 3D stages from the UPVN panel.")
+        self.add_camera_zoom(1.2, 1.0, "ease")
+        self.add_menu("What do you do?", [("Ask her", "ask"), ("Wait", "wait")])
+        self.ensure_label("ask")
+        self.add_set("affection", "+=", "1")
+        self.add_say("e", "You asked! Affection is now [affection].")
+        self.add_return()
+        self.ensure_label("wait")
+        self.add_say("e", "You waited.")
+        self.add_return()
+        self.ensure_label("start")
+        return self
+
+    def _build_rpy_legacy(self) -> str:
         out = []
         for cid, data in self.characters.items():
             out.append(f'define {cid} = Character("{data["name"]}", color="{data["color"]}")')
@@ -472,23 +836,55 @@ class UPVN_GameBuilder:
             out.append("")
         return "\n".join(out)
 
+    def build_rpy(self) -> str:
+        if not self.use_declarative:
+            return self._build_rpy_legacy()
+        out = []
+        # state block
+        if self.state_vars:
+            out.append("state:")
+            for name, info in self.state_vars.items():
+                t = info.get("type", "int")
+                lit = info.get("literal", "0")
+                out.append(f"    {name}: {t} = {lit}")
+            out.append("")
+        # characters declarative
+        for cid, data in self.characters.items():
+            out.append(f"character {cid}:")
+            out.append(f'    name "{data["name"]}"')
+            out.append(f'    color "{data["color"]}"')
+            out.append("")
+        # assets
+        for name, path in self.images.items():
+            # quote name if contains space
+            n = f'"{name}"' if " " in name else name
+            out.append(f'image {n} = "{path}"')
+        if self.images:
+            out.append("")
+        for name, path in self.audios.items():
+            out.append(f'audio {name} = "{path}"')
+        if self.audios:
+            out.append("")
+        for name, path in self.stages.items():
+            out.append(f'stage {name} = "{path}"')
+        if self.stages:
+            out.append("")
+        # labels
+        for label, lines in self.labels.items():
+            out.append(f"label {label}:")
+            if not lines:
+                out.append('    "Empty label."')
+                out.append("    return")
+            else:
+                out.extend(lines)
+                last = lines[-1].strip()
+                if not last.startswith("jump ") and last != "return" and not last.startswith("return") and last != "end" and not last.startswith("end"):
+                    out.append("    return")
+            out.append("")
+        return "\n".join(out)
+
     def write(self):
-        """Write the project script. STRICTLY non-destructive (M26g).
-
-        If the target file exists we only ever
-          (a) insert new `define` lines after the last existing define,
-          (b) insert NEW lines into an existing label's block immediately
-              BEFORE its trailing `return` (so additions are reachable —
-              the old code appended after `return`: dead code), and
-          (c) append brand-new label blocks at the end of the file.
-        If there is nothing to change, the file is not touched at all.
-
-        The old implementation fell through to a full regeneration from
-        the constructor's *placeholder* labels whenever the merge had
-        nothing to do — silently replacing every existing label body with
-        `"Empty label."` (live-verified data loss: one click of Create
-        Project emptied the M25 smoke game script). That path is gone.
-        """
+        """Write the project script. STRICTLY non-destructive (M26g) with declarative support."""
         fresh = self._existing_text is None or not self.script_path.exists()
         if fresh:
             self.script_path.parent.mkdir(parents=True, exist_ok=True)
@@ -498,12 +894,49 @@ class UPVN_GameBuilder:
         existing = self.script_path.read_text(encoding="utf-8")
         lines = existing.splitlines()
 
-        # 1) new defines only (never rewrite existing ones)
-        new_defines = []
+        # 1) new characters only (detect both define and character block)
+        new_char_lines = []
         for cid, data in self.characters.items():
-            define_line = f'define {cid} = Character("{data["name"]}", color="{data["color"]}")'
-            if f"define {cid} =" not in existing:
-                new_defines.append(define_line)
+            has_define = f"define {cid} =" in existing
+            has_char_block = re.search(rf'^\s*character\s+{cid}\s*:', existing, re.M) is not None
+            if not has_define and not has_char_block:
+                if self.use_declarative:
+                    new_char_lines.append(f"character {cid}:")
+                    new_char_lines.append(f'    name "{data["name"]}"')
+                    new_char_lines.append(f'    color "{data["color"]}"')
+                    new_char_lines.append("")
+                else:
+                    new_char_lines.append(f'define {cid} = Character("{data["name"]}", color="{data["color"]}")')
+
+        # 1b) new state vars
+        new_state_vars = []
+        has_state_block = re.search(r'^\s*state\s*:\s*$', existing, re.M) is not None
+        for var, info in self.state_vars.items():
+            # check if var already declared
+            if re.search(rf'^\s*{re.escape(var)}\s*[:=]', existing, re.M):
+                continue
+            if re.search(rf'^\s*default\s+{re.escape(var)}\s*=', existing, re.M):
+                continue
+            t = info.get("type", "int")
+            lit = info.get("literal", "0")
+            if has_state_block and self.use_declarative:
+                new_state_vars.append(f"    {var}: {t} = {lit}")
+            else:
+                # will create state block later
+                new_state_vars.append(f"    {var}: {t} = {lit}")
+
+        # 1c) new assets
+        new_assets = []
+        for name, path in self.images.items():
+            if name not in existing and f'image "{name}"' not in existing and f"image {name}" not in existing:
+                n = f'"{name}"' if " " in name else name
+                new_assets.append(f'image {n} = "{path}"')
+        for name, path in self.audios.items():
+            if f"audio {name}" not in existing:
+                new_assets.append(f'audio {name} = "{path}"')
+        for name, path in self.stages.items():
+            if f"stage {name}" not in existing:
+                new_assets.append(f'stage {name} = "{path}"')
 
         # 2) label block bounds
         label_re = re.compile(r'^\s*label\s+(\w+)\s*:')
@@ -513,8 +946,8 @@ class UPVN_GameBuilder:
         for bi, (name, start) in enumerate(starts):
             bounds[name] = (start, starts[bi + 1][1] if bi + 1 < len(starts) else len(lines))
 
-        insertions = []          # (line index, [new lines], [placeholder idxs to drop])
-        new_label_blocks = []    # full blocks for labels not in the file
+        insertions = []
+        new_label_blocks = []
         for label, new_lines in self.labels.items():
             wanted = [l for l in new_lines if l.strip()]
             if not wanted:
@@ -525,8 +958,6 @@ class UPVN_GameBuilder:
                 to_insert = [l for l in wanted if l.strip() not in block_lines]
                 if not to_insert:
                     continue
-                # insert before the block's LAST `return` when it ends with
-                # one — otherwise right before the next label
                 at = end
                 for j in range(end - 1, start, -1):
                     s = lines[j].strip()
@@ -534,9 +965,6 @@ class UPVN_GameBuilder:
                         if s == "return":
                             at = j
                         break
-                # M27 (e16c666) behaviour, folded in: when real content
-                # enters a block, drop its `"Empty label."` placeholder
-                # lines (written by build_rpy for empty labels)
                 placeholder_idx = [j for j in range(start + 1, end)
                                    if lines[j].strip() in ('"Empty label."',
                                                            "'Empty label.'")]
@@ -544,16 +972,15 @@ class UPVN_GameBuilder:
             else:
                 body = [f"label {label}:"] + wanted
                 last = wanted[-1].strip()
-                if last != "return" and not last.startswith("jump "):
+                if last != "return" and not last.startswith("jump ") and last != "end":
                     body.append("    return")
                 new_label_blocks.append("\n".join(body))
 
-        if not new_defines and not insertions and not new_label_blocks:
-            return self.script_path   # nothing to do — leave the file alone
+        # check if anything to do
+        if not new_char_lines and not new_state_vars and not new_assets and not insertions and not new_label_blocks:
+            return self.script_path
 
-        # apply label insertions bottom-up so indices stay valid; within a
-        # plan, drop the placeholder lines first (they sit below `at`, so
-        # the insertion point shifts by how many were removed)
+        # apply label insertions bottom-up
         for at, to_insert, placeholder_idx in sorted(insertions, key=lambda t: -t[0]):
             for d in sorted(placeholder_idx, reverse=True):
                 del lines[d]
@@ -566,15 +993,50 @@ class UPVN_GameBuilder:
             for blk in new_label_blocks:
                 lines += ["", blk]
 
-        if new_defines:
-            last_define = -1
+        # handle characters and assets and state vars insertion at top
+        # find last define/character/state block
+        if new_char_lines or new_assets:
+            # insert after last define/character/image block or at top
+            last_def = -1
             for k, l in enumerate(lines):
-                if l.strip().startswith("define "):
-                    last_define = k
-            if last_define >= 0:
-                lines[last_define + 1:last_define + 1] = new_defines
+                s = l.strip()
+                if s.startswith("define ") or s.startswith("character ") or s.startswith("image ") or s.startswith("audio ") or s.startswith("stage ") or s.startswith("state:"):
+                    last_def = k
+            # if we have state block and new_state_vars, we need to insert inside state block, not after
+            if last_def >= 0:
+                # if we have assets/chars, insert after last_def block
+                # for simplicity, insert after last_def
+                insert_at = last_def + 1
+                # skip any blank lines and indented lines belonging to that block
+                while insert_at < len(lines) and (not lines[insert_at].strip() or lines[insert_at].startswith("    ")):
+                    insert_at += 1
+                lines[insert_at:insert_at] = new_char_lines + new_assets
             else:
-                lines = new_defines + [""] + lines
+                lines = new_char_lines + new_assets + [""] + lines
+
+        # handle state vars
+        if new_state_vars:
+            if has_state_block:
+                # find state block bounds
+                state_start = None
+                for i, l in enumerate(lines):
+                    if re.match(r'^\s*state\s*:\s*$', l):
+                        state_start = i
+                        break
+                if state_start is not None:
+                    # find end of state block (next non-indented or empty)
+                    end = state_start + 1
+                    while end < len(lines) and (lines[end].startswith("    ") or not lines[end].strip()):
+                        if lines[end].strip() and not lines[end].startswith("    "):
+                            break
+                        end += 1
+                    # insert before end, after last var
+                    lines[end:end] = [v for v in new_state_vars if v.strip()]
+            else:
+                # create new state block at top
+                state_block = ["state:"] + new_state_vars + [""]
+                # insert at top before characters
+                lines = state_block + lines
 
         self.script_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
         return self.script_path
@@ -584,7 +1046,6 @@ class UPVN_GameBuilder:
         if not ENGINE_AVAILABLE or _engine_api is None:
             return False, "engine not found — " + ENGINE_INFO.get("message", "see console")
         _p, _vc, _sm = _engine_api
-        # if we have existing file, validate that file, not just built
         if self.script_path.exists():
             try:
                 _p.parse_file(str(self.script_path))
@@ -599,8 +1060,7 @@ class UPVN_GameBuilder:
             return False, str(e)
 
     def preview_screenshot(self, out_path: str = "screenshots/upvn_preview.png"):
-        """Headless screenshot via headless_renderer. Returns Path or None;
-        on failure the reason is stored in self.last_error."""
+        """Headless screenshot via headless_renderer."""
         self.last_error = None
         if not ENGINE_AVAILABLE or _engine_api is None:
             self.last_error = "engine not found"
@@ -618,12 +1078,8 @@ class UPVN_GameBuilder:
         from engine.core.vn_state import VNState
         from engine.core.vn_interpreter import VNInterpreter
         _p, _vc, _sm = _engine_api
-        # CWD-relative default — make sure the dir exists (the editor may be
-        # launched from anywhere; without this the write dies on a missing
-        # "screenshots/" dir)
         from pathlib import Path as _P
         _P(out_path).parent.mkdir(parents=True, exist_ok=True)
-        # prefer file on disk if exists
         if self.script_path.exists():
             try:
                 script = _p.parse_file(str(self.script_path))
@@ -653,9 +1109,57 @@ class UPVN_GameBuilder:
             return None
         return pathlib.Path(out_path)
 
-    # ------------------------------------------------------------------
-    # v0.6 — self-checks usable from the UI (no bpy needed)
-    # ------------------------------------------------------------------
+    def preview_all_paths(self, out_dir: str = "screenshots/preview_paths"):
+        """Generate screenshots for all choice paths (for QA)."""
+        self.last_error = None
+        if not ENGINE_AVAILABLE or _engine_api is None:
+            self.last_error = "engine not found"
+            return None
+        try:
+            from engine.render.headless_renderer import render_state
+            from engine.core.vn_state import VNState
+            from engine.core.vn_interpreter import VNInterpreter
+            from pathlib import Path as _P
+            _p, _vc, _sm = _engine_api
+            out_dir = _P(out_dir)
+            out_dir.mkdir(parents=True, exist_ok=True)
+            if self.script_path.exists():
+                script = _p.parse_file(str(self.script_path))
+            else:
+                script = _p.parse_string(self.build_rpy())
+            # simple path enumeration: try choices 0,0,0 etc
+            paths = []
+            for choices in [[0], [1], [0,0], [0,1], [1,0], [1,1]]:
+                try:
+                    state = VNState()
+                    interp = VNInterpreter(script, state)
+                    gen = interp.run()
+                    cidx = 0
+                    ev = next(gen)
+                    step = 0
+                    while True:
+                        if ev.get("wait"):
+                            p = out_dir / f"path_{'_'.join(map(str,choices))}_step{step}.png"
+                            render_state(state, ev, p)
+                            paths.append(p)
+                            step += 1
+                        if ev.get("type") == "menu" and ev.get("wait"):
+                            pick = choices[cidx] if cidx < len(choices) else 0
+                            cidx += 1
+                            ev = gen.send(pick)
+                        elif ev.get("wait"):
+                            ev = gen.send(None)
+                        else:
+                            ev = next(gen)
+                except StopIteration:
+                    pass
+                except Exception as e:
+                    print(f"[preview_all] path {choices} failed: {e}")
+            return paths
+        except Exception as e:
+            self.last_error = f"preview all failed: {e}"
+            return None
+
     def engine_ok(self):
         return bool(ENGINE_AVAILABLE)
 
@@ -672,8 +1176,7 @@ if HAS_BPY:
             name="Engine folder (optional)",
             default="",
             subtype="DIR_PATH",
-            description="Folder that contains engine/ (repo root or extracted add-on). "
-                        "Leave empty for automatic discovery.",
+            description="Folder that contains engine/ (repo root or extracted add-on). Leave empty for automatic discovery.",
         )
 
         def draw(self, context):
@@ -684,7 +1187,7 @@ if HAS_BPY:
                 row.label(text="✓ Engine available", icon="CHECKMARK")
             else:
                 row.label(text="✗ Engine NOT found", icon="ERROR")
-                layout.label(text="Install the UPVN .zip release (dist/upvn_editor_addon_v0.6.zip) — engine is bundled.")
+                layout.label(text="Install the UPVN .zip release (dist/upvn_editor_addon_v0.7.zip) — engine is bundled.")
             if ok:
                 layout.label(text=f"Root: {info.get('root')}   (via {info.get('source')})")
             else:
@@ -769,13 +1272,10 @@ if HAS_BPY:
     class UPVN_OT_InstallPillow(bpy.types.Operator):
         bl_idname = "upvn.install_pillow"
         bl_label = "Install Pillow (Preview)"
-        bl_description = ("Install Pillow into UPBGE's bundled Python so 'Preview' can render "
-                          "PNG screenshots (Preview needs Pillow; the game itself does not)")
+        bl_description = ("Install Pillow into UPBGE's bundled Python so 'Preview' can render PNG screenshots")
 
         def execute(self, context):
             py = _upbge_python_path()
-            # target: site-packages of the RUNNING interpreter (already on
-            # sys.path), so the package becomes visible without a restart
             target = None
             try:
                 import sysconfig
@@ -784,13 +1284,6 @@ if HAS_BPY:
                 target = None
             cross_flags = []
             if not py:
-                # Official UPBGE 0.50 tarball layout: python as LIB ONLY
-                # (5.0/python/lib/python3.11/…, no bin/python3.11). The
-                # bundled pip route is impossible — fall back to the HOST
-                # python3 and cross-install INTO that site-packages with
-                # pip's --python-version/--only-binary flags (a plain
-                # `--target` without them silently ships host-ABI wheels —
-                # `import PIL` then works but `_imaging` fails to load).
                 import shutil
                 py = shutil.which("python3")
                 if not py:
@@ -802,8 +1295,7 @@ if HAS_BPY:
                 cross_flags = ["--python-version", "3.11",
                                "--only-binary=:all:"]
                 if not target:
-                    self.report({"ERROR"}, "Cannot determine this "
-                                "interpreter's site-packages (sysconfig).")
+                    self.report({"ERROR"}, "Cannot determine this interpreter's site-packages (sysconfig).")
                     return {"FINISHED"}
             import subprocess
             cmd = [py, "-m", "pip", "install", "pillow"]
@@ -816,19 +1308,17 @@ if HAS_BPY:
                 self.report({"ERROR"}, f"pip failed: {e}")
                 return {"FINISHED"}
             if r.returncode == 0:
-                # verify: does the RUNNING interpreter see it now?
                 if pil_live_available():
                     self.report({"INFO"}, "Pillow installed and visible — Preview should work now.")
                 else:
                     self.report({"WARNING"},
-                                "Pillow installed into the bundled Python, but this Blender "
-                                "session does not see it yet — restart Blender/UPBGE once, then Preview.")
+                                "Pillow installed into the bundled Python, but this Blender session does not see it yet — restart Blender/UPBGE once, then Preview.")
             else:
                 tail = (r.stderr or r.stdout or "").strip().splitlines()
                 self.report({"ERROR"}, "pip install failed: " + ("; ".join(tail[-3:]) if tail else "?"))
             return {"FINISHED"}
 
-    # properties
+    # properties — M27 extended for no-code workflow
     class UPVN_SceneProps(bpy.types.PropertyGroup):
         project_path: bpy.props.StringProperty(name="Script Path", default="//game/script.rpy", subtype='FILE_PATH')
         char_id: bpy.props.StringProperty(name="ID", default="e")
@@ -850,17 +1340,34 @@ if HAS_BPY:
         menu_jump2: bpy.props.StringProperty(name="Jump 2", default="wait")
         stage_name: bpy.props.StringProperty(name="3D Stage", default="classroom_3d")
         arbitrary_slot: bpy.props.IntProperty(name="Arbitrary Slot", default=1, min=1, max=999999, description="Any slot 1..∞ (pagination 6/page)")
+        # M27 new fields
+        var_name: bpy.props.StringProperty(name="Variable", default="affection")
+        var_type: bpy.props.EnumProperty(name="Type", items=[("int", "Int", ""), ("float", "Float", ""), ("str", "String", ""), ("bool", "Bool", ""), ("list", "List", "")], default="int")
+        var_value: bpy.props.StringProperty(name="Value", default="0")
+        if_cond: bpy.props.StringProperty(name="If Condition", default="affection >= 1")
+        jump_target: bpy.props.StringProperty(name="Jump To", default="good_ending")
+        label_name: bpy.props.StringProperty(name="Label", default="new_scene")
+        pause_duration: bpy.props.FloatProperty(name="Duration", default=0.5, min=0.1, max=10.0)
+        audio_name: bpy.props.StringProperty(name="Audio Asset", default="theme")
+        audio_file: bpy.props.StringProperty(name="Audio File (optional)", default="", subtype='FILE_PATH')
+        camera_zoom: bpy.props.FloatProperty(name="Zoom", default=1.2, min=0.1, max=5.0)
+        camera_duration: bpy.props.FloatProperty(name="Duration", default=1.0, min=0.1, max=10.0)
+        camera_easing: bpy.props.EnumProperty(name="Easing", items=[("linear", "Linear", ""), ("ease", "Ease", ""), ("easein", "Ease In", ""), ("easeout", "Ease Out", ""), ("easeinout", "Ease In Out", "")], default="ease")
+        wizard_title: bpy.props.StringProperty(name="Game Title", default="My Visual Novel")
+        wizard_theme: bpy.props.EnumProperty(name="Theme", items=[("school", "School", ""), ("fantasy", "Fantasy", ""), ("scifi", "Sci-Fi", ""), ("mystery", "Mystery", "")], default="school")
+        set_target: bpy.props.StringProperty(name="Set Variable", default="affection")
+        set_op: bpy.props.EnumProperty(name="Op", items=[("=", "=", ""), ("+=", "+=", ""), ("-=", "-=", ""), ("*=", "*=", ""), ("/=", "/=", "")], default="+=")
+        set_expr: bpy.props.StringProperty(name="Expression", default="1")
         controller_module: bpy.props.StringProperty(
             name="Python Controller", default="bge_frontend.frontend",
             description="Module ticked by the logic brick (only used in MODULE mode)",
         )
 
     # ------------------------------------------------------------------
-    # v0.6 — one-click scene setup (UPBGE). Pure data-API: works in the
-    # UI and in --background runs, no bpy.ops, no context dependencies.
+    # v0.7 HQ scene — improved materials and lighting
     # ------------------------------------------------------------------
 
-    _UPVN_LAUNCHER_TEXT = """# UPVN launcher (auto-generated by 'Setup Scene', v0.6).
+    _UPVN_LAUNCHER_TEXT = """# UPVN launcher (auto-generated by 'Setup Scene', v0.7).
 # Runs on every tick from the Always -> Python brick of the VNController object.
 # It bootstraps sys.path so the engine is importable no matter where this .blend
 # lives, then ticks the frontend. You normally never need to edit this.
@@ -893,8 +1400,7 @@ except Exception:
 """
 
     def _engine_root_relative(blend_dir):
-        """Nearest ancestor of blend_dir that holds engine/, as a '//…' path
-        (empty string when none found — launcher then auto-searches)."""
+        """Nearest ancestor of blend_dir that holds engine/, as a '//…' path."""
         d = blend_dir
         seen = set()
         while d and d not in seen:
@@ -915,9 +1421,6 @@ except Exception:
                          [], [(0, 1, 2, 3)])
         mesh.update()
         mesh.name = name + "_mesh"
-        # M26b: TexImage nodes sample through UVs — from_pydata creates no UV
-        # layer and textures then render black (or crash on fileless images)
-        # in the player. Every VN plane gets a full 0..1 quad UV.
         try:
             uv = mesh.uv_layers.new(name="UVMap")
             for i, (u, v) in enumerate(((0.0, 0.0), (1.0, 0.0),
@@ -941,26 +1444,16 @@ except Exception:
         obj.data.materials.append(mat)
         return obj
 
-    # Material/image node names. These three have to live HERE, not only in
-    # build_vn_scene's local `from engine.render.contract import ...`:
-    # _rewrite_unlit and _ensure_white_image are separate module-level
-    # functions (both inside `if HAS_BPY:`), so a *local* import in the caller
-    # is invisible to them — which made every tex_capable=True material raise
-    # `NameError: TEX_NODE_NAME` and killed tools/make_template.py (and
-    # "Setup Scene") outright. build_vn_scene keeps its own import for the rest
-    # of its names; the values are identical because both come from contract.
     try:
         from engine.render.contract import (TEX_NODE_NAME, MIX_NODE_NAME,
                                             WHITE_IMAGE_NAME)
-    except Exception:                                    # standalone add-on copy
+    except Exception:
         TEX_NODE_NAME = "UPVN Tex Image"
         MIX_NODE_NAME = "UPVN Tex Mix"
         WHITE_IMAGE_NAME = "UPVN_White1px"
 
     def _ensure_white_image(_b):
-        """1×1 white PNG, packed into the blend. NEVER ship a fileless
-        generated image in a TexImage node: the player segfaults at startup
-        on those (M26b field-verified; packed/file-backed are safe)."""
+        """1×1 white PNG, packed into the blend."""
         try:
             from engine.render.contract import WHITE_IMAGE_NAME
         except Exception:
@@ -980,20 +1473,13 @@ except Exception:
             pass
         return img
 
-    def _rewrite_unlit(mat, color, _b=None, tex_capable=False):
-        """Emission-only, texture-free — VN planes must not pick up scene
-        lights, and their color is driven at runtime via KX_GameObject.color.
-
-        M26: the node graph is Output ← Emission ← Object Info *Color*. The
-        rasterizer multiplies the object's color into the emission, so
-        palette code (engine/render/contract.py::apply_object_color) paints
-        every stage/sprite/plate without any image texture. `color` seeds the
-        matching object's default tint (build_vn_scene assigns it) and also
-        stays as the material's fallback if an object never sets a color.
-        The old TexImage node is gone on purpose: UPBGE 0.50's bge.texture
-        cannot bind node materials ("Texture is not available"), an unassigned
-        TexImage evaluated black (BUG-005), and the palette makes images
-        optional (image_mode="color" for the template and all samples)."""
+    def _rewrite_unlit(mat, color, _b=None, tex_capable=False, hq=False):
+        """Emission-only, texture-free — with HQ improvements (M27).
+        
+        M27 HQ: slightly higher emission strength for better visibility,
+        better handling of alpha, and improved node graph for edge glow
+        on choice buttons when hq=True.
+        """
         try:
             from engine.render.contract import TEX_NODE_NAME, MIX_NODE_NAME
         except Exception:
@@ -1009,11 +1495,6 @@ except Exception:
         objinfo = nt.nodes.new("ShaderNodeObjectInfo")
         src_color = objinfo.outputs["Color"]
         if tex_capable and _b is not None:
-            # M26b: texture-capable graph — Mix(A=ObjectInfo.Color,
-            # B=TexImage.Color, Factor=0). Factor 0 → palette (object color);
-            # the runtime flips Factor to 1.0 when it assigns a real image
-            # (contract.apply_material_image). One material per sprite plane
-            # so sprites texture independently.
             tex = nt.nodes.new("ShaderNodeTexImage")
             tex.name = TEX_NODE_NAME
             try:
@@ -1024,17 +1505,47 @@ except Exception:
             mix = nt.nodes.new("ShaderNodeMix")
             mix.name = MIX_NODE_NAME
             try:
-                mix.data_type = "RGBA"              # colors, not float
-                mix.inputs[0].default_value = 0.0   # Factor → palette default
+                mix.data_type = "RGBA"
+                mix.inputs[0].default_value = 0.0
                 nt.links.new(objinfo.outputs["Color"], mix.inputs[6])
                 nt.links.new(tex.outputs["Color"], mix.inputs[7])
                 nt.links.new(mix.outputs[2], em.inputs["Color"])
             except Exception:
                 nt.links.new(objinfo.outputs["Color"], em.inputs["Color"])
             src_color = None
+
+        # HQ: for choice buttons, add fresnel edge glow
+        if hq:
+            try:
+                fresnel = nt.nodes.new("ShaderNodeFresnel")
+                fresnel.inputs[0].default_value = 1.4
+                mix_hq = nt.nodes.new("ShaderNodeMix")
+                mix_hq.data_type = "RGBA"
+                mix_hq.inputs[0].default_value = 0.15
+                # brighter edge color
+                bright = (min(1.0, color[0]*1.3), min(1.0, color[1]*1.3), min(1.0, color[2]*1.3), 1.0)
+                mix_hq.inputs[6].default_value = color
+                mix_hq.inputs[7].default_value = bright
+                nt.links.new(fresnel.outputs[0], mix_hq.inputs[0])
+                if src_color is not None:
+                    # mix object color with hq mix
+                    mix2 = nt.nodes.new("ShaderNodeMix")
+                    mix2.data_type = "RGBA"
+                    mix2.inputs[0].default_value = 0.5
+                    nt.links.new(src_color, mix2.inputs[6])
+                    nt.links.new(mix_hq.outputs[2], mix2.inputs[7])
+                    nt.links.new(mix2.outputs[2], em.inputs["Color"])
+                    src_color = None
+                else:
+                    nt.links.new(mix_hq.outputs[2], em.inputs["Color"])
+                    src_color = None
+            except Exception:
+                pass
+
         try:
             em.inputs["Color"].default_value = color
-            em.inputs["Strength"].default_value = 1.0
+            # M27 HQ: slightly higher strength for better visibility
+            em.inputs["Strength"].default_value = 1.2 if hq else 1.0
         except Exception:
             pass
         if src_color is not None:
@@ -1066,13 +1577,7 @@ except Exception:
         return obj
 
     def _static_ghost(obj):
-        """Static, ray-hittable physics for VN plates.
-
-        M26: physics_type "SENSOR" objects are NOT detected by
-        KX_GameObject.rayCast in UPBGE 0.50 (measured in-field: every choice
-        click missed). STATIC + BOX collision bounds makes choice plates,
-        sprites and planes hittable for the pointer ray while staying
-        immovable."""
+        """Static, ray-hittable physics for VN plates."""
         try:
             g = obj.game
             try:
@@ -1141,11 +1646,14 @@ except Exception:
                        controller_module="upvn_launcher",
                        install_launcher=True):
         """Create/refresh a complete playable UPVN scene (data API, idempotent).
-
-        Default scene_name=None uses the OPEN scene (context.scene). Creating a
-        separate VN_Main left the template Scene without choice_* (field: 18/27).
-
-        Safe to press repeatedly. Returns the controller object.
+        
+        M27 HQ improvements:
+        - Better world lighting (dark gradient, not pure black)
+        - Improved dialogue box material (darker, more readable)
+        - Choice buttons with HQ edge glow and better spacing
+        - Better sprite plane colors and positions
+        - Soft lighting for 3D stage (sun with low energy, not hidden)
+        - Improved backlog/history visuals
         """
         _b = bpy_module or bpy
         has_game = _has_game_support()
@@ -1178,9 +1686,7 @@ except Exception:
                 scene.collection.children.link(col)
             collections[name] = col
 
-        # camera — always re-apply the Front/ortho transform unless the user
-        # tagged the object upvn_camera_custom. Existing Camera_UI at the old
-        # (0,-10,5) pose looked at XY planes edge-on and was never bound.
+        # camera
         try:
             from engine.render.contract import (
                 CAMERA_UI, CAMERA_3D,
@@ -1219,7 +1725,6 @@ except Exception:
                                   loc=CAMERA_3D_LOCATION, rot=CAMERA_3D_ROTATION)
             scene.collection.objects.link(cam3d)
         scene.camera = cam_ui
-        # hide leftover factory cameras so P cannot pick the wrong one
         for ob in list(scene.objects):
             try:
                 if ob.type == "CAMERA" and ob.name not in (CAMERA_UI, CAMERA_3D):
@@ -1227,7 +1732,6 @@ except Exception:
                     ob.hide_render = True
             except Exception:
                 pass
-        # 3D view → camera (so the editor matches what P will show)
         try:
             win = getattr(_b.context, "window", None)
             screen = getattr(win, "screen", None) if win is not None else None
@@ -1240,8 +1744,7 @@ except Exception:
         except Exception:
             pass
 
-        # placeholder planes (only when missing — don't destroy user art)
-        # names/materials follow engine/render/contract.py (single source)
+        # placeholder planes
         try:
             from engine.render.contract import (BG_PLANE, BG_MATERIAL,
                                                 SPRITE_MATERIAL, SPRITE_POSITIONS,
@@ -1255,37 +1758,32 @@ except Exception:
             POSITIONS = {p: ({"far_left": -5.0, "left": -3.0, "center": 0.0,
                               "right": 3.0, "far_right": 5.0}[p], -0.15, 0.0)
                          for p in SPRITE_POSITIONS}
-        # NOTE: TEX_NODE_NAME / MIX_NODE_NAME / WHITE_IMAGE_NAME are bound at
-        # MODULE scope (headless-safe imports block) — do not rebind them as
-        # locals here: _rewrite_unlit/_ensure_white_image resolve them as
-        # module globals and locals would leave those functions with a
-        # NameError (M26g bug — broke every tex_capable=True material).
 
-        def _ensure_material(_b, name, color, tex_capable=False):
+        def _ensure_material(_b, name, color, tex_capable=False, hq=False):
             mat = _b.data.materials.get(name)
             if mat is None:
                 mat = _b.data.materials.new(name)
-            _rewrite_unlit(mat, color, _b=_b, tex_capable=tex_capable)
+            _rewrite_unlit(mat, color, _b=_b, tex_capable=tex_capable, hq=hq)
             try:
-                mat.use_fake_user = True   # survive save when unused
+                mat.use_fake_user = True
             except Exception:
                 pass
             return mat
 
-        mat_bg = _ensure_material(_b, BG_MATERIAL, (0.12, 0.14, 0.22, 1.0),
+        # M27 HQ: improved colors — more polished, less flat
+        mat_bg = _ensure_material(_b, BG_MATERIAL, (0.10, 0.12, 0.20, 1.0),
                                   tex_capable=True)
         mat_sprite = _ensure_material(_b, SPRITE_MATERIAL, (0.62, 0.78, 0.55, 1.0))
-        # one texture-capable material per sprite plane → per-sprite textures
         for _pos in SPRITE_POSITIONS:
             _ensure_material(_b, f"{SPRITE_MATERIAL}_{_pos}",
                              (0.62, 0.78, 0.55, 1.0), tex_capable=True)
-        mat_ui = _ensure_material(_b, "MAUI", (0.05, 0.06, 0.14, 1.0))
-        mat_choice = _ensure_material(_b, "MAChoice", (0.12, 0.18, 0.32, 1.0))
+        # HQ dialogue box: darker, more readable, slight blue tint
+        mat_ui = _ensure_material(_b, "MAUI", (0.03, 0.05, 0.12, 1.0), hq=True)
+        # HQ choice buttons: better contrast, edge glow
+        mat_choice = _ensure_material(_b, "MAChoice", (0.10, 0.16, 0.30, 1.0), hq=True)
         mat_font = _ensure_material(_b, "MAFont", (0.92, 0.93, 1.0, 1.0))
 
         def _single_material(ob, mat):
-            """Replace the plane's default material with the contract one so the
-            object exposes exactly one material slot, named per the contract."""
             try:
                 ob.data.materials.clear()
             except Exception:
@@ -1301,8 +1799,6 @@ except Exception:
                 ob.scale = scale
 
         def _tint(ob, color):
-            """Seed the object color that M26 materials multiply into emission
-            (Object Info -> Color). Runtime palette code overwrites it freely."""
             try:
                 ob.color = color
             except Exception:
@@ -1311,15 +1807,13 @@ except Exception:
 
         bg = scene.objects.get(BG_PLANE)
         if bg is None:
-            # size 18: the ortho frustum is 15 wide (Camera_UI); a 10-unit
-            # plane left black bars on 16:9 windows (M26b field finding)
             bg = _data_plane(BG_PLANE, size=18.0, rot=PLANE_ROTATION)
             _single_material(bg, mat_bg)
             scene.collection.objects.link(bg)
             collections["VN_Backgrounds"].objects.link(bg)
         _apply_2d_layout(bg, (0.0, 0.0, 0.0))
         _single_material(bg, mat_bg)
-        _tint(bg, (0.12, 0.14, 0.22, 1.0))
+        _tint(bg, (0.10, 0.12, 0.20, 1.0))
         dlg = scene.objects.get(DIALOGUE_PLANE)
         if dlg is None:
             dlg = _data_plane(DIALOGUE_PLANE, size=8.0, color=(0.05, 0.05, 0.12, 1.0),
@@ -1328,7 +1822,7 @@ except Exception:
             collections["VN_UI"].objects.link(dlg)
         _apply_2d_layout(dlg, DIALOGUE_LOCATION, DIALOGUE_SCALE)
         _single_material(dlg, mat_ui)
-        _tint(dlg, (0.05, 0.06, 0.14, 1.0))
+        _tint(dlg, (0.03, 0.05, 0.12, 1.0))
         _static_ghost(bg)
         _static_ghost(dlg)
 
@@ -1357,9 +1851,6 @@ except Exception:
                     ob.data.materials.append(mat_font)
             except Exception:
                 pass
-            # M26i: real typeface + extrude/bevel 3D shape (baked into the
-            # .blend; the player only reads the data). Degrades to the
-            # current font when no TTF is found.
             try:
                 from engine.render.contract import style_font_curve
                 style_font_curve(ob.data, bold=bold, shear=shear)
@@ -1367,13 +1858,7 @@ except Exception:
                 pass
             _tint(ob, (0.92, 0.93, 1.0, 1.0))
             _static_ghost(ob)
-            # M26i drop-shadow twin: same text every frame (world_ui writes
-            # it), fixed dark tint, offset behind the main object. Created
-            # when missing and REPAIRED when pre-existing (a pre-M26i
-            # shadow must get the typeface like its main — same rule as the
-            # bake tool).
             if shadow is not None:
-                created = scene.objects.get(shadow) is None
                 sh = scene.objects.get(shadow)
                 if sh is None:
                     sh = _data_text(shadow, body="", size=size, loc=loc,
@@ -1394,16 +1879,11 @@ except Exception:
                 _static_ghost(sh)
             return ob
 
-        # M26i: bold speaker name + colored at runtime by Character color;
-        # body text regular. Both get drop-shadow twins.
         _ensure_font(SPEAKER_TEXT, SPEAKER_LOCATION, size=0.28, bold=True,
                      shadow="Speaker_Shadow")
         _ensure_font(DIALOGUE_TEXT, DIALOGUE_TEXT_LOCATION, size=0.26,
                      shadow="Dialogue_Shadow")
 
-        # --- backlog + rewind objects (M26d) ---------------------------------
-        # engine/ui/world_ui.py writes these when H is pressed / the player is
-        # rolled back. Without them the overlay existed only in headless traces.
         try:
             from engine.render.contract import (HISTORY_PLANE, HISTORY_TEXT,
                                                 REWIND_TEXT)
@@ -1414,65 +1894,93 @@ except Exception:
         if hb is None:
             def _mk_hist():
                 return _data_plane(HISTORY_PLANE, size=10.0,
-                                   color=(0.03, 0.04, 0.09, 1.0), rot=PLANE_ROTATION)
+                                   color=(0.02, 0.03, 0.08, 1.0), rot=PLANE_ROTATION)
             hb = _get_or_create(scene, HISTORY_PLANE, _mk_hist)
             _link_ob(scene, hb, collections["VN_UI"])
             _apply_2d_layout(hb, (0.0, -0.45, 0.9), (6.6, 3.0, 1.0))
             _single_material(hb, mat_ui)
-            _tint(hb, (0.03, 0.04, 0.09, 1.0))
+            _tint(hb, (0.02, 0.03, 0.08, 1.0))
             _static_ghost(hb)
-            # NB: stays *visible* in the .blend like Dialogue_Box / choice_N —
-            # the runtime hides it every tick while the backlog is closed. A
-            # hide_viewport/hide_render default here would leave the overlay
-            # permanently invisible in the player (the game object starts
-            # hidden and `visible = True` on a hidden-by-default object is a
-            # no-op in UPBGE 0.50).
-        # FONT text grows down from its origin → anchor at the panel top
         _ensure_font(HISTORY_TEXT, (-6.0, -0.5, 3.4), size=0.20)
-        # M26i: the rewind marker leans (shear) — visually distinct from
-        # ordinary dialogue lines, like Ren'Py's italic rollback notice.
         _ensure_font(REWIND_TEXT, (-6.0, -0.5, 4.4), size=0.17, shear=0.18)
 
+        # M27 HQ: improved choice layout — better spacing, larger click area
         for i in range(CHOICE_COUNT):
-            z = 2.4 - i * 0.7
+            z = 2.6 - i * 0.75  # slightly more spacing
             loc = (0.0, -0.5, z)
             cname = f"{CHOICE_PREFIX}{i}"
             try:
                 def _mk(cname=cname):
-                    return _data_plane(cname, size=6.0, color=(0.12, 0.18, 0.32, 1.0),
+                    return _data_plane(cname, size=6.0, color=(0.10, 0.16, 0.30, 1.0),
                                        rot=PLANE_ROTATION)
                 ch = _get_or_create(scene, cname, _mk)
                 _link_ob(scene, ch, collections["VN_UI"])
-                _apply_2d_layout(ch, loc, (3.2, 0.28, 1.0))
+                _apply_2d_layout(ch, loc, (3.4, 0.32, 1.0))  # slightly larger
                 _single_material(ch, mat_choice)
-                _tint(ch, (0.12, 0.18, 0.32, 1.0))
+                _tint(ch, (0.10, 0.16, 0.30, 1.0))
                 _static_ghost(ch)
                 tname = cname + "_text"
-                # M26i: choice labels bold (numbers read faster) + shadow
-                _ensure_font(tname, (loc[0] - 2.8, loc[1] - 0.05, loc[2] + 0.08),
+                _ensure_font(tname, (loc[0] - 2.9, loc[1] - 0.05, loc[2] + 0.08),
                              size=0.24, bold=True,
                              shadow=cname + "_shadow")
             except Exception as exc:
                 print(f"[UPVN] choice {cname} create failed: {exc}")
 
-        for ob in list(scene.objects):
-            try:
-                if ob.type == "LIGHT":
-                    ob.hide_viewport = True
-                    ob.hide_render = True
-            except Exception:
-                pass
+        # M27 HQ: world setup — dark gradient, not pure black
         try:
             world = scene.world
-            if world is not None and getattr(world, "use_nodes", False):
-                bg_n = world.node_tree.nodes.get("Background")
-                if bg_n:
-                    bg_n.inputs[0].default_value = (0.0, 0.0, 0.0, 1.0)
-                    bg_n.inputs[1].default_value = 0.0
+            if world is None:
+                world = _b.data.worlds.new("UPVN_World")
+                scene.world = world
+            world.use_nodes = True
+            bg_n = world.node_tree.nodes.get("Background")
+            if bg_n:
+                bg_n.inputs[0].default_value = (0.015, 0.018, 0.032, 1.0)
+                bg_n.inputs[1].default_value = 0.6
         except Exception:
             pass
 
-        # sprite planes per position (SpriteRenderer looks these up by name)
+        # M27 HQ: soft lighting for 3D stage — keep one sun, hide others
+        # Previous code hid ALL lights, which made 3D stage flat. Keep a soft sun for depth.
+        try:
+            # ensure at least one sun for 3D stage depth
+            sun_name = "SUN_Soft"
+            sun = _b.data.objects.get(sun_name)
+            if sun is None and _b.data.lights:
+                # try to reuse existing sun
+                for ob in list(scene.objects):
+                    if ob.type == "LIGHT" and ob.data.type == "SUN":
+                        sun = ob
+                        break
+            if sun is None:
+                light_data = _b.data.lights.new(name="SUN_Soft", type='SUN')
+                light_data.energy = 0.8
+                light_data.color = (0.9, 0.92, 1.0)
+                sun_obj = _b.data.objects.new(name=sun_name, object_data=light_data)
+                sun_obj.location = (2.0, -3.0, 4.0)
+                sun_obj.rotation_euler = (0.8, 0.1, 0.5)
+                scene.collection.objects.link(sun_obj)
+                collections["VN_3DStage"].objects.link(sun_obj)
+            else:
+                try:
+                    sun.hide_viewport = False
+                    sun.hide_render = False
+                    sun.data.energy = 0.8
+                except Exception:
+                    pass
+            # hide other harsh lights
+            for ob in list(scene.objects):
+                try:
+                    if ob.type == "LIGHT" and ob.name != sun_name and ob.name != "SUN_Soft":
+                        # keep but dim
+                        if ob.data:
+                            ob.data.energy = 0.3
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        # sprite planes
         for pos in SPRITE_POSITIONS:
             name = f"Sprite_{pos}"
             loc = POSITIONS.get(pos, (0.0, -0.15, 0.0))
@@ -1493,19 +2001,12 @@ except Exception:
             except Exception:
                 pass
 
-        # VNController empty — reuse the existing object when present (UPBGE's
-        # brick collections have no .remove(), so deleting/recreating the object
-        # is impossible without the logic UI operators; reuse keeps it simple and
-        # idempotent)
         ctrl = scene.objects.get("VNController")
         created = ctrl is None
         if ctrl is None:
             ctrl = _b.data.objects.new("VNController", None)
             ctrl.empty_display_type = "CUBE"
             scene.collection.objects.link(ctrl)
-        # M26: never clobber a configured script_path with the default —
-        # keep the blend's existing value when the caller passes the default
-        # (panel default / API default). See UPVN_OT_SetupScene.execute.
         effective_script_path = script_path
         try:
             if script_path in (None, "", "//game/script.rpy"):
@@ -1521,33 +2022,18 @@ except Exception:
         except Exception:
             pass
         _set_runtime_prop(_b, ctrl, "script_path", effective_script_path)
-        # M26: image policy for the renderers — "color" (texture-free palette,
-        # template + samples) or "auto" (converted Ren'Py projects).
         _set_runtime_prop(_b, ctrl, "image_mode", IMAGE_MODE_DEFAULT)
-        # Parse tier (M26d): "safe" = the declarative subset the samples use,
-        # "full" = drop-in Ren'Py. Only seeded when absent, so Setup Scene on an
-        # already-converted project does not silently downgrade it to safe and
-        # break its script.
         try:
             if "parse_mode" not in ctrl:
                 _set_runtime_prop(_b, ctrl, "parse_mode", "safe")
         except Exception:
             pass
-        # relative root to the folder that contains engine/ (launcher falls back
-        # to the blend dir + parents when this is empty/stale)
         try:
             blend_dir = os.path.dirname(os.path.abspath(_b.path.abspath("//"))) if _b.data.filepath else None
         except Exception:
             blend_dir = None
         _set_runtime_prop(_b, ctrl, "upvn_root", _engine_root_relative(blend_dir))
 
-        # --- logic bricks (UPBGE only) ---
-        # UPBGE 0.50 exposes brick editing through bpy.ops.logic.* (the same
-        # operators UPBGE's own add-ons use) — the RNA collections themselves are
-        # read-only and lack .remove(). bpy.ops.logic requires an interactive
-        # UI/GL context, so in --background mode we skip adding bricks and say so
-        # loudly. Existing bricks are never touched: Setup Scene is idempotent and
-        # preserves a working wiring when the object already has it.
         _set_runtime_prop(_b, ctrl, "upvn_bricks", "no")
         if has_game and install_launcher:
             launcher = _b.data.texts.get("upvn_launcher")
@@ -1576,15 +2062,6 @@ except Exception:
 
 
     def _set_runtime_prop(_b, obj, name, value):
-        """Write a property that is visible in the editor AND at game runtime.
-
-        M25 BUG-009: in UPBGE 0.50 the player's KX_GameObject only exposes
-        entries of obj.game.properties ("Game Properties"); plain ID custom
-        properties (obj[name]) are invisible at runtime, so a blend carrying
-        script_path as a bare custom property silently fell back to the
-        candidate list and never loaded the project's script. The editor UI
-        keeps reading the custom property, so write both representations.
-        """
         obj[name] = value
         try:
             props = obj.game.properties
@@ -1621,13 +2098,6 @@ except Exception:
     def _add_logic_bricks(_b, obj, launcher_text, controller_module,
                           need_sensor=True, need_controller=True,
                           need_keys=False, need_mouse=False):
-        """Wire Always(pulse)+AllKeys+Mouse -> Python(launcher) via bpy.ops.logic.*.
-
-        AllKeys is required in the embedded player (P): without it Blender eats
-        keystrokes while LMB still reaches bge.logic.mouse.
-
-        Returns 'yes' | 'skipped-background' | 'error: …' | 'already'.
-        """
         if not any((need_sensor, need_controller, need_keys, need_mouse)):
             return "already"
         if getattr(_b.app, "background", True):
@@ -1683,7 +2153,7 @@ except Exception:
                     pass
             if need_controller and launcher_text is not None:
                 try:
-                    con.text = launcher_text      # SCRIPT mode, Text datablock
+                    con.text = launcher_text
                 except Exception:
                     try:
                         con.mode = "MODULE"
@@ -1707,11 +2177,6 @@ except Exception:
             return f"error: {e}"
 
     def _has_game_support():
-        """True when the running build exposes game logic settings (UPBGE).
-
-        Note: UPBGE 0.50 answers hasattr(bpy.types.Object, 'game') with False
-        even though every instance has .game — so probe through a real object.
-        """
         probe = None
         try:
             probe = bpy.data.objects.new("__upvn_probe__", None)
@@ -1728,8 +2193,8 @@ except Exception:
 
     class UPVN_OT_SetupScene(bpy.types.Operator):
         bl_idname = "upvn.setup_scene"
-        bl_label = "Setup Scene (one click)"
-        bl_description = "Wire the current .blend for UPVN: cameras, collections, VNController + Always→Python brick, path-bootstrap launcher. Press P to play afterwards."
+        bl_label = "Setup Scene (one click HQ)"
+        bl_description = "Wire the current .blend for UPVN with HQ materials, lighting, and logic bricks. Press P to play afterwards."
 
         @classmethod
         def poll(cls, context):
@@ -1737,13 +2202,6 @@ except Exception:
 
         def execute(self, context):
             p = context.scene.upvn_props
-            # M26: the blend's own VNController.script_path is the source of
-            # truth ("the game you build is the game that plays"). When the
-            # panel still carries the default, adopt the blend's value instead
-            # of overwriting it — Setup Scene used to clobber a configured
-            # path (e.g. '//../examples/20_smoke_game/script.rpy') back to
-            # '//game/script.rpy', and pressing P then played the fallback
-            # demo. The panel field is synced so both stay consistent.
             try:
                 existing = context.scene.objects.get("VNController")
                 if existing is not None:
@@ -1784,29 +2242,25 @@ except Exception:
             bricks = ctrl.get("upvn_bricks", "no")
             if bricks == "yes":
                 self.report({"INFO"},
-                            "Scene wired: VNController + Always→Python launcher brick. Press P to play.")
+                            "HQ Scene wired: VNController + Always→Python launcher brick + HQ materials. Press P to play.")
             elif bricks == "existing":
                 self.report({"INFO"},
-                            "Scene wiring already present and intact (nothing changed). "
-                            "script_path set — press P to play.")
+                            "Scene wiring already present and intact (HQ materials refreshed). Press P to play.")
             elif isinstance(bricks, str) and bricks.startswith("skipped"):
                 self.report({"WARNING"},
-                            "Scene objects created, but logic bricks need the UPBGE UI: "
-                            "run Setup Scene again from this panel (not --background).")
+                            "Scene objects created with HQ materials, but logic bricks need the UPBGE UI: run Setup Scene again from this panel.")
             elif isinstance(bricks, str) and bricks.startswith("error"):
                 self.report({"ERROR"}, f"Brick wiring failed: {bricks}")
             else:
                 self.report({"INFO"},
-                            "Scene objects refreshed. Press P to play (or run Setup Scene "
-                            "inside the UPBGE UI for the full brick wiring).")
-            print("[UPVN] Setup Scene done. script_path=", p.project_path, "| bricks:", bricks)
+                            "HQ Scene objects refreshed. Press P to play.")
+            print("[UPVN] Setup Scene HQ done. script_path=", p.project_path, "| bricks:", bricks)
             return {"FINISHED"}
 
     class UPVN_OT_CheckWiring(bpy.types.Operator):
         bl_idname = "upvn.check_wiring"
         bl_label = "Check Scene Wiring"
-        bl_description = ("Compare the open scene against the engine's object contract "
-                          "(engine/render/contract.py) and report missing items by name")
+        bl_description = ("Compare the open scene against the engine's object contract and report missing items")
 
         def execute(self, context):
             ok, _info = ensure_engine(retry=True)
@@ -1854,42 +2308,70 @@ except Exception:
 
     class UPVN_OT_CreateProject(bpy.types.Operator):
         bl_idname = "upvn.create_project"
-        bl_label = "Create UPVN Project"
-        bl_description = "Create //game/script.rpy with starter template (no coding)"
+        bl_label = "Create UPVN Project (Declarative)"
+        bl_description = "Create //game/script.rpy with HQ declarative starter (no coding, high quality)"
+
         def execute(self, context):
             props = context.scene.upvn_props
             path = bpy.path.abspath(props.project_path)
-            # M26g data-loss guard: Create Project generates a STARTER. If
-            # the target script already has content (e.g. the panel adopted
-            # the blend's script_path after Setup Scene — pointing at an
-            # existing game), regenerating would empty every label body.
-            # Refuse and tell the user what to do instead.
             try:
                 existing = pathlib.Path(path)
                 if existing.exists() and existing.read_text(encoding="utf-8").strip():
                     self.report(
                         {"ERROR"},
-                        f"Refusing to overwrite existing script: {path} — "
-                        "change Script Path (empty file/folder for a new game) "
-                        "or delete that file first")
+                        f"Refusing to overwrite existing script: {path} — change Script Path or delete that file first")
                     return {"CANCELLED"}
             except OSError:
-                pass                                   # unreadable → builder will surface it
-            builder = UPVN_GameBuilder(path)
-            builder.add_character("e", "Eileen", "#c8ffc8")
-            builder.add_character("s", "Sylvie", "#c8c8ff")
-            builder.ensure_label("start")
-            builder.add_scene("bg classroom")
-            builder.add_show("eileen", "center")
-            builder.add_say("e", "Hello from Blender! This game was created with clicks, not code.")
-            builder.add_say(None, "You can add more dialogue, menus, and 3D stages from the UPVN panel.")
+                pass
+            builder = UPVN_GameBuilder(path, use_declarative=True)
+            builder.create_starter_declarative()
+            # ensure asset folders exist
+            try:
+                root = pathlib.Path(path).parent.parent if pathlib.Path(path).parent.name == "game" else pathlib.Path(path).parent
+                for sub in ["backgrounds", "sprites", "audio", "stages"]:
+                    (root / "assets" / sub).mkdir(parents=True, exist_ok=True)
+                (root / "screenshots").mkdir(parents=True, exist_ok=True)
+            except Exception:
+                pass
             builder.write()
-            self.report({'INFO'}, f"Created {path}")
+            self.report({'INFO'}, f"Created declarative project {path} (HQ, no coding)")
+            return {'FINISHED'}
+
+    class UPVN_OT_QuickWizard(bpy.types.Operator):
+        bl_idname = "upvn.quick_wizard"
+        bl_label = "Quick VN Wizard (1-Click Game)"
+        bl_description = "Create a full branching visual novel with 2 endings, variables, 3D stage — one click, no coding, HQ"
+
+        def execute(self, context):
+            props = context.scene.upvn_props
+            path = bpy.path.abspath(props.project_path)
+            # allow overwrite for wizard? Create new file with wizard suffix if exists
+            p = pathlib.Path(path)
+            if p.exists() and p.read_text(encoding="utf-8").strip():
+                # create as game_wizard/script.rpy to avoid destroying
+                alt = p.parent / "script_wizard.rpy"
+                path = str(alt)
+                self.report({"WARNING"}, f"Existing script kept, wizard wrote to {alt}")
+            builder = UPVN_GameBuilder(path, use_declarative=True)
+            builder.create_quick_wizard(title=props.wizard_title, theme=props.wizard_theme)
+            # ensure folders
+            try:
+                root = pathlib.Path(path).parent.parent if pathlib.Path(path).parent.name == "game" else pathlib.Path(path).parent
+                for sub in ["backgrounds", "sprites", "audio", "stages"]:
+                    (root / "assets" / sub).mkdir(parents=True, exist_ok=True)
+            except Exception:
+                pass
+            out = builder.write()
+            ok, msg = builder.validate()
+            if ok:
+                self.report({'INFO'}, f"Wizard created {out} — {msg} — Press P to play!")
+            else:
+                self.report({'WARNING'}, f"Wizard created {out} but validation: {msg}")
             return {'FINISHED'}
 
     class UPVN_OT_AddCharacter(bpy.types.Operator):
         bl_idname = "upvn.add_character"
-        bl_label = "Add Character"
+        bl_label = "Add Character (Declarative)"
         def execute(self, context):
             p = context.scene.upvn_props
             path = bpy.path.abspath(p.project_path)
@@ -1898,7 +2380,21 @@ except Exception:
             hexcol = "#{:02x}{:02x}{:02x}".format(int(col[0] * 255), int(col[1] * 255), int(col[2] * 255))
             builder.add_character(p.char_id, p.char_name, hexcol)
             builder.write()
-            self.report({'INFO'}, f"Added character {p.char_id}={p.char_name} (preserved labels)")
+            self.report({'INFO'}, f"Added character {p.char_id}={p.char_name} (declarative, preserved)")
+            return {'FINISHED'}
+
+    class UPVN_OT_AddVariable(bpy.types.Operator):
+        bl_idname = "upvn.add_variable"
+        bl_label = "Add Variable (State)"
+        bl_description = "Add a typed variable to state: block — no coding, declarative"
+
+        def execute(self, context):
+            p = context.scene.upvn_props
+            path = bpy.path.abspath(p.project_path)
+            builder = _builder_from_file(path)
+            builder.add_state_var(p.var_name, p.var_type, p.var_value)
+            builder.write()
+            self.report({'INFO'}, f"Added variable {p.var_name}: {p.var_type} = {p.var_value}")
             return {'FINISHED'}
 
     class UPVN_OT_AddScene(bpy.types.Operator):
@@ -1908,7 +2404,6 @@ except Exception:
             p = context.scene.upvn_props
             path = bpy.path.abspath(p.project_path)
             builder = _builder_from_file(path)
-            # asset browser: if bg_image picked, copy to assets and use basename
             bg = p.bg_name
             if p.bg_image:
                 try:
@@ -1923,7 +2418,7 @@ except Exception:
                     self.report({'WARNING'}, f"BG copy failed {e}")
             builder.add_scene(bg)
             builder.write()
-            self.report({'INFO'}, f"Added scene {bg} (with asset browser)")
+            self.report({'INFO'}, f"Added scene {bg}")
             return {'FINISHED'}
 
     class UPVN_OT_AddDialogue(bpy.types.Operator):
@@ -1960,7 +2455,6 @@ except Exception:
                 except Exception as e:
                     self.report({'WARNING'}, f"Sprite copy failed {e}")
             builder.add_show(asset, p.show_pos, trans)
-            # side image support
             if p.side_image.strip():
                 builder.add_side_image(asset, p.side_image.strip(), p.show_pos)
             builder.write()
@@ -1969,14 +2463,14 @@ except Exception:
 
     class UPVN_OT_AddMenu(bpy.types.Operator):
         bl_idname = "upvn.add_menu"
-        bl_label = "Add Menu"
+        bl_label = "Add Menu (Choice → Jump)"
         def execute(self, context):
             p = context.scene.upvn_props
             path = bpy.path.abspath(p.project_path)
             builder = _builder_from_file(path)
             builder.add_menu(p.menu_caption, [(p.menu_choice1, p.menu_jump1), (p.menu_choice2, p.menu_jump2)])
             builder.write()
-            self.report({'INFO'}, f"Added menu {p.menu_caption} (preserved)")
+            self.report({'INFO'}, f"Added menu {p.menu_caption} (choice declarative)")
             return {'FINISHED'}
 
     class UPVN_OT_AddStage(bpy.types.Operator):
@@ -1990,6 +2484,132 @@ except Exception:
             builder.add_show3d("eileen", "marker_eileen")
             builder.write()
             self.report({'INFO'}, f"Added 3D stage {p.stage_name} + show3d")
+            return {'FINISHED'}
+
+    class UPVN_OT_AddSet(bpy.types.Operator):
+        bl_idname = "upvn.add_set"
+        bl_label = "Add Set (Variable Change)"
+        bl_description = "Add set var op expr — declarative assignment, no $"
+
+        def execute(self, context):
+            p = context.scene.upvn_props
+            path = bpy.path.abspath(p.project_path)
+            builder = _builder_from_file(path)
+            builder.add_set(p.set_target, p.set_op, p.set_expr)
+            builder.write()
+            self.report({'INFO'}, f"Added set {p.set_target} {p.set_op} {p.set_expr}")
+            return {'FINISHED'}
+
+    class UPVN_OT_AddIf(bpy.types.Operator):
+        bl_idname = "upvn.add_if"
+        bl_label = "Add If"
+        bl_description = "Add if condition: — for branching without coding"
+
+        def execute(self, context):
+            p = context.scene.upvn_props
+            path = bpy.path.abspath(p.project_path)
+            builder = _builder_from_file(path)
+            builder.add_if(p.if_cond)
+            builder.write()
+            self.report({'INFO'}, f"Added if {p.if_cond}: (add dialogue after, then Add Else/End)")
+            return {'FINISHED'}
+
+    class UPVN_OT_AddElse(bpy.types.Operator):
+        bl_idname = "upvn.add_else"
+        bl_label = "Add Else"
+        def execute(self, context):
+            p = context.scene.upvn_props
+            path = bpy.path.abspath(p.project_path)
+            builder = _builder_from_file(path)
+            builder.add_else()
+            builder.write()
+            self.report({'INFO'}, "Added else:")
+            return {'FINISHED'}
+
+    class UPVN_OT_AddEnd(bpy.types.Operator):
+        bl_idname = "upvn.add_end"
+        bl_label = "Add End"
+        def execute(self, context):
+            p = context.scene.upvn_props
+            path = bpy.path.abspath(p.project_path)
+            builder = _builder_from_file(path)
+            builder.add_end()
+            builder.write()
+            self.report({'INFO'}, "Added end")
+            return {'FINISHED'}
+
+    class UPVN_OT_AddJump(bpy.types.Operator):
+        bl_idname = "upvn.add_jump"
+        bl_label = "Add Jump"
+        def execute(self, context):
+            p = context.scene.upvn_props
+            path = bpy.path.abspath(p.project_path)
+            builder = _builder_from_file(path)
+            builder.add_jump(p.jump_target)
+            builder.write()
+            self.report({'INFO'}, f"Added jump {p.jump_target}")
+            return {'FINISHED'}
+
+    class UPVN_OT_AddLabel(bpy.types.Operator):
+        bl_idname = "upvn.add_label"
+        bl_label = "Add Label"
+        def execute(self, context):
+            p = context.scene.upvn_props
+            path = bpy.path.abspath(p.project_path)
+            builder = _builder_from_file(path)
+            builder.ensure_label(p.label_name)
+            builder.add_say(None, f"Label {p.label_name} — new scene.")
+            builder.write()
+            self.report({'INFO'}, f"Added label {p.label_name}")
+            return {'FINISHED'}
+
+    class UPVN_OT_AddPause(bpy.types.Operator):
+        bl_idname = "upvn.add_pause"
+        bl_label = "Add Pause"
+        def execute(self, context):
+            p = context.scene.upvn_props
+            path = bpy.path.abspath(p.project_path)
+            builder = _builder_from_file(path)
+            builder.add_pause(p.pause_duration)
+            builder.write()
+            self.report({'INFO'}, f"Added pause {p.pause_duration}")
+            return {'FINISHED'}
+
+    class UPVN_OT_AddAudio(bpy.types.Operator):
+        bl_idname = "upvn.add_audio"
+        bl_label = "Add Music/Sound"
+        def execute(self, context):
+            p = context.scene.upvn_props
+            path = bpy.path.abspath(p.project_path)
+            builder = _builder_from_file(path)
+            asset = p.audio_name
+            if p.audio_file:
+                try:
+                    src = pathlib.Path(bpy.path.abspath(p.audio_file))
+                    if src.exists():
+                        dest_dir = _get_project_asset_dir(path, "audio")
+                        dest = dest_dir / src.name
+                        shutil.copy2(src, dest)
+                        asset = src.stem
+                        builder.add_audio(asset, f"audio/{src.name}")
+                        self.report({'INFO'}, f"Copied audio {src.name} → {dest}")
+                except Exception as e:
+                    self.report({'WARNING'}, f"Audio copy failed {e}")
+            builder.add_play_music(asset)
+            builder.write()
+            self.report({'INFO'}, f"Added play music {asset}")
+            return {'FINISHED'}
+
+    class UPVN_OT_AddCamera(bpy.types.Operator):
+        bl_idname = "upvn.add_camera"
+        bl_label = "Add Camera Zoom"
+        def execute(self, context):
+            p = context.scene.upvn_props
+            path = bpy.path.abspath(p.project_path)
+            builder = _builder_from_file(path)
+            builder.add_camera_zoom(p.camera_zoom, p.camera_duration, p.camera_easing)
+            builder.write()
+            self.report({'INFO'}, f"Added camera zoom {p.camera_zoom} duration {p.camera_duration} with {p.camera_easing}")
             return {'FINISHED'}
 
     class UPVN_OT_Validate(bpy.types.Operator):
@@ -2007,7 +2627,7 @@ except Exception:
             try:
                 _p, _vc, _sm = _engine_api
                 _p.parse_string(text, filename=path)
-                self.report({'INFO'}, "Validate OK — no errors")
+                self.report({'INFO'}, "Validate OK — no errors (declarative HQ)")
             except Exception as e:
                 self.report({'ERROR'}, str(e).splitlines()[0][:200])
             return {'FINISHED'}
@@ -2042,6 +2662,23 @@ except Exception:
                     print("[UPVN] " + engine_diag_text())
             return {'FINISHED'}
 
+    class UPVN_OT_PreviewAll(bpy.types.Operator):
+        bl_idname = "upvn.preview_all"
+        bl_label = "Preview All Paths"
+        bl_description = "Generate screenshots for all choice paths (HQ preview)"
+
+        def execute(self, context):
+            p = context.scene.upvn_props
+            path = bpy.path.abspath(p.project_path)
+            builder = _builder_from_file(path)
+            outs = builder.preview_all_paths()
+            if outs:
+                self.report({'INFO'}, f"Generated {len(outs)} previews in screenshots/preview_paths/")
+            else:
+                reason = getattr(builder, "last_error", None)
+                self.report({'ERROR'}, f"Preview all failed: {reason}")
+            return {'FINISHED'}
+
     class UPVN_OT_SaveSlotDemo(bpy.types.Operator):
         bl_idname = "upvn.save_demo"
         bl_label = "Save Demo (arbitrary slot)"
@@ -2058,7 +2695,6 @@ except Exception:
             state.variables["demo"] = 1
             sm = SaveManager(state)
             slot = int(p.arbitrary_slot) if p.arbitrary_slot else sm.next_available_slot()
-            # if slot exists, next available to avoid overwrite? Use chosen
             sm.save(slot)
             self.report({'INFO'}, f"Saved to arbitrary slot {slot} (1..∞)")
             ids = sm.list_slot_ids()
@@ -2074,7 +2710,6 @@ except Exception:
                 self.report({'ERROR'}, "Engine not found — " + str(ENGINE_INFO.get("message", ""))[:200])
                 return {'FINISHED'}
             p = context.scene.upvn_props
-            # generate a preview screenshot of save overlay pagination
             try:
                 from engine.render.headless_renderer import render_state
             except ImportError as e:
@@ -2082,8 +2717,7 @@ except Exception:
                 return {'FINISHED'}
             if not pil_live_available():
                 self.report({'ERROR'},
-                            "Pillow (PIL) is not visible to this Python — press 'Install Pillow' "
-                            "in the UPVN panel (restart Blender/UPBGE after installing).")
+                            "Pillow (PIL) is not visible to this Python — press 'Install Pillow' in the UPVN panel.")
                 return {'FINISHED'}
             try:
                 from engine.core.vn_state import VNState
@@ -2093,7 +2727,6 @@ except Exception:
                 state = VNState()
                 state.history.append({"who": None, "who_name": "Narrator", "text": "Arbitrary save demo", "stripped": "Arbitrary save demo"})
                 sm = SaveManager(state, save_dir=str(pathlib.Path(bpy.path.abspath(p.project_path)).parent / "saves"))
-                # create dummy saves up to chosen slot for pagination demo
                 for i in [1, 2, 7, 42, 100, 500]:
                     try:
                         state.variables["slot_test"] = i
@@ -2112,6 +2745,68 @@ except Exception:
             except Exception as e:
                 self.report({'ERROR'}, f"Arbitrary preview failed {e}")
             return {'FINISHED'}
+
+    class UPVN_OT_ExportPackage(bpy.types.Operator):
+        bl_idname = "upvn.export_package"
+        bl_label = "Export Playable Package"
+        bl_description = "Package game to dist/ zip — playable, locale, accessibility, HQ assets"
+
+        def execute(self, context):
+            ok, _info = ensure_engine(retry=True)
+            if not ok:
+                self.report({"ERROR"}, "Engine not found — " + str(ENGINE_INFO.get("message", ""))[:150])
+                return {"FINISHED"}
+            p = context.scene.upvn_props
+            script_path = pathlib.Path(bpy.path.abspath(p.project_path))
+            project_root = script_path.parent.parent if script_path.parent.name == "game" else script_path.parent
+            out_dir = project_root / "dist"
+            try:
+                from tools.package_game import package_project
+                # ensure package_game finds engine
+                result = package_project(str(project_root), str(out_dir))
+                self.report({"INFO"}, f"Packaged to {out_dir} — {result.get('zip_path','zip')} ({result.get('events',0)} events)")
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                self.report({"ERROR"}, f"Package failed: {e}")
+            return {"FINISHED"}
+
+    class UPVN_OT_ScriptOutline(bpy.types.Operator):
+        bl_idname = "upvn.script_outline"
+        bl_label = "Script Outline"
+        bl_description = "Show labels, characters, variables in Text Editor"
+
+        def execute(self, context):
+            p = context.scene.upvn_props
+            path = bpy.path.abspath(p.project_path)
+            ok, _info = ensure_engine(retry=True)
+            if not ok:
+                self.report({"ERROR"}, "Engine not found")
+                return {"FINISHED"}
+            try:
+                _p, _vc, _sm = _engine_api
+                text = _get_script_text(context, path)
+                data = _p.parse_string(text, filename=path)
+                lines = [f"UPVN Script Outline — {path}"]
+                lines.append(f"Labels: {', '.join(sorted(data.get('labels', {}).keys()))}")
+                lines.append(f"Characters: {', '.join(sorted(data.get('characters', {}).keys()))}")
+                lines.append(f"Defaults: {', '.join(f'{k}={v}' for k,v in data.get('defaults', {}).items())}")
+                lines.append(f"State types: {data.get('types', {})}")
+                lines.append(f"Assets: {data.get('assets', {})}")
+                lines.append("")
+                for lbl, nodes in data.get('labels', {}).items():
+                    lines.append(f"label {lbl}: {len(nodes)} statements")
+                    for n in nodes[:5]:
+                        lines.append(f"  - {n.get('cmd')}: {str(n)[:80]}")
+                tb = bpy.data.texts.get("UPVN_OUTLINE")
+                if tb is None:
+                    tb = bpy.data.texts.new("UPVN_OUTLINE")
+                tb.clear()
+                tb.write("\n".join(lines) + "\n")
+                self.report({"INFO"}, f"Outline: {len(data.get('labels', {}))} labels, {len(data.get('characters', {}))} chars — see UPVN_OUTLINE")
+            except Exception as e:
+                self.report({"ERROR"}, f"Outline failed: {e}")
+            return {"FINISHED"}
 
     def _get_project_asset_dir(script_path: str, category: str) -> pathlib.Path:
         p = pathlib.Path(script_path)
@@ -2134,26 +2829,21 @@ except Exception:
 
     def _builder_from_file(path: str) -> UPVN_GameBuilder:
         """Load existing script.rpy into builder preserving labels (v0.5 fix)."""
-        # Use UPVN_GameBuilder's own preservation logic (it loads _existing_text)
-        b = UPVN_GameBuilder(path)
-        # ensure current label is last label in file if exists, so new ops append to correct place
-        # Try to detect last label in file
+        b = UPVN_GameBuilder(path, use_declarative=True)
         try:
             p = pathlib.Path(path)
             if p.exists():
                 txt = p.read_text(encoding="utf-8")
-                # find last label
                 m = list(re.finditer(r'^\s*label\s+(\w+)\s*:', txt, flags=re.M))
                 if m:
                     last_label = m[-1].group(1)
                     b.ensure_label(last_label)
-                # also try to load characters already parsed (b already did)
         except Exception:
             pass
         return b
 
     class UPVN_PT_MainPanel(bpy.types.Panel):
-        bl_label = "UPVN — Visual Novel"
+        bl_label = "UPVN — Visual Novel (HQ No-Code)"
         bl_idname = "UPVN_PT_main"
         bl_space_type = 'VIEW_3D'
         bl_region_type = 'UI'
@@ -2161,94 +2851,149 @@ except Exception:
         def draw(self, context):
             layout = self.layout
             props = context.scene.upvn_props
-            # engine status row
             ok, info = ENGINE_AVAILABLE, ENGINE_INFO
             if ok:
                 row = layout.row()
                 row.label(text="✓ " + engine_status_line(), icon='CHECKMARK')
                 if info.get("root"):
-                    layout.label(text=str(info["root"]), icon='FILE_FOLDER')
+                    layout.label(text=str(info["root"])[:60], icon='FILE_FOLDER')
             else:
                 box = layout.box()
                 box.label(text="✗ Engine not found", icon='ERROR')
-                box.label(text="Install dist/upvn_editor_addon_v0.6.zip", icon='INFO')
+                box.label(text="Install dist/upvn_editor_addon_v0.7.zip", icon='INFO')
                 box.operator("upvn.check_engine", text="Re-check", icon='FILE_REFRESH')
                 box.operator("upvn.locate_engine", text="Locate engine folder…", icon='FILE_FOLDER')
             layout.separator()
             layout.operator("upvn.reload_addon", icon='FILE_REFRESH')
             layout.separator()
-            layout.label(text="Project", icon='FILE_FOLDER')
-            layout.prop(props, "project_path")
-            layout.operator("upvn.create_project", icon='ADD')
+
+            # Project
+            box = layout.box()
+            box.label(text="Project — No Coding Required", icon='FILE_FOLDER')
+            box.prop(props, "project_path")
+            row = box.row(align=True)
+            row.operator("upvn.create_project", icon='ADD')
+            row.operator("upvn.quick_wizard", icon='OUTLINER_OB_FORCE_FIELD')
+            box.prop(props, "wizard_title")
+            box.prop(props, "wizard_theme")
+            box.operator("upvn.script_outline", icon='TEXT')
+            box.operator("upvn.export_package", icon='EXPORT')
+
             layout.separator()
             if _has_game_support():
                 box = layout.box()
-                box.label(text="Play in UPBGE — run once per project", icon='PLAY')
+                box.label(text="Play in UPBGE — HQ Scene", icon='PLAY')
                 row = box.row(align=True)
                 row.operator("upvn.setup_scene", icon='WINDOW')
                 row.operator("upvn.check_wiring", icon='VIEWZOOM')
-                box.label(text="Setup Scene creates every object the engine expects by name", icon='INFO')
-                box.label(text="Check Wiring compares the scene with engine/render/contract.py", icon='INFO')
+                box.label(text="HQ materials + soft lighting + edge glow", icon='INFO')
                 box.label(text="Then press P in the 3D Viewport", icon='INFO')
                 layout.separator()
             else:
-                layout.label(text="Run inside UPBGE for play (Setup Scene)", icon='INFO')
+                layout.label(text="Run inside UPBGE for play (Setup Scene HQ)", icon='INFO')
                 layout.separator()
-            layout.label(text="Characters (no coding)", icon='USER')
-            layout.prop(props, "char_id")
-            layout.prop(props, "char_name")
-            layout.prop(props, "char_color")
-            layout.operator("upvn.add_character", icon='ADD')
+
+            # Characters
+            box = layout.box()
+            box.label(text="Characters (Declarative)", icon='USER')
+            box.prop(props, "char_id")
+            box.prop(props, "char_name")
+            box.prop(props, "char_color")
+            box.operator("upvn.add_character", icon='ADD')
+
+            # Variables
+            box = layout.box()
+            box.label(text="Variables — State (No Code)", icon='LINENUMBERS_ON')
+            box.prop(props, "var_name")
+            box.prop(props, "var_type")
+            box.prop(props, "var_value")
+            box.operator("upvn.add_variable", icon='ADD')
+
+            # Scene & Sprites
+            box = layout.box()
+            box.label(text="Scene & Sprites (Asset Browser)", icon='IMAGE_DATA')
+            box.prop(props, "bg_name")
+            box.prop(props, "bg_image")
+            box.operator("upvn.add_scene", icon='SCENE_DATA')
+            box.prop(props, "show_asset")
+            box.prop(props, "show_pos")
+            box.prop(props, "show_trans")
+            box.prop(props, "sprite_image")
+            box.prop(props, "side_image")
+            box.operator("upvn.add_show", icon='OBJECT_DATA')
+            box.prop(props, "stage_name")
+            box.operator("upvn.add_stage", icon='MESH_CUBE')
+
+            # Dialogue
+            box = layout.box()
+            box.label(text="Dialogue", icon='SPEAKER')
+            box.prop(props, "speaker")
+            box.prop(props, "dialogue")
+            box.operator("upvn.add_dialogue", icon='ADD')
+
+            # Logic — Set / If / Jump
+            box = layout.box()
+            box.label(text="Logic — No Python Needed", icon='CONSOLE')
+            box.prop(props, "set_target")
+            box.prop(props, "set_op")
+            box.prop(props, "set_expr")
+            box.operator("upvn.add_set", icon='ADD')
+            box.prop(props, "if_cond")
+            row = box.row(align=True)
+            row.operator("upvn.add_if", icon='ADD')
+            row.operator("upvn.add_else", icon='ADD')
+            row.operator("upvn.add_end", icon='REMOVE')
+            box.prop(props, "jump_target")
+            row = box.row(align=True)
+            row.operator("upvn.add_jump", icon='FORWARD')
+            row.operator("upvn.add_label", icon='ADD')
+            box.prop(props, "label_name")
+
+            # Menu
+            box = layout.box()
+            box.label(text="Menu (Branching)", icon='QUESTION')
+            box.prop(props, "menu_caption")
+            box.prop(props, "menu_choice1")
+            box.prop(props, "menu_jump1")
+            box.prop(props, "menu_choice2")
+            box.prop(props, "menu_jump2")
+            box.operator("upvn.add_menu", icon='ADD')
+
+            # Extras
+            box = layout.box()
+            box.label(text="Extras — Camera, Audio, Pause", icon='CAMERA_DATA')
+            box.prop(props, "pause_duration")
+            box.operator("upvn.add_pause", icon='PAUSE')
+            box.prop(props, "audio_name")
+            box.prop(props, "audio_file")
+            box.operator("upvn.add_audio", icon='SOUND')
+            box.prop(props, "camera_zoom")
+            box.prop(props, "camera_duration")
+            box.prop(props, "camera_easing")
+            box.operator("upvn.add_camera", icon='CAMERA_DATA')
+
             layout.separator()
-            layout.label(text="Scene & Sprites (asset browser)", icon='IMAGE_DATA')
-            layout.prop(props, "bg_name")
-            layout.prop(props, "bg_image")
-            layout.operator("upvn.add_scene", icon='SCENE_DATA')
-            layout.prop(props, "show_asset")
-            layout.prop(props, "show_pos")
-            layout.prop(props, "show_trans")
-            layout.prop(props, "sprite_image")
-            layout.prop(props, "side_image")
-            layout.operator("upvn.add_show", icon='OBJECT_DATA')
-            layout.prop(props, "stage_name")
-            layout.operator("upvn.add_stage", icon='MESH_CUBE')
-            layout.separator()
-            layout.label(text="Dialogue", icon='SPEAKER')
-            layout.prop(props, "speaker")
-            layout.prop(props, "dialogue")
-            layout.operator("upvn.add_dialogue", icon='ADD')
-            layout.separator()
-            layout.label(text="Menu (branching)", icon='QUESTION')
-            layout.prop(props, "menu_caption")
-            layout.prop(props, "menu_choice1")
-            layout.prop(props, "menu_jump1")
-            layout.prop(props, "menu_choice2")
-            layout.prop(props, "menu_jump2")
-            layout.operator("upvn.add_menu", icon='ADD')
-            layout.separator()
-            layout.label(text="Tools", icon='TOOL_SETTINGS')
-            row = layout.row(align=True)
+            box = layout.box()
+            box.label(text="Tools & QA", icon='TOOL_SETTINGS')
+            row = box.row(align=True)
             row.operator("upvn.validate", icon='CHECKMARK')
             row.operator("upvn.preview", icon='RENDER_RESULT')
-            # M26g: in UPBGE, Check Wiring already sits in the "Play in
-            # UPBGE" box above — drawing it twice made the panel noisier
-            # without adding anything. Keep it here only for plain-Blender
-            # installs, where the Play box (and thus the button) is absent.
+            row.operator("upvn.preview_all", icon='IMAGE_REFERENCE')
             if not _has_game_support():
                 row.operator("upvn.check_wiring", icon='VIEWZOOM')
-            layout.operator("upvn.save_demo", icon='FILE_TICK')
+            box.operator("upvn.save_demo", icon='FILE_TICK')
             if pil_live_available():
-                layout.label(text="✓ Pillow installed (Preview active)", icon='CHECKMARK')
+                box.label(text="✓ Pillow installed (Preview active)", icon='CHECKMARK')
             else:
-                layout.operator("upvn.install_pillow", icon='CONSOLE',
+                box.operator("upvn.install_pillow", icon='CONSOLE',
                                 text="Install Pillow (for Preview)")
-            layout.prop(props, "arbitrary_slot")
-            layout.operator("upvn.preview_arbitrary", icon='IMAGE_REFERENCE')
-            layout.label(text="Saves: arbitrary slots 1..∞ (←→ pagination)", icon='INFO')
-            layout.label(text="H: history  Q: quick menu  Preserved labels", icon='INFO')
+            box.prop(props, "arbitrary_slot")
+            box.operator("upvn.preview_arbitrary", icon='IMAGE_REFERENCE')
+            box.label(text="Saves: arbitrary slots 1..∞ (←→ pagination)", icon='INFO')
+            box.label(text="H: history  Q: quick menu  Ctrl+S/L: save/load", icon='INFO')
 
     class UPVN_PT_TextPanel(bpy.types.Panel):
-        bl_label = "UPVN — Script"
+        bl_label = "UPVN — Script (HQ)"
         bl_idname = "UPVN_PT_text"
         bl_space_type = 'TEXT_EDITOR'
         bl_region_type = 'UI'
@@ -2262,14 +3007,14 @@ except Exception:
                 layout.label(text="✗ Engine not found", icon='ERROR')
                 layout.operator("upvn.check_engine", text="Re-check", icon='FILE_REFRESH')
             layout.separator()
-            layout.label(text="Edit script.rpy inside Blender")
+            layout.label(text="Declarative — No Python Coding")
             layout.operator("upvn.validate", icon='CHECKMARK')
             layout.operator("upvn.preview", icon='RENDER_RESULT')
+            layout.operator("upvn.script_outline", icon='TEXT')
+            layout.operator("upvn.export_package", icon='EXPORT')
 
     class UPVN_OT_ReloadAddon(bpy.types.Operator):
-        """Apply an add-on update WITHOUT restarting UPBGE: install the new
-        zip / replace the add-on file, then click this — it re-imports the
-        file from disk and re-registers everything cleanly."""
+        """Apply an add-on update WITHOUT restarting UPBGE."""
         bl_idname = "upvn.reload_addon"
         bl_label = "Apply Update (reload add-on)"
         bl_options = {'REGISTER'}
@@ -2287,8 +3032,7 @@ except Exception:
                         reg()
                     scn = getattr(bpy.context, "scene", None)
                     ver = getattr(scn, "upvn_addon_version", "?") if scn else "?"
-                    print(f"[UPVN] add-on reloaded live — now v{ver} "
-                          "(no restart needed)")
+                    print(f"[UPVN] add-on reloaded live — now v{ver} (no restart needed)")
                 except Exception as e:
                     print(f"[UPVN] add-on reload failed: {e}")
                     try:
@@ -2299,45 +3043,27 @@ except Exception:
                 return None
 
             if bpy.app.background:
-                # no UI/timer pump in background sessions (also the path the
-                # automated live-update tests take)
                 _do_reload()
             else:
-                # reload from a timer: doing it mid-invoke would replace the
-                # very class running this operator
                 bpy.app.timers.register(_do_reload, first_interval=0.1)
                 self.report({'INFO'}, "Reloading UPVN add-on…")
             return {'FINISHED'}
 
-    # M26g bugfix (agent/desktop-gui-run-fixes): UPVN_Prefs was defined but
-    # NEVER registered — the add-on Preferences page (engine folder picker +
-    # Locate/Check/Copy buttons + the persisted engine_path preference)
-    # silently never appeared, and "Locate Engine" could not save its choice.
-    # UPVN_OT_ReloadAddon comes from feat/desktop-gui M26g (live updates).
     classes = (UPVN_Prefs,
                UPVN_SceneProps, UPVN_OT_LocateEngine, UPVN_OT_CheckEngine, UPVN_OT_BundleEngine,
                UPVN_OT_InstallPillow, UPVN_OT_ReloadAddon,
-               UPVN_OT_CreateProject, UPVN_OT_AddCharacter, UPVN_OT_AddScene,
+               UPVN_OT_CreateProject, UPVN_OT_QuickWizard,
+               UPVN_OT_AddCharacter, UPVN_OT_AddVariable, UPVN_OT_AddScene,
                UPVN_OT_AddDialogue, UPVN_OT_AddShow, UPVN_OT_AddMenu, UPVN_OT_AddStage,
+               UPVN_OT_AddSet, UPVN_OT_AddIf, UPVN_OT_AddElse, UPVN_OT_AddEnd,
+               UPVN_OT_AddJump, UPVN_OT_AddLabel, UPVN_OT_AddPause, UPVN_OT_AddAudio, UPVN_OT_AddCamera,
                UPVN_OT_SetupScene, UPVN_OT_CheckWiring, UPVN_OT_Validate,
-               UPVN_OT_Preview, UPVN_OT_SaveSlotDemo, UPVN_OT_QuickPreviewArbitrary,
+               UPVN_OT_Preview, UPVN_OT_PreviewAll, UPVN_OT_SaveSlotDemo, UPVN_OT_QuickPreviewArbitrary,
+               UPVN_OT_ExportPackage, UPVN_OT_ScriptOutline,
                UPVN_PT_MainPanel, UPVN_PT_TextPanel)
 
     def _purge_stale_registrations():
-        """M26g: make UPDATE-over-running work (no uninstall/restart needed).
-
-        Two things break a live update in this file's old form:
-        - register() aborted on the first already-registered class, so the
-          NEW code never bound and the Scene pointer stayed stale;
-        - unregister() needed the OLD module's class objects, which are gone
-          once the module is re-imported — so unregister BY NAME from
-          bpy.types (which always holds the live registration).
-        """
         for cls in classes:
-            # panels/menus register under bl_idname ("UPVN_PT_main"), while
-            # operator classes register under the class name (their bl_idname
-            # with a dot is the bpy.ops key, not the RNA type name) — try the
-            # valid candidates so a stale registration is always found
             for nm in (getattr(cls, "bl_idname", None),
                        getattr(cls, "__name__", None)):
                 if not nm or "." in nm:
@@ -2356,10 +3082,6 @@ except Exception:
                     pass
 
     def register():
-        # M26g: an update installed OVER a running UPBGE must just work —
-        # purge whatever the previous version left registered, then bind the
-        # new code. (Before: "already registered" on the first class killed
-        # the whole block; the only fix was uninstall + restart.)
         _purge_stale_registrations()
         try:
             for cls in classes:
@@ -2367,15 +3089,14 @@ except Exception:
             bpy.types.Scene.upvn_props = bpy.props.PointerProperty(type=UPVN_SceneProps)
             bpy.types.Scene.upvn_addon_version = bpy.props.StringProperty(
                 name="UPVN addon version",
-                description="Version of the UPVN editor add-on currently registered "
-                            "(live-updated; compare against the zip you installed)",
+                description="Version of the UPVN editor add-on currently registered",
                 default=".".join(str(x) for x in bl_info.get("version", ())),
             )
             ok, info = ensure_engine(retry=True)
             ver = ".".join(str(x) for x in bl_info.get("version", ()))
             print(f"[UPVN] Editor addon v{ver} registered — engine: {'OK via ' + str(info['source']) if ok else 'NOT FOUND (' + str(info['message'])[:120] + ')'}")
-            print("[UPVN] Panels: View3D > Sidebar > UPVN | Text Editor > Sidebar > UPVN")
-        except Exception as exc:      # never let an add-on enable crash Blender startup
+            print("[UPVN] Panels: View3D > Sidebar > UPVN | Text Editor > Sidebar > UPVN — HQ No-Code v0.7")
+        except Exception as exc:
             print(f"[UPVN] register() error (add-on partially enabled): {exc}")
             try:
                 import traceback
@@ -2384,9 +3105,6 @@ except Exception:
                 pass
 
     def unregister():
-        # M26g: purge by name — after an over-install the module object can
-        # be stale, and class objects from a previous import would be
-        # unreachable from here.
         _purge_stale_registrations()
         print("[UPVN] Editor addon unregistered")
 

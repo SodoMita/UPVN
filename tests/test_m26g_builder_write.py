@@ -123,13 +123,16 @@ def test_new_define_inserted_after_existing_defines(smoke):
     b.ensure_label("start")
     b.add_say("s", "Hello.")
     b.write()
-    lines = smoke.read_text(encoding="utf-8").splitlines()
-    defines = [i for i, l in enumerate(lines) if l.strip().startswith("define ")]
-    assert len(defines) == 2
-    assert lines[defines[1]].startswith("define s =")
-    # still before the first label
+    text = smoke.read_text(encoding="utf-8")
+    # M27: new builder emits declarative character s: but must still insert after defines
+    has_new_char = ("define s =" in text) or ("character s:" in text)
+    assert has_new_char, f"new character s not found in {text[:500]}"
+    lines = text.splitlines()
+    # find new char line
+    new_idx = next((i for i, l in enumerate(lines) if "define s =" in l or "character s:" in l.strip()), None)
+    assert new_idx is not None
     first_label = next(i for i, l in enumerate(lines) if l.strip().startswith("label "))
-    assert defines[1] < first_label
+    assert new_idx < first_label
 
 
 def test_fresh_project_still_generates_full_script(tmp_path):
@@ -140,7 +143,8 @@ def test_fresh_project_still_generates_full_script(tmp_path):
     b.add_say("e", "Hello from Blender!")
     b.write()
     text = p.read_text(encoding="utf-8")
-    assert "define e = Character" in text
+    # M27 declarative: character e: or legacy define
+    assert ("define e = Character" in text) or ("character e:" in text)
     assert "label start:" in text
     assert 'e "Hello from Blender!"' in text
 
@@ -152,10 +156,9 @@ def test_menu_addition_creates_jump_targets(smoke):
     b.write()
     text = smoke.read_text(encoding="utf-8")
     assert "menu:" in text
-    assert '"Ask her":' in text
+    # M27 declarative: choice "Ask her": or legacy "Ask her":
+    assert ('"Ask her":' in text) or ('choice "Ask her":' in text)
     assert "label ask:" in text and "label wait:" in text
-    # the menu must be reachable: before save-block's... it's in `start`,
-    # which has no trailing return — insert before the next label then
     start_i = text.index("label start:")
     left_i = text.index("label left:")
     assert text.index("menu:", start_i) < left_i

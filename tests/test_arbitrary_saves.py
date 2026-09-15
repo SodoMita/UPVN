@@ -86,19 +86,42 @@ def test_blender_builder_minimal_coding():
     from blend.upvn_editor_addon import UPVN_GameBuilder
     import tempfile, pathlib
     tmp = pathlib.Path(tempfile.mkdtemp()) / "script.rpy"
-    b = UPVN_GameBuilder(str(tmp))
+    b = UPVN_GameBuilder(str(tmp), use_declarative=True)
     b.add_character("e", "Eileen", "#c8ffc8")
+    b.add_state_var("affection", "int", "0")
     b.add_scene("bg classroom")
     b.add_say("e", "Hello from minimal coding")
     b.add_show("eileen", "center", "move")
+    b.add_set("affection", "+=", "1")
     b.add_menu("Choose?", [("A","a_label"), ("B","b_label")])
     ok, msg = b.validate()
     assert ok, msg
     p = b.write()
     text = p.read_text()
-    assert 'define e = Character("Eileen"' in text
+    # declarative forms (M27) — character block, state block, set, choice
+    assert ('character e:' in text) or ('define e = Character("Eileen"' in text)
     assert 'scene bg classroom' in text
     assert 'e "Hello' in text
+    assert 'affection' in text
     # preview screenshot should work headless
     out = b.preview_screenshot(str(tmp.parent / "preview.png"))
+    assert out and out.exists()
+
+def test_blender_builder_declarative_hq():
+    from blend.upvn_editor_addon import UPVN_GameBuilder
+    import tempfile, pathlib
+    tmp = pathlib.Path(tempfile.mkdtemp()) / "script.rpy"
+    b = UPVN_GameBuilder(str(tmp), use_declarative=True)
+    b.create_quick_wizard(title="Test Wizard", theme="school")
+    ok, msg = b.validate()
+    assert ok, f"wizard validate failed: {msg}"
+    p = b.write()
+    text = p.read_text()
+    assert 'state:' in text
+    assert 'character e:' in text
+    assert 'affection' in text
+    assert 'choice' in text
+    assert 'if' in text
+    assert 'good_ending' in text or 'neutral_ending' in text
+    out = b.preview_screenshot(str(tmp.parent / "preview_wizard.png"))
     assert out and out.exists()

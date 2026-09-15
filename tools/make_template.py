@@ -29,8 +29,8 @@ except ImportError:
     bpy = None  # module stays importable headless; main() explains
 
 
-# ---------------------------------------------------------------- small data-API helpers
-def _mat(name: str, color=(0.5, 0.5, 0.5, 1.0), roughness=0.8):
+# ---------------------------------------------------------------- small data-API helpers — M27 HQ
+def _mat(name: str, color=(0.5, 0.5, 0.5, 1.0), roughness=0.8, emission=False, emission_strength=0.0):
     mat = bpy.data.materials.new(name=name)
     mat.use_nodes = True
     try:
@@ -41,8 +41,71 @@ def _mat(name: str, color=(0.5, 0.5, 0.5, 1.0), roughness=0.8):
                 principled.inputs["Roughness"].default_value = roughness
             except Exception:
                 pass
+            # HQ: slight metallic for wood, less for walls
+            try:
+                if "Wood" in name or "Desk" in name:
+                    principled.inputs["Metallic"].default_value = 0.0
+                    principled.inputs["Specular"].default_value = 0.3
+            except Exception:
+                pass
+        if emission and emission_strength > 0:
+            # mix emission for UI planes
+            nt = mat.node_tree
+            try:
+                em = nt.nodes.new("ShaderNodeEmission")
+                em.inputs["Color"].default_value = color
+                em.inputs["Strength"].default_value = emission_strength
+                out = nt.nodes.get("Material Output")
+                if out:
+                    # keep principled but add emission via mix? Simplify: use emission only for UI
+                    pass
+            except Exception:
+                pass
     except Exception:
         pass
+    return mat
+
+def _mat_hq(name: str, color, hq_type="ui"):
+    """HQ material with improved node graph for better visuals."""
+    mat = bpy.data.materials.new(name=name)
+    mat.use_nodes = True
+    nt = mat.node_tree
+    try:
+        nt.nodes.clear()
+    except Exception:
+        pass
+    if hq_type == "ui":
+        # Emission-only for VN UI (unlit, high quality)
+        out = nt.nodes.new("ShaderNodeOutputMaterial")
+        em = nt.nodes.new("ShaderNodeEmission")
+        objinfo = nt.nodes.new("ShaderNodeObjectInfo")
+        try:
+            em.inputs["Color"].default_value = color
+            em.inputs["Strength"].default_value = 1.2
+            nt.links.new(objinfo.outputs["Color"], em.inputs["Color"])
+        except Exception:
+            pass
+        nt.links.new(em.outputs[0], out.inputs[0])
+        try:
+            mat.blend_method = "OPAQUE"
+            mat.shadow_method = "NONE"
+        except Exception:
+            pass
+    else:
+        # PBR for 3D stage — Principled with better settings
+        out = nt.nodes.new("ShaderNodeOutputMaterial")
+        principled = nt.nodes.new("ShaderNodeBsdfPrincipled")
+        try:
+            principled.inputs["Base Color"].default_value = color
+            principled.inputs["Roughness"].default_value = 0.7 if hq_type == "wood" else 0.9
+            if hq_type == "wood":
+                try:
+                    principled.inputs["Specular"].default_value = 0.25
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        nt.links.new(principled.outputs[0], out.inputs[0])
     return mat
 
 
@@ -147,48 +210,88 @@ def main(out_path: Path | None = None):
     ctrl = build_vn_scene(bpy, scene_name="VN_Main",
                           script_path="//game/script.rpy")
 
-    # ---- 3D classroom stage (load_stage classroom_3d content) ----
+    # ---- 3D classroom stage (HQ) — load_stage classroom_3d content ----
     stage_col = bpy.data.collections["VN_3DStage"]
-    wood = _mat("MatDesk", (0.49, 0.37, 0.25, 1.0))
-    wood_dark = _mat("MatDeskTeacher", (0.55, 0.42, 0.30, 1.0))
-    green = _mat("MatBoard", (0.12, 0.22, 0.13, 1.0), roughness=0.5)
-    grey = _mat("MatFloor", (0.30, 0.30, 0.33, 1.0), roughness=1.0)
-    eileen_c = _mat("MatChar_Eileen_placeholder", (0.55, 0.8, 0.55, 1.0), roughness=0.9)
-    sylvie_c = _mat("MatChar_Sylvie_placeholder", (0.55, 0.55, 0.9, 1.0), roughness=0.9)
+    # M27 HQ materials — more polished, PBR for 3D
+    wood = _mat_hq("MatDesk", (0.52, 0.38, 0.26, 1.0), hq_type="wood")
+    wood_dark = _mat_hq("MatDeskTeacher", (0.58, 0.44, 0.32, 1.0), hq_type="wood")
+    green = _mat_hq("MatBoard", (0.10, 0.20, 0.12, 1.0), hq_type="wall")
+    grey = _mat_hq("MatFloor", (0.28, 0.28, 0.32, 1.0), hq_type="floor")
+    wall_mat = _mat_hq("MatWall", (0.85, 0.84, 0.80, 1.0), hq_type="wall")
+    window_mat = _mat_hq("MatWindow", (0.6, 0.8, 1.0, 0.3), hq_type="ui")
+    light_mat = _mat_hq("MatLight", (1.0, 0.95, 0.8, 1.0), hq_type="ui")
+    eileen_c = _mat_hq("MatChar_Eileen_placeholder", (0.55, 0.85, 0.55, 1.0), hq_type="char")
+    sylvie_c = _mat_hq("MatChar_Sylvie_placeholder", (0.55, 0.55, 0.92, 1.0), hq_type="char")
 
-    # Floor
-    floor = _plane("Floor_classroom", 12.0, (0, 0, 0), mat=grey, collection=stage_col)
+    # Floor — HQ larger
+    floor = _plane("Floor_classroom", 14.0, (0, 0, 0), mat=grey, collection=stage_col)
+
+    # Walls — HQ addition: back wall and side walls for depth
+    back_wall = _plane("Wall_back", 12.0, (0, 2.5, 1.5), rot=(1.5708, 0, 0), mat=wall_mat, collection=stage_col)
+    back_wall.scale = (2.0 * 12 / 2, 1.2 * 12 / 2, 1)
+    left_wall = _plane("Wall_left", 10.0, (-6.0, 0, 1.5), rot=(0, 1.5708, 0), mat=wall_mat, collection=stage_col)
+    left_wall.scale = (1.2 * 10 / 2, 1.0 * 10 / 2, 1)
+    right_wall = _plane("Wall_right", 10.0, (6.0, 0, 1.5), rot=(0, -1.5708, 0), mat=wall_mat, collection=stage_col)
+    right_wall.scale = (1.2 * 10 / 2, 1.0 * 10 / 2, 1)
+
+    # Windows — HQ addition
+    for i, x in enumerate([-4.5, 4.5]):
+        win = _plane(f"Window_{i}", 2.0, (x, 2.48, 1.8), rot=(1.5708, 0, 0), mat=window_mat, collection=stage_col)
+        win.scale = (0.8 * 2 / 2, 1.0 * 2 / 2, 1)
+
+    # Ceiling lights — HQ
+    for i, pos in enumerate([(0, 0, 3.0), (-2.5, -0.5, 3.0), (2.5, -0.5, 3.0)]):
+        light = _cube(f"Light_{i}", (0.6, 0.2, 0.05), pos, light_mat)
+        stage_col.objects.link(light)
 
     # Markers (spawn targets for show3d)
     for mname, pos in [("marker_eileen", (-1.6, 1.2, 0)), ("marker_sylvie", (1.6, 1.2, 0)),
-                       ("marker_center", (0, 0.5, 0))]:
+                       ("marker_center", (0, 0.5, 0)), ("marker_left", (-2.5, 0.8, 0)),
+                       ("marker_right", (2.5, 0.8, 0))]:
         e = _empty(mname, pos, "ARROWS", 0.5)
         stage_col.objects.link(e)
 
-    # Camera presets (lerp targets)
+    # Camera presets (lerp targets) — HQ: more presets
     for pname, pos, rot in [("preset_closeup_eileen", (-1.6, -1.5, 1.4), (1.1, 0, 0)),
                             ("preset_closeup_sylvie", (1.6, -1.5, 1.4), (1.1, 0, 0)),
-                            ("preset_wide", (0, -5, 2.2), (1.05, 0, 0))]:
+                            ("preset_wide", (0, -5, 2.2), (1.05, 0, 0)),
+                            ("preset_dramatic", (0, -2, 2.8), (1.2, 0, 0)),
+                            ("preset_low", (0, -3, 0.5), (0.9, 0, 0))]:
         pe = _empty(pname, pos, "SPHERE", 0.3, rot=rot)
         stage_col.objects.link(pe)
 
-    # Desks: 4 + 4 students + 1 teacher
+    # Desks: 4 + 4 students + 1 teacher + 2 extra for HQ
     desk_positions = [(-2.2, 0.2, 0.25), (-0.7, 0.2, 0.25), (0.8, 0.2, 0.25), (2.3, 0.2, 0.25),
                       (-2.2, -0.4, 0.25), (-0.7, -0.4, 0.25), (0.8, -0.4, 0.25), (2.3, -0.4, 0.25),
-                      (-1.4, 0.9, 0.35)]
+                      (-1.4, 0.9, 0.35), (-3.5, 0.8, 0.25), (3.5, 0.8, 0.25)]
     for i, pos in enumerate(desk_positions):
         d = _cube(f"Desk_{i:02d}", (0.9, 0.55, 0.5) if i < 8 else (1.1, 0.6, 0.6), pos,
                   wood if i < 8 else wood_dark)
         stage_col.objects.link(d)
 
-    # Blackboard
-    board = _plane("Blackboard", 4.0, (0, 2.0, 1.2), rot=(1.5708, 0, 0), mat=green,
-                   collection=stage_col)
-    board.scale = (1.5 * 4 / 2, 1 * 4 / 2, 1)
+    # Chairs — HQ addition
+    chair_mat = _mat_hq("MatChair", (0.3, 0.3, 0.32, 1.0), hq_type="floor")
+    for i, pos in enumerate([(-2.2, -0.1, 0.2), (-0.7, -0.1, 0.2), (0.8, -0.1, 0.2), (2.3, -0.1, 0.2)]):
+        c = _cube(f"Chair_{i:02d}", (0.4, 0.4, 0.45), pos, chair_mat)
+        stage_col.objects.link(c)
 
-    # Placeholder capsule characters
-    _cylinder("Char_Eileen_placeholder", 0.25, 1.4, (-1.6, 1.2, 0.9), eileen_c, stage_col)
-    _cylinder("Char_Sylvie_placeholder", 0.25, 1.4, (1.6, 1.2, 0.9), sylvie_c, stage_col)
+    # Blackboard — HQ larger
+    board = _plane("Blackboard", 4.5, (0, 2.45, 1.4), rot=(1.5708, 0, 0), mat=green,
+                   collection=stage_col)
+    board.scale = (1.6 * 4.5 / 2, 1.1 * 4.5 / 2, 1)
+
+    # Blackboard frame — HQ
+    frame_mat = _mat_hq("MatBoardFrame", (0.4, 0.3, 0.2, 1.0), hq_type="wood")
+    for side, spos, sscale in [("top", (0, 2.44, 2.0), (1.7*4.5/2, 0.05, 0.05)),
+                               ("bottom", (0, 2.44, 0.8), (1.7*4.5/2, 0.05, 0.05)),
+                               ("left", (-1.7*4.5/2, 2.44, 1.4), (0.05, 0.05, 1.1*4.5/2)),
+                               ("right", (1.7*4.5/2, 2.44, 1.4), (0.05, 0.05, 1.1*4.5/2))]:
+        f = _cube(f"BoardFrame_{side}", sscale, spos, frame_mat)
+        stage_col.objects.link(f)
+
+    # Placeholder capsule characters — HQ taller, better colors
+    _cylinder("Char_Eileen_placeholder", 0.28, 1.5, (-1.6, 1.2, 0.95), eileen_c, stage_col)
+    _cylinder("Char_Sylvie_placeholder", 0.28, 1.5, (1.6, 1.2, 0.95), sylvie_c, stage_col)
 
     # ---- save ----
     out_path = Path(out_path)

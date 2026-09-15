@@ -30,47 +30,58 @@ if str(ROOT) not in sys.path:
 
 from blend.upvn_editor_addon import UPVN_GameBuilder
 
-def quick_game(project: str = "game", title: str = "UPVN Quick Game", characters=None, scenes=None, dialogues=None, menu=None, preview: bool = True):
+def quick_game(project: str = "game", title: str = "UPVN Quick Game", characters=None, scenes=None, dialogues=None, menu=None, preview: bool = True, use_wizard: bool = False):
     """
-    One-call game creator — minimal coding.
+    One-call game creator — minimal coding, declarative, HQ.
     Example:
         quick_game(project="my_game", characters=[("e","Eileen","#c8ffc8")], dialogues=[("e","Hi")])
+        quick_game(project="my_game", use_wizard=True)  # full branching game, no coding
     """
     script_path = Path(project) / "script.rpy"
-    builder = UPVN_GameBuilder(str(script_path))
-    # characters
-    for cid, name, color in (characters or [("e","Eileen","#c8ffc8")]):
-        builder.add_character(cid, name, color)
-    builder.ensure_label("start")
-    # scenes
-    for bg in (scenes or ["bg classroom"]):
-        builder.add_scene(bg)
-        break  # only first scene at start
-    # dialogues
-    for who, text in (dialogues or [(None, "This game was created with minimal coding — no .rpy typing!"), ("e","Hello from UPVN!")]):
-        builder.add_say(who, text)
-    # menu
-    if menu:
-        caption, choices = menu
-        builder.add_menu(caption, choices)
+    builder = UPVN_GameBuilder(str(script_path), use_declarative=True)
+    if use_wizard:
+        builder.create_quick_wizard(title=title, theme="school")
     else:
-        # demo menu
-        builder.add_menu("What will you do?", [("Continue","continue_label"), ("End","end_label")])
-        builder.ensure_label("continue_label")
-        builder.add_say("e", "You continued!")
-        builder.add_jump("end_label")
-        builder.ensure_label("end_label")
-        builder.add_say(None, "The end. Created with UPVN_GameBuilder (minimal coding).")
-        builder.labels["end_label"].append("    return")
+        # characters
+        for cid, name, color in (characters or [("e","Eileen","#c8ffc8")]):
+            builder.add_character(cid, name, color)
+        # state vars (no-code logic)
+        builder.add_state_var("affection", "int", "0")
         builder.ensure_label("start")
+        # scenes
+        for bg in (scenes or ["bg classroom"]):
+            builder.add_scene(bg, "fade")
+            break
+        # dialogues
+        for who, text in (dialogues or [(None, "This game was created with minimal coding — no .rpy typing!"), ("e","Hello from UPVN!")]):
+            builder.add_say(who, text)
+        builder.add_set("affection", "+=", "1")
+        # menu
+        if menu:
+            caption, choices = menu
+            builder.add_menu(caption, choices)
+        else:
+            builder.add_menu("What will you do?", [("Continue","continue_label"), ("End","end_label")])
+            builder.ensure_label("continue_label")
+            builder.add_say("e", "You continued! Affection is now [affection].")
+            builder.add_jump("end_label")
+            builder.ensure_label("end_label")
+            builder.add_say(None, "The end. Created with UPVN_GameBuilder (minimal coding, declarative, HQ).")
+            builder.add_return()
+            builder.ensure_label("start")
     ok, msg = builder.validate()
     print(f"[creator] validate: {msg}")
     path = builder.write()
-    print(f"[creator] wrote {path} ({path.stat().st_size} bytes)")
+    print(f"[creator] wrote {path} ({path.stat().st_size} bytes) — declarative HQ")
     if preview:
         out = builder.preview_screenshot()
         if out:
             print(f"[creator] preview: {out}")
+        # also preview all paths if wizard
+        if use_wizard:
+            outs = builder.preview_all_paths()
+            if outs:
+                print(f"[creator] preview all paths: {len(outs)} images")
     return path
 
 def demo_arbitrary_saves():
