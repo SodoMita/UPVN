@@ -5,7 +5,10 @@ Headless runner for UPVN scripts — golden-trace generator.
 Usage:
   python -m tools.run_headless examples/00_minimal_dialogue/script.rpy
   python -m tools.run_headless examples/03_variables_routes/script.rpy --choices 0
-  python -m tools.run_headless the_question/game/script.rpy --choices 0 0 --json
+
+  # Run Ren'Py SDK projects directly (no copying needed):
+  python -m tools.run_headless ~/renpy-8.5.1-sdk/the_question/game/script.rpy --mode full --choices 0 0
+  python -m tools.run_headless ~/renpy-8.5.1-sdk/tutorial/game/script.rpy --mode full --compat
 
 Emits trace events (SAY, MENU, JUMP, etc.) and final VNState.
 Use for agent verification without UPBGE.
@@ -35,10 +38,13 @@ def main():
     ap.add_argument("--state", action="store_true", help="dump final state JSON")
     ap.add_argument("--mode", choices=("safe", "full"), default="safe",
                     help="parse mode: safe declarative subset (default) or full drop-in Ren'Py")
+    ap.add_argument("--compat", action="store_true",
+                    help="compat mode: init python / python block errors are collected, not fatal. "
+                         "Required for real Ren'Py projects that use Ren'Py-specific modules (ui, renpy.store, etc.)")
     args = ap.parse_args()
 
     ctrl = VNController(script_path=args.script, mode=args.mode)
-    trace = ctrl.run_headless(choices=args.choices)
+    trace = ctrl.run_headless(choices=args.choices, compat=args.compat)
 
     if args.json:
         print(json.dumps(trace, ensure_ascii=False, indent=2))
