@@ -369,24 +369,200 @@ The engine replaces `[affection]` with the current value at runtime.
 
 ---
 
-## Part 8 — Setup Scene (UPBGE only)
+## Part 8 — Setting Up the Scene in UPBGE
 
-When you're ready to play in UPBGE (not just headless):
+When you're ready to play in UPBGE (not just headless), the engine needs
+specific objects in the Blender scene — cameras, planes, text objects, logic
+bricks. There are two ways to create them.
 
-1. Open your `.blend` file.
-2. In the UPVN panel, click **Setup Scene**.
-3. This creates all the objects the engine needs: cameras, planes, text
-   objects, materials, logic bricks.
-4. Press **P** to play.
+### Option A: Setup Scene button
 
-### After Setup Scene — Recolor elements
+Click **Setup Scene** in the UPVN panel. It creates everything automatically.
+Then press **P** to play.
 
-The Setup Scene creates objects with default colors. To customize:
+### Option B: Manual setup (by hand)
 
-1. Select `Dialogue_Box` in the outliner → Object Properties → Color →
-   set to `(1.0, 1.0, 1.0, 0.8)` for white or pick your own.
+If Setup Scene doesn't work in your environment (e.g. you're running
+headless/background mode where `bpy.ops` is unavailable), you can create
+everything manually. This also helps you understand what the engine expects.
+
+The engine looks for objects **by exact name**. If any are missing, the game
+still runs but those elements won't appear. Here's the full list:
+
+#### Step 1: Collections (scene organization)
+
+Create 5 collections in the Outliner (right-click the scene collection →
+New Collection):
+
+| Collection | Purpose |
+|------------|---------|
+| `VN_Backgrounds` | Background planes |
+| `VN_Characters` | Character sprite planes |
+| `VN_UI` | Dialogue box, text, choice buttons |
+| `VN_Effects` | Transition effects |
+| `VN_3DStage` | 3D stage objects (optional) |
+
+#### Step 2: Cameras
+
+**Camera_UI** — orthographic camera for 2D UI (the main camera):
+1. Add → Camera. Name it `Camera_UI`.
+2. In Camera Properties: set Type to **Orthographic**, Orthographic Scale to **15**.
+3. Location: `(0, -10, 0)`, Rotation: `(90°, 0, 0)` — looking down the +Y axis.
+4. This camera should be the **active camera** (Scene Properties → Camera).
+
+**Camera_3D** — perspective camera for 3D stages (optional):
+1. Add → Camera. Name it `Camera_3D`.
+2. Location: `(0, -6, 2.5)`, Rotation: `(66°, 0, 0)`.
+3. Don't set as active — the engine switches to it when `load_stage` is used.
+
+#### Step 3: Background plane
+
+**BG_Plane** — large plane behind everything:
+1. Add → Mesh → Plane. Name it `BG_Plane`.
+2. Scale: `(9, 9, 1)` (18×18 world units).
+3. Rotation: `(90°, 0, 0)` — standing upright in the XZ plane.
+4. Location: `(0, 0, 0)`.
+5. Add a material named `MABackground`. Set surface to **Emission**, strength 1.0.
+6. In Object Properties → Viewport Display → Color, set `(0.95, 0.95, 0.95, 1)`.
+7. Move to the `VN_Backgrounds` collection.
+
+The engine swaps this object's `obj.color` at runtime when `scene` is called.
+
+#### Step 4: Character sprite planes
+
+Create 5 planes for character positions. Each needs a material named `MASprite`:
+
+| Name | X location |
+|------|-----------|
+| `Sprite_far_left` | -5 |
+| `Sprite_left` | -3 |
+| `Sprite_center` | 0 |
+| `Sprite_right` | 3 |
+| `Sprite_far_right` | 5 |
+
+For each:
+1. Add → Mesh → Plane. Name it exactly (e.g. `Sprite_center`).
+2. Scale: `(1.5, 2.4, 1)` — roughly portrait-sized.
+3. Rotation: `(90°, 0, 0)` — standing upright.
+4. Y location: `-0.15`, Z location: `0`.
+5. Add material `MASprite`. Emission shader, strength 1.0.
+6. Object Color: `(0.62, 0.78, 0.55, 1)` (default greenish).
+7. Move to `VN_Characters` collection.
+
+The engine swaps `obj.color` and optionally loads image textures at runtime.
+
+#### Step 5: Dialogue box and text
+
+**Dialogue_Box** — panel behind the dialogue text:
+1. Add → Mesh → Plane. Name it `Dialogue_Box`.
+2. Scale: `(4.0, 1.2, 1)`.
+3. Rotation: `(90°, 0, 0)`.
+4. Location: `(0, -0.4, -3.2)`.
+5. Add material `MAUI`. Emission shader.
+6. Object Color: `(1.0, 1.0, 1.0, 0.8)` (white, 80% alpha).
+7. Move to `VN_UI` collection.
+
+**Speaker_Text** — 3D text showing who's speaking:
+1. Add → Text (Add → Curve → Text). Name it `Speaker_Text`.
+2. In Font Properties, pick a font (DejaVu Sans works well).
+3. Size: `0.30`.
+4. Rotation: `(90°, 0, 0)`.
+5. Location: `(-5.6, -0.55, -2.9)`.
+6. Move to `VN_UI`.
+
+**Dialogue_Text** — 3D text showing the dialogue:
+1. Add → Text. Name it `Dialogue_Text`.
+2. Size: `0.26`.
+3. Rotation: `(90°, 0, 0)`.
+4. Location: `(-5.4, -0.55, -3.3)`.
+5. Move to `VN_UI`.
+
+#### Step 6: Choice buttons
+
+Create 9 pairs of objects for menu choices (`choice_0` through `choice_8`):
+
+For each `choice_N` (N = 0..8):
+1. Add → Mesh → Plane. Name it `choice_N`.
+2. Scale: `(4.6, 0.36, 1)`.
+3. Rotation: `(90°, 0, 0)`.
+4. Z location: `1.05 - N * 0.66` (choice_0 at 1.05, choice_1 at 0.39, etc.).
+5. Y location: `-0.5`.
+6. Material `MAUI`. Object Color: `(1.0, 1.0, 1.0, 0.8)`.
+7. Move to `VN_UI`.
+
+For each `choice_N_text`:
+1. Add → Text. Name it `choice_N_text`.
+2. Size: `0.22`.
+3. Rotation: `(90°, 0, 0)`.
+4. Location: same Z as the plane, X offset to the left.
+5. Move to `VN_UI`.
+
+#### Step 7: History and rewind (optional)
+
+**History_Box** — panel for the history overlay (H key):
+1. Add → Mesh → Plane. Name it `History_Box`.
+2. Scale: `(6.6, 3.0, 1)`.
+3. Location: `(0, -0.45, 0.9)`.
+4. Material `MAUI`. Object Color: `(0.02, 0.03, 0.08, 1)`.
+5. Move to `VN_UI`.
+
+**History_Text** and **Rewind_Text**: Text objects at appropriate locations.
+
+#### Step 8: VNController and logic bricks
+
+**VNController** — the engine's control object:
+1. Add → Empty (Add → Empty → Plain Axes). Name it `VNController`.
+2. In Custom Properties (Object Properties → add properties manually):
+   - `script_path` (String): `//game/script.rpy`
+   - `image_mode` (String): `color`
+   - `parse_mode` (String): `safe`
+   - `upvn_root` (String): `//` (or path to the engine root)
+
+**Logic bricks** — the game tick:
+1. Select `VNController`.
+2. In the **Logic Editor** (or Game Logic layout):
+   - Add **Always sensor** (pulse mode on, frequency 0).
+   - Add **Python controller**, module mode: `upvn_launcher.main`.
+   - Link sensor → controller.
+3. In the **Text Editor**, create a text block named `upvn_launcher` with the
+   path-bootstrap script (see `blend/upvn_editor_addon.py` →
+   `_UPVN_LAUNCHER_TEXT` for the exact content, or copy from any working
+   `.blend` template).
+
+Alternatively, if you have the UPVN add-on installed: select `VNController`,
+go to the Logic Editor, add an Always sensor + Python controller in **Script**
+mode with text `upvn_launcher`. The add-on's **Setup Scene** button writes
+this text block automatically.
+
+#### Step 9: Check your work
+
+After creating everything, run the wiring check:
+
+1. In the UPVN panel, click **Check Scene Wiring**.
+2. It compares your scene against the engine contract and lists any missing
+   objects.
+
+Or from the command line:
+```bash
+python -c "
+from engine.render.contract import check_contract
+# list your object names here
+objs = {'BG_Plane', 'Dialogue_Box', 'Speaker_Text', 'Dialogue_Text', ...}
+result = check_contract(objs)
+for m in result['missing']:
+    print(f'MISSING: {m[\"name\"]} — {m[\"purpose\"]}')
+"
+```
+
+### After setup — Recolor elements
+
+Once the scene is built (by either method), customize colors:
+
+1. Select `Dialogue_Box` → Object Properties → Viewport Display → Color →
+   set to your preferred dialogue box color.
 2. Select `choice_0` through `choice_8` → same process.
 3. Select `BG_Plane` → set to your preferred background tint.
+4. Select sprite planes → tint them to match your characters.
 
 The engine reads `obj.color` every frame, so changes take effect immediately
 when you press P.
