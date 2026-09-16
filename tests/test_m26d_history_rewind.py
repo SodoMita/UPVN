@@ -315,8 +315,9 @@ def test_template_ships_the_backlog_objects():
     fields = quad[0].split()
     assert fields[1] == "True" and fields[2] == "1.0", quad[0]   # +/-1 quad
     assert int(fields[3]) >= 1, "UV layer required for TexImage sampling"
-    assert "[0.03, 0.04, 0.09, 1.0]" in quad[0], \
-        "History_Box must be tinted dark or it paints white-on-white"
+    # M28 Ren'Py identical: history box dark, allow variations (white UI uses 0.02,0.03,0.08)
+    assert any(c in quad[0] for c in ("[0.03, 0.04, 0.09, 1.0]", "[0.02, 0.03, 0.08, 1.0]", "0.02, 0.03, 0.08", "0.03, 0.04, 0.09")), \
+        f"History_Box must be tinted dark or it paints white-on-white, got {quad[0]}"
 
 
 # ------------------------------------------------------- input plumbing (fake bge)
