@@ -669,6 +669,7 @@ class UPVN_GameBuilder:
         """One-click high-quality branching story with variables, 2 endings, 3D stage.
         
         No Python coding required — generates declarative script.
+        Each theme produces a unique story: school, fantasy, scifi, mystery.
         """
         # reset
         self.characters = {}
@@ -679,20 +680,29 @@ class UPVN_GameBuilder:
         self.labels = {}
         self._label_indent = {}
         self._indent_stack = {}
-        # characters
+
+        if theme == "fantasy":
+            self._wizard_fantasy(title)
+        elif theme == "scifi":
+            self._wizard_scifi(title)
+        elif theme == "mystery":
+            self._wizard_mystery(title)
+        else:
+            self._wizard_school(title)
+        return self
+
+    def _wizard_school(self, title: str):
+        """School-themed VN wizard."""
         self.add_character("e", "Eileen", "#c8ffc8")
         self.add_character("s", "Sylvie", "#c8c8ff")
-        # state
         self.add_state_var("affection", "int", "0")
         self.add_state_var("route", "str", '"none"')
         self.add_state_var("has_book", "bool", "False")
-        # assets (manifest, optional)
         self.add_image("bg classroom", "backgrounds/bg_classroom.png")
         self.add_image("bg library", "backgrounds/bg_lecturehall.png")
         self.add_image("bg meadow", "backgrounds/bg_meadow.png")
         self.add_stage_asset("classroom_3d", "stages/classroom_3d.blend")
 
-        # start
         self.ensure_label("start")
         self.add_scene("bg classroom", "fade")
         self.add_show("eileen", "center", "dissolve")
@@ -786,6 +796,257 @@ class UPVN_GameBuilder:
         self.add_return()
 
         return self
+
+    def _wizard_fantasy(self, title: str):
+        """Fantasy-themed VN wizard — knights, dragons, magic."""
+        self.add_character("k", "Kael", "#ffcc66")
+        self.add_character("l", "Lyra", "#aa88ff")
+        self.add_state_var("courage", "int", "0")
+        self.add_state_var("magic", "bool", "False")
+        self.add_state_var("route", "str", '"none"')
+        self.add_image("bg forest", "backgrounds/bg_forest.png")
+        self.add_image("bg castle", "backgrounds/bg_castle.png")
+        self.add_image("bg mountain", "backgrounds/bg_mountain.png")
+
+        self.ensure_label("start")
+        self.add_scene("bg forest", "fade")
+        self.add_show("kael", "center", "dissolve")
+        self.add_camera_zoom(1.1, 1.0, "ease")
+        self.add_say("k", f"Welcome to {title}! The forest grows dark ahead.")
+        self.add_say(None, "A knight stands at the crossroads, sword at his side.")
+        self.add_menu("The path splits:", [("Take the mountain road", "mountain_road"), ("Enter the dark cave", "dark_cave")])
+
+        self.ensure_label("mountain_road")
+        self.add_set("courage", "+=", "1")
+        self.add_set("route", "=", '"mountain"')
+        self.add_scene("bg mountain", "dissolve")
+        self.add_say(None, "The mountain wind howls. Stones shift beneath your boots.")
+        self.add_show("lyra", "right", "move")
+        self.add_say("l", "You dare climb in this storm? You must be brave \u2014 or foolish.")
+        self.add_say("k", "Perhaps both. But I seek the Dragon\u2019s Peak.")
+        self.add_menu("Lyra offers help:", [("Accept her aid", "accept_magic"), ("Climb alone", "climb_alone")])
+
+        self.ensure_label("dark_cave")
+        self.add_set("route", "=", '"cave"')
+        self.add_scene("bg forest", "fade")
+        self.add_camera_zoom(1.4, 0.8, "ease")
+        self.add_say(None, "The cave breathes cold air. Something glitters in the dark...")
+        self.add_say("k", "A crystal! It pulses with ancient magic.")
+        self.add_set("magic", "=", "True")
+        self.add_set("courage", "+=", "2")
+        self.add_jump("dragon_encounter")
+
+        self.ensure_label("accept_magic")
+        self.add_set("magic", "=", "True")
+        self.add_set("courage", "+=", "1")
+        self.add_say("l", "Take this enchantment. It will shield you from dragon fire.")
+        self.add_jump("dragon_encounter")
+
+        self.ensure_label("climb_alone")
+        self.add_set("courage", "+=", "2")
+        self.add_say("k", "I need no magic \u2014 only courage.")
+        self.add_jump("dragon_encounter")
+
+        self.ensure_label("dragon_encounter")
+        self.add_scene("bg castle", "fade")
+        self.add_show("kael", "left", "dissolve")
+        self.add_say(None, "At the peak, a dragon awaits. Its eyes burn like embers.")
+        self.add_if("magic")
+        self.add_say("k", "The enchantment shields me! The dragon bows its head.")
+        self.add_say(None, "The dragon recognizes the ancient magic and grants safe passage.")
+        self.add_set("courage", "+=", "2")
+        self.add_else()
+        self.add_say("k", "Stand back! I'll face it with steel alone!")
+        self.add_say(None, "The battle is fierce, but your courage prevails.")
+        self.add_end()
+        self.add_if("courage >= 4")
+        self.add_jump("dragon_friend")
+        self.add_else()
+        self.add_jump("dragon_survive")
+        self.add_end()
+
+        self.ensure_label("dragon_friend")
+        self.add_scene("bg mountain", "fade")
+        self.add_show("lyra", "center", "dissolve")
+        self.add_say("l", "You didn't just survive \u2014 you befriended the dragon!")
+        self.add_say(None, "Legendary Ending \u2014 Courage [courage], Magic: [magic]")
+        self.add_return()
+
+        self.ensure_label("dragon_survive")
+        self.add_scene("bg forest", "fade")
+        self.add_show("kael", "center")
+        self.add_say("k", "I lived to tell the tale. That counts for something.")
+        self.add_say(None, "Survivor Ending \u2014 Try for more courage or magic next time!")
+        self.add_return()
+
+    def _wizard_scifi(self, title: str):
+        """Sci-Fi themed VN wizard \u2014 space station, AI, aliens."""
+        self.add_character("c", "Captain Zara", "#66ccff")
+        self.add_character("a", "ARIA", "#66ffaa")
+        self.add_state_var("trust_ai", "int", "0")
+        self.add_state_var("route", "str", '"none"')
+        self.add_state_var("scanned", "bool", "False")
+        self.add_image("bg bridge", "backgrounds/bg_bridge.png")
+        self.add_image("bg corridor", "backgrounds/bg_corridor.png")
+        self.add_image("bg planet", "backgrounds/bg_planet.png")
+
+        self.ensure_label("start")
+        self.add_scene("bg bridge", "fade")
+        self.add_show("zara", "center", "dissolve")
+        self.add_camera_zoom(1.1, 0.8, "ease")
+        self.add_say("c", f"Captain's log \u2014 {title}. Day 47 in deep space.")
+        self.add_say("a", "Captain, I'm detecting an anomalous signal from Sector 7.")
+        self.add_say(None, "ARIA, the ship's AI, projects a holographic display.")
+        self.add_menu("The signal is unusual:", [("Investigate the signal", "investigate"), ("Stay on course", "stay_course")])
+
+        self.ensure_label("investigate")
+        self.add_set("trust_ai", "+=", "1")
+        self.add_set("route", "=", '"signal"')
+        self.add_scene("bg corridor", "dissolve")
+        self.add_say("c", "ARIA, plot a course to Sector 7.")
+        self.add_say("a", "Course plotted. ETA: 3 hours. Captain... be careful.")
+        self.add_menu("Approaching the anomaly:", [("Scan the anomaly", "scan_anomaly"), ("Hail on open frequency", "hail")])
+
+        self.ensure_label("scan_anomaly")
+        self.add_set("scanned", "=", "True")
+        self.add_set("trust_ai", "+=", "1")
+        self.add_say("a", "Scan complete. It's a derelict ship \u2014 pre-warp era.")
+        self.add_say("c", "Life signs?")
+        self.add_say("a", "One. Faint. Humanoid.")
+        self.add_jump("alien_contact")
+
+        self.ensure_label("hail")
+        self.add_say("c", "Unidentified vessel, this is Captain Zara. Respond.")
+        self.add_say(None, "Static... then a voice, ancient and tired.")
+        self.add_say(None, '"We have waited... so long..."')
+        self.add_set("trust_ai", "+=", "2")
+        self.add_jump("alien_contact")
+
+        self.ensure_label("stay_course")
+        self.add_set("route", "=", '"course"')
+        self.add_scene("bg bridge", "fade")
+        self.add_say("a", "Understood. Maintaining heading.")
+        self.add_say(None, "But hours later, the signal grows stronger...")
+        self.add_say("c", "ARIA, what's happening?")
+        self.add_say("a", "The signal is following us. It wants to be found.")
+        self.add_set("trust_ai", "+=", "1")
+        self.add_jump("alien_contact")
+
+        self.ensure_label("alien_contact")
+        self.add_scene("bg planet", "fade")
+        self.add_show("zara", "left", "dissolve")
+        self.add_show("aria_hologram", "right", "dissolve")
+        self.add_if("scanned")
+        self.add_say("c", "The scans show it's safe. Let's make contact.")
+        self.add_set("trust_ai", "+=", "1")
+        self.add_else()
+        self.add_say("c", "We go in blind. Stay sharp, ARIA.")
+        self.add_end()
+        self.add_if("trust_ai >= 4")
+        self.add_jump("alliance")
+        self.add_else()
+        self.add_jump("mystery_remain")
+        self.add_end()
+
+        self.ensure_label("alliance")
+        self.add_scene("bg planet", "fade")
+        self.add_show("zara", "center", "dissolve")
+        self.add_say("a", "Captain! The aliens are peaceful \u2014 they're offering a star map!")
+        self.add_say("c", "A new era for humanity. Thank you, ARIA.")
+        self.add_say(None, "Alliance Ending \u2014 Trust [trust_ai], Route [route]")
+        self.add_return()
+
+        self.ensure_label("mystery_remain")
+        self.add_scene("bg bridge", "fade")
+        self.add_show("zara", "center")
+        self.add_say("c", "We'll return someday. Better prepared.")
+        self.add_say(None, "Mystery Ending \u2014 Build more trust with ARIA next time!")
+        self.add_return()
+
+    def _wizard_mystery(self, title: str):
+        """Mystery/noir themed VN wizard \u2014 detective, clues, suspects."""
+        self.add_character("d", "Detective", "#ff8866")
+        self.add_character("m", "Ms. Gray", "#cccccc")
+        self.add_state_var("clues", "int", "0")
+        self.add_state_var("suspect", "str", '"none"')
+        self.add_state_var("key_found", "bool", "False")
+        self.add_image("bg office", "backgrounds/bg_office.png")
+        self.add_image("bg manor", "backgrounds/bg_manor.png")
+        self.add_image("bg garden", "backgrounds/bg_garden.png")
+
+        self.ensure_label("start")
+        self.add_scene("bg office", "fade")
+        self.add_show("detective", "center", "dissolve")
+        self.add_camera_zoom(1.2, 1.0, "ease")
+        self.add_say(None, f"{title}. A rainy night. The phone rings.")
+        self.add_say("m", "Detective? I need your help. My husband has vanished.")
+        self.add_say("d", "Tell me everything. Start from the beginning.")
+        self.add_menu("Where to begin the investigation:", [("Search the manor", "search_manor"), ("Check the garden", "check_garden")])
+
+        self.ensure_label("search_manor")
+        self.add_set("suspect", "=", '"manor"')
+        self.add_scene("bg manor", "dissolve")
+        self.add_show("detective", "left", "move")
+        self.add_show("ms_gray", "right", "move")
+        self.add_say("d", "When did you last see your husband?")
+        self.add_say("m", "Yesterday evening. He was in his study, as usual.")
+        self.add_say(None, "You notice a torn letter in the fireplace. Only half burned.")
+        self.add_menu("The letter is partially readable:", [("Read the fragment", "read_fragment"), ("Search the study", "search_study")])
+
+        self.ensure_label("check_garden")
+        self.add_set("suspect", "=", '"garden"')
+        self.add_scene("bg garden", "fade")
+        self.add_show("detective", "center", "dissolve")
+        self.add_say(None, "The garden is overgrown. A fresh footprint in the mud.")
+        self.add_say("d", "Someone was here recently \u2014 and they were in a hurry.")
+        self.add_set("clues", "+=", "1")
+        self.add_say(None, "Near the greenhouse, you find a rusty key hidden in a planter.")
+        self.add_set("key_found", "=", "True")
+        self.add_set("clues", "+=", "1")
+        self.add_jump("revelation")
+
+        self.ensure_label("read_fragment")
+        self.add_set("clues", "+=", "2")
+        self.add_say("d", "The letter mentions a safe deposit box... and a flight to Paris.")
+        self.add_say("m", "He never told me about any box!")
+        self.add_say("d", "People rarely tell their spouses everything.")
+        self.add_jump("revelation")
+
+        self.ensure_label("search_study")
+        self.add_set("clues", "+=", "1")
+        self.add_say(None, "The study is meticulously organized \u2014 except for one drawer.")
+        self.add_say("d", "This drawer was forced open. Recently.")
+        self.add_set("key_found", "=", "True")
+        self.add_jump("revelation")
+
+        self.ensure_label("revelation")
+        self.add_scene("bg office", "fade")
+        self.add_show("detective", "center", "dissolve")
+        self.add_say("d", "I think I know what happened to your husband.")
+        self.add_if("clues >= 3")
+        self.add_say("d", "He staged his own disappearance. The letter, the key, the garden \u2014 all deliberate.")
+        self.add_say("m", "You mean... he's alive?")
+        self.add_say("d", "Very much so. He's in Paris by now.")
+        self.add_jump("solved")
+        self.add_else()
+        self.add_say("d", "I have a theory, but I need more evidence.")
+        self.add_say("m", "Please, detective. Find him.")
+        self.add_jump("unsolved")
+        self.add_end()
+
+        self.ensure_label("solved")
+        self.add_scene("bg manor", "fade")
+        self.add_show("ms_gray", "center", "dissolve")
+        self.add_say("m", "Thank you, detective. At least now I know the truth.")
+        self.add_say(None, "Solved Ending \u2014 Clues [clues], Key found: [key_found]")
+        self.add_return()
+
+        self.ensure_label("unsolved")
+        self.add_scene("bg office", "fade")
+        self.add_show("detective", "center")
+        self.add_say("d", "The case remains open. But I'll find the truth.")
+        self.add_say(None, "Unsolved Ending \u2014 Gather more clues next time!")
+        self.add_return()
 
     def create_starter_declarative(self):
         """High-quality starter using declarative forms."""
