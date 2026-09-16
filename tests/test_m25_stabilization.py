@@ -82,7 +82,8 @@ def test_dialogue_box_stays_inside_ortho_frame():
 
 
 def test_layout_respects_window_aspect_when_bge_present():
-    """With a 4:3 window the vertical half-extent is 7.5*(3/4)=5.625."""
+    """With a 4:3 window the vertical half-extent is 7.5*(3/4)=5.625.
+    M28 Ren'Py identical: dialogue box at fixed DIALOGUE_LOCATION (-3.134) full-width, not aspect-dependent."""
     fake = types.ModuleType("bge")
     render = types.SimpleNamespace(getWindowWidth=lambda: 800, getWindowHeight=lambda: 600)
     fake.render = render
@@ -92,8 +93,12 @@ def test_layout_respects_window_aspect_when_bge_present():
         assert world_ui.aspect_wh() == pytest.approx(4.0 / 3.0)
         store = _store()
         world_ui.layout_screen_ui(store.get, _payload(), ortho=15.0)
+        # M28: fixed Ren'Py position, not aspect formula
+        from engine.render.contract import DIALOGUE_LOCATION
+        assert store["Dialogue_Box"].worldPosition[2] == pytest.approx(DIALOGUE_LOCATION[2])
+        # still inside frame
         half_v = 7.5 / (4.0 / 3.0)
-        assert store["Dialogue_Box"].worldPosition[2] == pytest.approx(-half_v * 0.72)
+        assert abs(store["Dialogue_Box"].worldPosition[2]) < half_v
     finally:
         if old is None:
             sys.modules.pop("bge", None)
