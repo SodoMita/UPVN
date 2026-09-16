@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.7.2 — M29: Theme-Aware Wizards & Ren'Py SDK Validation
+
+Usability workflow improvements: higher quality scene, less Python coding, reliability kept.
+
+### Wizard themes (4 unique stories)
+- `create_quick_wizard(theme=)` now uses the theme parameter (was hardcoded "school").
+- **school**: Eileen + Sylvie, library/classroom/meadow, affection tracking, book quest.
+- **fantasy**: Kael + Lyra, mountain/cave/castle, courage + magic tracking, dragon encounter.
+- **scifi**: Captain Zara + ARIA, bridge/corridor/planet, trust_ai tracking, alien contact.
+- **mystery**: Detective + Ms. Gray, office/manor/garden, clues tracking, noir investigation.
+- Each theme: unique characters/colors, 3+ branching paths, 2 endings, camera zoom, state variables.
+- No Python coding required — full game from one click.
+
+### One-click launcher (tools/play_game.sh)
+- Auto-installs: packages, 3 GB swap, UPBGE 0.50, headless sway+pixman compositor.
+- Modes: `--wizard`, `--script script.rpy`, `--blend file.blend`, `--setup-only`.
+- Heartbeat-integrated player launch with controls documentation.
+
+### Standalone game creator (tools/upvn_game_creator.py)
+- CLI: `python tools/upvn_game_creator.py --title "My Story" --theme fantasy --out game/script.rpy`
+- No bpy needed — pure Python, works in CI.
+
+### Ren'Py SDK validation
+- Downloaded Ren'Py 8.5.1 SDK (147 MB) for comparison testing.
+- The Question: 92 events (56 say, 2 menus, 6 scenes, 13 shows) via UPVN headless run.
+- gui.rpy, screens.rpy, options.rpy parse without errors.
+- Golden trace saved: tests/data/trace_the_question_upvn.json.
+
+### Tests
+- 28 new tests: 4 themes × (parse, endings, variables, menus, headless trace) + game creator + Ren'Py SDK comparison.
+- Total: 391 passed / 30 skipped (6 warnings).
+- 4 example projects: examples/99_wizard_{school,fantasy,scifi,mystery}/
+
 ## 0.7.1 — M28: Audit Fixes & Reliability Hardening (no silent failures)
 
 Full engine/UI/frontend/addon hardening — previously silent no-ops now log and degrade gracefully, per M28 audit checklist.
