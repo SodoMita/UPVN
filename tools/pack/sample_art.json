@@ -1,0 +1,65 @@
+{
+  "_comment": "UPVN sample art pipeline (M29). Raw AI/freehand art lives in art/, game-ready assets in assets/. Re-run: python tools/make_asset_pack.py tools/pack/sample_art.json",
+  "root": "../..",
+  "canvas": [
+    1280,
+    720
+  ],
+  "sprite": {
+    "width": 512,
+    "height": 768,
+    "margin": 18
+  },
+  "backgrounds": [
+    {
+      "src": "art/bg_classroom.png",
+      "out": "assets/backgrounds/bg_classroom.jpg",
+      "fit": "cover",
+      "quality": 92
+    },
+    {
+      "src": "art/bg_lecturehall.png",
+      "out": "assets/backgrounds/bg_lecturehall.jpg",
+      "fit": "cover",
+      "quality": 92
+    },
+    {
+      "src": "art/bg_meadow.png",
+      "out": "assets/backgrounds/bg_meadow.jpg",
+      "fit": "cover",
+      "quality": 92
+    },
+    {
+      "src": "art/bg_uni.png",
+      "out": "assets/backgrounds/bg_uni.jpg",
+      "fit": "cover",
+      "quality": 92
+    }
+  ],
+  "sprites": [
+    {
+      "src": "art/eileen_neutral.png",
+      "out": "assets/sprites/eileen_neutral.png",
+      "key": "magenta",
+      "trim": true
+    },
+    {
+      "src": "art/eileen_happy.png",
+      "out": "assets/sprites/eileen_happy.png",
+      "key": "magenta",
+      "trim": true
+    },
+    {
+      "src": "art/sylvie.png",
+      "out": "assets/sprites/sylvie.png",
+      "key": "magenta",
+      "trim": true
+    }
+  ],
+  "copies": [
+    {
+      "src": "assets/sprites/eileen_neutral.png",
+      "out": "assets/sprites/eileen.png"
+    }
+  ]
+}
