@@ -898,7 +898,10 @@ class VNController:
         return self.state.auto
 
     # ---------------------------- headless convenience
-    def run_headless(self, choices: List[int] | None = None):
+    def run_headless(self, choices: List[int] | None = None, compat: bool | None = None):
+        # Allow caller to override compat for this run (e.g. --compat flag)
+        if compat is not None:
+            self.compat = compat
         # Headless should start from a clean state, not the pre-advanced
         # state left by load()'s _advance() which pollutes history.
         # Create a fresh VNState + VNInterpreter from same script_dict.
