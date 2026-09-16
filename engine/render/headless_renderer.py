@@ -225,6 +225,217 @@ def draw_bg(img: Image.Image, draw: ImageDraw.ImageDraw, scene: str | None):
             draw.ellipse([x+70,240,x+78,248], fill=(210,210,190))
             # door handle highlight
             draw.ellipse([x+72,242,x+76,246], fill=(255,255,255,120))
+
+    elif s == "bg forest":
+        # HQ fantasy forest: dark canopy, shafts of light, mossy floor
+        for y in range(H):
+            t = y/H
+            if t < 0.4:
+                tt = t/0.4
+                r = int(15+10*tt); g = int(28+15*tt); b = int(18+12*tt)
+            else:
+                tt = (t-0.4)/0.6
+                r = int(25+18*tt); g = int(43+22*tt); b = int(30+15*tt)
+            draw.line([(0,y),(W,y)], fill=(r,g,b))
+        # tree trunks
+        for tx in [100, 350, 700, 1050]:
+            draw.rectangle([tx-12, 100, tx+12, H-80], fill=(45,30,18))
+            draw.rectangle([tx-8, 120, tx+8, H-100], fill=(55,38,22))
+            # canopy
+            draw.ellipse([tx-80, 20, tx+80, 180], fill=(20,55,25,180))
+            draw.ellipse([tx-60, 50, tx+60, 150], fill=(28,65,30,160))
+        # light shafts
+        overlay = Image.new("RGBA", (W,H), (0,0,0,0))
+        od = ImageDraw.Draw(overlay)
+        for lx in [300, 800]:
+            for w in range(30):
+                a = int(8 - w*0.25)
+                od.polygon([(lx-w,0),(lx+w,0),(lx+w+60,H),(lx-w+60,H)], fill=(255,240,180,a))
+        img.alpha_composite(overlay, (0,0))
+    elif s == "bg castle":
+        # HQ fantasy castle: stone walls, torchlight, vaulted ceiling
+        for y in range(H):
+            t = y/H
+            r = int(35+15*t); g = int(30+12*t); b = int(40+18*t)
+            draw.line([(0,y),(W,y)], fill=(r,g,b))
+        # stone blocks
+        for by in range(0, 500, 40):
+            for bx in range(0, W, 80):
+                offset = 40 if (by // 40) % 2 else 0
+                draw.rectangle([bx+offset, by, bx+offset+78, by+38], outline=(50,45,55,100), width=1)
+        # archway
+        draw.arc([W//2-200, 200, W//2+200, 600], 180, 0, fill=(60,55,70), width=8)
+        draw.rectangle([W//2-200, 400, W//2-192, H-40], fill=(60,55,70))
+        draw.rectangle([W//2+192, 400, W//2+200, H-40], fill=(60,55,70))
+        # torch glow
+        overlay = Image.new("RGBA", (W,H), (0,0,0,0))
+        od = ImageDraw.Draw(overlay)
+        for tx in [200, W-200]:
+            od.ellipse([tx-60, 300, tx+60, 420], fill=(255,160,60,30))
+            od.ellipse([tx-30, 330, tx+30, 390], fill=(255,200,80,40))
+        img.alpha_composite(overlay, (0,0))
+    elif s == "bg mountain":
+        # HQ fantasy mountain: misty peaks, dramatic sky
+        for y in range(H):
+            t = y/H
+            if t < 0.45:
+                tt = t/0.45
+                r = int(70+50*tt); g = int(90+55*tt); b = int(140+40*tt)
+            else:
+                tt = (t-0.45)/0.55
+                r = int(120-40*tt); g = int(145-35*tt); b = int(180-60*tt)
+            draw.line([(0,y),(W,y)], fill=(r,g,b))
+        # peaks
+        draw.polygon([(200,280),(400,120),(600,280)], fill=(75,80,95))
+        draw.polygon([(500,300),(750,80),(1000,300)], fill=(65,70,85))
+        draw.polygon([(800,320),(1050,160),(1280,320)], fill=(85,90,100))
+        # snow caps
+        draw.polygon([(370,130),(400,120),(430,130)], fill=(220,230,245))
+        draw.polygon([(720,90),(750,80),(780,90)], fill=(210,220,240))
+        # mist
+        overlay = Image.new("RGBA", (W,H), (0,0,0,0))
+        od = ImageDraw.Draw(overlay)
+        for my in range(250, 350):
+            a = int(30 * (1 - abs(my-300)/50))
+            od.line([(0,my),(W,my)], fill=(200,210,230,a))
+        img.alpha_composite(overlay, (0,0))
+    elif s == "bg bridge":
+        # HQ sci-fi bridge: dark panels, holographic displays, ambient lights
+        for y in range(H):
+            t = y/H
+            r = int(12+8*t); g = int(18+12*t); b = int(35+20*t)
+            draw.line([(0,y),(W,y)], fill=(r,g,b))
+        # console panels
+        for px in [80, 320, 960, 1200]:
+            draw.rounded_rectangle([px, 280, px+120, 440], radius=5, fill=(15,25,50), outline=(0,140,200,120), width=2)
+            draw.rectangle([px+10, 290, px+110, 350], fill=(0,40,80,180))
+            draw.rectangle([px+10, 360, px+110, 430], fill=(0,30,60,160))
+        # central viewport
+        draw.rounded_rectangle([W//2-250, 30, W//2+250, 280], radius=10, fill=(5,15,40), outline=(0,100,180,150), width=3)
+        # stars in viewport
+        import random
+        random.seed(42)
+        for _ in range(30):
+            sx = random.randint(W//2-240, W//2+240)
+            sy = random.randint(40, 270)
+            draw.ellipse([sx-1,sy-1,sx+1,sy+1], fill=(200,220,255,180))
+        # ambient glow
+        overlay = Image.new("RGBA", (W,H), (0,0,0,0))
+        od = ImageDraw.Draw(overlay)
+        od.ellipse([W//2-120, 60, W//2+120, 250], fill=(0,80,140,20))
+        img.alpha_composite(overlay, (0,0))
+    elif s == "bg corridor":
+        # HQ sci-fi corridor: perspective lines, grating, ambient
+        for y in range(H):
+            t = y/H
+            r = int(18+10*t); g = int(24+14*t); b = int(45+22*t)
+            draw.line([(0,y),(W,y)], fill=(r,g,b))
+        # perspective walls
+        draw.polygon([(0,0),(350,180),(350,540),(0,H)], fill=(22,30,55))
+        draw.polygon([(W,0),(W-350,180),(W-350,540),(W,H)], fill=(22,30,55))
+        # floor grating
+        for gy in range(540, H, 8):
+            draw.line([(350,gy),(W-350,gy)], fill=(30,38,65,100))
+        # ceiling lights
+        for lx in range(450, W-400, 120):
+            draw.rectangle([lx, 175, lx+60, 180], fill=(60,180,220,120))
+            draw.ellipse([lx+10, 180, lx+50, 200], fill=(60,180,220,30))
+    elif s == "bg planet":
+        # HQ sci-fi planet: space view, planet surface, alien sky
+        for y in range(H):
+            t = y/H
+            if t < 0.5:
+                tt = t/0.5
+                r = int(5+15*tt); g = int(8+20*tt); b = int(25+35*tt)
+            else:
+                tt = (t-0.5)/0.5
+                r = int(20+30*tt); g = int(28+25*tt); b = int(60-10*tt)
+            draw.line([(0,y),(W,y)], fill=(r,g,b))
+        # planet curve
+        draw.ellipse([W//2-400, -200, W//2+400, 500], fill=(25,45,70))
+        draw.ellipse([W//2-380, -180, W//2+380, 480], fill=(30,55,80))
+        # atmosphere glow
+        overlay = Image.new("RGBA", (W,H), (0,0,0,0))
+        od = ImageDraw.Draw(overlay)
+        od.ellipse([W//2-420, -220, W//2+420, 520], outline=(60,140,200,60), width=8)
+        # alien vegetation dots
+        for gx in range(200, W-200, 40):
+            import random
+            random.seed(hash(str(gx)))
+            gy = 400 + random.randint(-20, 20)
+            draw.ellipse([gx-4, gy-4, gx+4, gy+4], fill=(40,120,60,120))
+        img.alpha_composite(overlay, (0,0))
+    elif s == "bg office":
+        # HQ mystery office: noir lighting, desk, venetian blinds
+        for y in range(H):
+            t = y/H
+            r = int(28+8*t); g = int(25+6*t); b = int(30+10*t)
+            draw.line([(0,y),(W,y)], fill=(r,g,b))
+        # desk
+        draw.rectangle([100, 420, W-100, 440], fill=(55,35,20))
+        draw.rectangle([120, 440, W-120, 580], fill=(45,28,15))
+        # desk items
+        draw.rectangle([200, 400, 350, 420], fill=(60,55,50))  # typewriter
+        draw.rectangle([900, 405, 1000, 420], fill=(40,35,30))  # papers
+        # blinds (noir light shafts)
+        overlay = Image.new("RGBA", (W,H), (0,0,0,0))
+        od = ImageDraw.Draw(overlay)
+        for by in range(0, 350, 25):
+            od.rectangle([0, by, W, by+12], fill=(0,0,0,60))
+        # light shaft through blinds
+        od.polygon([(800,0),(950,0),(1100,400),(900,400)], fill=(180,160,120,25))
+        img.alpha_composite(overlay, (0,0))
+    elif s == "bg manor":
+        # HQ mystery manor: dark wood, chandelier, curtains
+        for y in range(H):
+            t = y/H
+            r = int(32+10*t); g = int(28+8*t); b = int(22+6*t)
+            draw.line([(0,y),(W,y)], fill=(r,g,b))
+        # wood panels
+        for py in range(0, 400, 60):
+            draw.rectangle([0, py, W, py+58], outline=(45,35,25,80), width=1)
+        # chandelier
+        draw.line([(W//2,0),(W//2,80)], fill=(80,65,40))
+        draw.ellipse([W//2-60, 80, W//2+60, 100], outline=(100,80,50), width=2)
+        for cx in range(W//2-50, W//2+51, 25):
+            draw.line([(cx,100),(cx,120)], fill=(80,65,40))
+            draw.ellipse([cx-6, 118, cx+6, 130], fill=(255,220,120,120))
+        # curtains
+        draw.rectangle([0,0,120,H], fill=(80,25,25))
+        draw.rectangle([W-120,0,W,H], fill=(80,25,25))
+        # glow from chandelier
+        overlay = Image.new("RGBA", (W,H), (0,0,0,0))
+        od = ImageDraw.Draw(overlay)
+        od.ellipse([W//2-200, 60, W//2+200, 300], fill=(255,220,120,15))
+        img.alpha_composite(overlay, (0,0))
+    elif s == "bg garden":
+        # HQ mystery garden: overgrown, moonlit, misty
+        for y in range(H):
+            t = y/H
+            if t < 0.5:
+                tt = t/0.5
+                r = int(15+10*tt); g = int(20+15*tt); b = int(35+20*tt)
+            else:
+                tt = (t-0.5)/0.5
+                r = int(25+20*tt); g = int(35+25*tt); b = int(55-10*tt)
+            draw.line([(0,y),(W,y)], fill=(r,g,b))
+        # moon
+        draw.ellipse([900, 40, 1000, 140], fill=(200,210,230,150))
+        draw.ellipse([920, 35, 1020, 135], fill=(15,20,35))  # crescent shadow
+        # overgrown hedges
+        for hx in range(50, W, 180):
+            draw.ellipse([hx-40, 350, hx+40, 450], fill=(25,50,30,180))
+            draw.ellipse([hx-30, 340, hx+30, 420], fill=(30,60,35,160))
+        # path
+        draw.polygon([(W//2-40,H),(W//2+40,H),(W//2+20,400),(W//2-20,400)], fill=(50,45,38))
+        # mist
+        overlay = Image.new("RGBA", (W,H), (0,0,0,0))
+        od = ImageDraw.Draw(overlay)
+        for my in range(350, 450):
+            a = int(25 * (1 - abs(my-400)/50))
+            od.line([(0,my),(W,my)], fill=(150,160,180,a))
+        img.alpha_composite(overlay, (0,0))
+
     elif s == "black" or s is None:
         # HQ: dark with subtle radial glow, not flat
         for y in range(H):
