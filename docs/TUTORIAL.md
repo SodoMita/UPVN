@@ -1,34 +1,76 @@
-# UPVN Tutorial — Recreating the Ren'Py Tutorial in UPBGE
+# UPVN Tutorial — Building a Visual Novel in UPBGE
 
-This guide walks you through building a complete visual novel in **UPBGE** using
-the **UPVN** add-on, step by step, covering the same topics as the official
-Ren'Py Tutorial — but using the UPVN panel in Blender instead of writing `.rpy`
-files by hand.
+This guide walks you through building a complete visual novel in **UPBGE**
+using the **UPVN** engine. It covers the same topics as the official
+Ren'Py Tutorial — writing dialogue, scenes, choices, and branching.
 
 **What you need:**
 - UPBGE 0.50 (Blender 5.0.1) installed
 - The UPVN add-on (`dist/upvn_editor_addon_v0.7.1.zip`) installed and enabled
 - Engine shows **✓ Engine: OK** in the UPVN sidebar tab
 
-**What you'll learn:**
-1. Creating a project (one click)
-2. Writing dialogue (no typing `.rpy`)
-3. Adding images and scenes
-4. Positioning sprites
-5. Transitions (fade, dissolve, move)
-6. Music and sound effects
-7. Choices and variables (branching)
-8. Input and variable interpolation
-9. Testing and previewing
+---
+
+## Before You Start — Important Notes
+
+### Write `.rpy` files directly in Blender's Text Editor
+
+The UPVN panel has buttons like "Add Dialogue", "Add Scene", "Add Menu", etc.
+**These buttons have known issues with script file attachment and are not
+reliable for building games.** They may fail to append to the correct file,
+produce malformed output, or lose track of the current label.
+
+**Recommended workflow:** Write your `.rpy` script directly in Blender's
+**Text Editor** (the built-in code editor, not the UPVN panel). Open it from
+the editor type dropdown, create or open `script.rpy`, and type your story
+there. The syntax is simple — this tutorial teaches it step by step.
+
+The **Create Project** and **Quick Wizard** buttons do work correctly for
+creating an initial script file. Use them to get started, then edit the
+resulting `script.rpy` in the Text Editor.
+
+### UI Layout — Aspect Ratio
+
+The in-game UI (dialogue box, choice buttons, speaker name) is designed for
+**landscape widescreen** (1024×576 or 1280×720). If you use a different
+aspect ratio, elements may overlap — especially the menu choices and dialogue
+box. Stick to 16:9 or similar widescreen ratios.
+
+### Set Element Colors
+
+UPVN renders sprites and UI planes using `Object Color` (the color property on
+each object). To change how characters and UI look:
+
+1. In the 3D Viewport, select the object (e.g. `Sprite_center`, `Dialogue_Box`,
+   `choice_0`).
+2. In the **Object Properties** panel (orange square icon), find **Viewport
+   Display → Color**.
+3. Change the RGBA color to whatever you want.
+4. The engine reads `obj.color` at runtime and applies it via an Emission
+   shader — no material editing needed.
+
+Common objects to recolor:
+
+| Object | What it is | Default |
+|--------|-----------|---------|
+| `BG_Plane` | Background | light gray |
+| `Sprite_center` | Center character sprite | green |
+| `Sprite_left` | Left character sprite | green |
+| `Sprite_right` | Right character sprite | green |
+| `Dialogue_Box` | Dialogue background box | white 80% alpha |
+| `choice_0` .. `choice_8` | Menu choice buttons | white 80% alpha |
+| `Speaker_Text` | Speaker name text | character's color |
+| `Dialogue_Text` | Dialogue body text | dark gray |
+
+Character sprites inherit their color from the `Character(color=...)` definition
+in your script. The dialogue box and choice buttons use the defaults from
+`Object Color` unless overridden by a converted `gui.rpy`.
 
 ---
 
 ## Part 1 — Creating a New Game
 
-In Ren'Py, you click "Create New Project" in the launcher. In UPVN, you do the
-same thing from the Blender sidebar.
-
-### Steps
+### Using the Quick Wizard (recommended)
 
 1. **Open UPBGE.** Launch `blender` from your UPBGE install.
 
@@ -38,30 +80,61 @@ same thing from the Blender sidebar.
    ✓ Engine: OK (repo root)
    ```
 
-3. **Create your project.** In the **Project** section:
-   - Set **Script Path** to `//game/script.rpy` (the default is fine).
-   - Click **Create UPVN Project**.
-   
-   This creates `game/script.rpy` with a starter script using declarative
-   syntax. No Python coding needed.
-
-4. **Or use the Quick Wizard** for a complete branching story:
+3. **Use the Quick Wizard:**
    - Set a **Game Title** (e.g. "My First VN").
-   - Pick a **Theme** (school, fantasy, scifi, mystery).
+   - Pick a **Theme**: school, fantasy, scifi, or mystery.
    - Click **Quick VN Wizard**.
-   
-   The wizard creates a full game with characters, variables, menus, and
-   two endings — all in one click.
 
-### What was created
+   This creates `game/script.rpy` with a complete branching story — characters,
+   variables, menus, two endings, all working. You can play it immediately.
 
-The file `game/script.rpy` now contains something like:
+4. **Open the script.** Switch to Blender's **Text Editor**, open the dropdown,
+   and select `script.rpy`. This is where you'll make all changes.
 
+### Using Create Project (minimal starter)
+
+Click **Create UPVN Project** for a bare-minimum starter with one character
+and a single line of dialogue. Then build from there in the Text Editor.
+
+### Running from the command line
+
+You can also run any `.rpy` file headlessly (no UPBGE window needed):
+
+```bash
+python -m tools.run_headless game/script.rpy --mode full
 ```
-state:
-    affection: int = 0
-    route: str = "none"
 
+---
+
+## Part 2 — Writing Dialogue
+
+Open `script.rpy` in the Text Editor and write dialogue directly.
+
+### Narration (no speaker)
+
+A line with just a string produces narration — no character name shown:
+
+```renpy
+label start:
+    "The lecture hall was quiet."
+    "I couldn't concentrate on the professor's words."
+```
+
+### Spoken dialogue
+
+A character ID followed by a string shows the character's name and their line:
+
+```renpy
+label start:
+    e "Hi! I'm Eileen."
+    s "Nice to meet you!"
+```
+
+### Defining characters
+
+Before using a character ID, define it at the top of the file:
+
+```renpy
 character e:
     name "Eileen"
     color "#c8ffc8"
@@ -69,372 +142,258 @@ character e:
 character s:
     name "Sylvie"
     color "#c8c8ff"
-
-label start:
-    scene bg classroom with fade
-    show eileen at center with dissolve
-    e "Hello from Blender! This game was created with clicks, not code."
-    ...
 ```
 
-You can view this file in Blender's **Text Editor** — open `script.rpy` from
-the text dropdown. But you don't need to edit it by hand for most tasks.
-
----
-
-## Part 2 — Writing Dialogue
-
-In Ren'Py, you write dialogue as `e "Hello!"` in a text file. In UPVN, you
-use the **Add Dialogue** button.
-
-### The two kinds of dialogue
-
-| Kind | Ren'Py syntax | UPVN panel |
-|------|--------------|------------|
-| **Narration** (no speaker) | `"The sun was setting."` | Speaker field = *empty* |
-| **Spoken line** | `e "Hello, player!"` | Speaker = `e` |
-
-### Steps
-
-1. In the UPVN panel, find the **Dialogue** section.
-2. **Narration:** Leave **Speaker** empty. Type `"The lecture hall was quiet."`
-   in **Text**. Click **Add Dialogue**.
-3. **Spoken line:** Set **Speaker** to `e`. Type `"Hi! I'm Eileen."`.
-   Click **Add Dialogue**.
-
-Each click appends a new line to `game/script.rpy`. You never need to worry
-about indentation or quotes — the panel handles it.
-
-### Using characters
-
-Before writing dialogue for a character, you need to define them. If you used
-the **Create Project** button, `e` (Eileen) and `s` (Sylvie) are already
-defined. To add more:
-
-1. In the **Characters** section, set:
-   - **ID**: `l` (short name, used in dialogue)
-   - **Name**: `Lucy`
-   - **Color**: pick a reddish color
-2. Click **Add Character**.
-
-Now you can use `l` as the speaker in dialogue.
+The `color` sets the speaker name color in-game. Pick colors that contrast
+with your dialogue box background — light colors on dark boxes, dark colors
+on white boxes.
 
 ### Text formatting
-
-UPVN supports Ren'Py-style text tags in dialogue:
 
 | Tag | Effect | Example |
 |-----|--------|---------|
 | `{b}text{/b}` | **Bold** | `e "This is {b}important{/b}."` |
 | `{i}text{/i}` | *Italic* | `e "A {i}whispered{/i} word."` |
-| `[variable]` | Variable interpolation | `e "Affection is [affection]."` |
+| `[variable]` | Show variable value | `e "Affection is [affection]."` |
 
 ---
 
-## Part 3 — Adding Images (Scenes and Sprites)
+## Part 3 — Scenes and Sprites
 
-In Ren'Py, you place image files in an `images/` folder and use `scene` and
-`show` statements. In UPVN, the workflow is similar but uses the panel.
+### Changing the background
 
-### Backgrounds (scene)
+The `scene` statement replaces the entire screen with a background:
 
-The `scene` statement sets the background. In UPVN:
+```renpy
+label start:
+    scene bg classroom with fade
+    e "We're in the classroom now."
+    scene bg library with dissolve
+    e "Now we're in the library."
+```
 
-1. In the **Scene & Sprites** section, set **Background** to a name like
-   `bg classroom`.
-2. Optionally, click the folder icon next to **BG Image** to browse for a
-   `.png`/`.jpg` file. UPVN will copy it to `assets/backgrounds/`.
-3. Click **Add Scene**.
+Known background names and their headless renderer appearance:
 
-This appends `scene bg classroom` to your script.
+| Name | Description |
+|------|------------|
+| `bg classroom` | Warm room with windows and floor |
+| `bg library` / `bg lecturehall` | Dark atmospheric hall with light rays |
+| `bg meadow` | Green hills with clouds and flowers |
+| `bg forest` | Dark forest with tree trunks and light shafts |
+| `bg castle` | Stone walls with torchlight |
+| `bg mountain` | Mountain peaks with snow and mist |
+| `bg bridge` | Sci-fi bridge with holographic displays |
+| `bg corridor` | Sci-fi corridor with perspective lines |
+| `bg planet` | Space view with planet surface |
+| `bg office` | Noir office with venetian blinds |
+| `bg manor` | Dark wood paneling with chandelier |
+| `bg garden` | Moonlit garden with hedges and mist |
+| `black` | Dark background with subtle glow |
 
-**Without an image file**, UPVN renders the scene using its HQ headless
-renderer — you get a gradient background with details (windows, floor lines,
-etc.) based on the scene name. This is useful for prototyping.
+Without a matching image file, UPVN uses the headless renderer's procedural
+backgrounds. To use your own images, place them in `assets/backgrounds/` and
+declare them:
 
-### Sprites (show)
+```renpy
+image "bg classroom" = "backgrounds/bg_classroom.png"
+```
 
-The `show` statement places a character sprite on screen. In UPVN:
+### Showing character sprites
 
-1. Set **Asset** to the sprite name (e.g. `eileen` or `eileen happy`).
-2. Pick a **Position**: left, center, right, far_left, far_right.
-3. Set **With** to a transition: `move`, `dissolve`, or leave empty.
-4. Optionally, attach a sprite image via **Sprite Image**.
-5. Click **Add Show**.
+The `show` statement adds a character sprite:
+
+```renpy
+    scene bg classroom with fade
+    show eileen at center with dissolve
+    e "Hello!"
+    show sylvie at right with move
+    s "Hi there!"
+    show eileen happy at center with dissolve
+    e "I'm happy now!"
+```
+
+- The sprite **tag** (first word, e.g. `eileen`) determines which slot it
+  occupies. Showing `eileen happy` replaces the previous `eileen` sprite.
+- **Position**: `left`, `center`, `right`, `far_left`, `far_right`.
+- **Transition**: `dissolve`, `move`, or omit for instant.
 
 ### Hiding sprites
 
-To remove a character from the scene:
+```renpy
+    hide sylvie with dissolve
+```
 
-1. Set **Asset** to the character's tag (e.g. `eileen`).
-2. In the panel, use **Add Hide** (or manually write `hide eileen`).
-
-In practice, `scene` clears everything and `show` replaces the same tag, so
-`hide` is rarely needed.
+Usually you don't need `hide` — `scene` clears everything, and `show` replaces
+the same tag.
 
 ---
 
-## Part 4 — Positioning Images
+## Part 4 — Transitions
 
-Ren'Py uses `left`, `center`, `right` as built-in positions, plus custom
-transforms with `xalign`/`yalign`. UPVN supports both.
+Transitions smooth scene changes. Add them with `with`:
 
-### Built-in positions
+```renpy
+    scene bg classroom with fade
+    # fade: fade to black, then fade in
 
-When you click **Add Show**, the **Position** dropdown offers:
+    scene bg library with dissolve
+    # dissolve: cross-fade between old and new
 
-| Position | Effect |
-|----------|--------|
-| `left` | Left third of screen |
-| `center` | Center |
-| `right` | Right third |
-| `far_left` | Far left edge |
-| `far_right` | Far right edge |
+    show eileen at right with move
+    # move: slide sprite from old position to new
 
-### Example: moving a character
-
+    scene bg classroom
+    # no transition: instant change
 ```
-show eileen at center
-e "I'm in the center."
-show eileen at right with move
-e "Now I moved to the right."
-```
-
-To create this in the panel:
-1. **Add Show**: Asset=`eileen`, Position=`center`. Click.
-2. **Add Dialogue**: Speaker=`e`, Text=`"I'm in the center."`. Click.
-3. **Add Show**: Asset=`eileen`, Position=`right`, With=`move`. Click.
-4. **Add Dialogue**: Speaker=`e`, Text=`"Now I moved to the right."`. Click.
-
----
-
-## Part 5 — Transitions
-
-In Ren'Py, you write `scene bg cave with dissolve`. In UPVN, transitions are
-built into the Scene and Show operators.
-
-### Available transitions
-
-| Transition | Effect |
-|------------|--------|
-| `fade` | Fade to black, then fade in |
-| `dissolve` | Cross-fade between old and new scene |
-| `move` | Slide sprite from old position to new |
-| `None` | Instant change (no transition) |
-
-### Adding transitions
-
-**When changing scenes:**
-1. In **Scene & Sprites**, set **Background** and optionally fill **With**
-   (e.g. `dissolve`).
-2. Click **Add Scene**.
-3. This generates: `scene bg library with dissolve`
-
-**When showing/moving sprites:**
-1. Set **Asset**, **Position**, and **With** (e.g. `move`).
-2. Click **Add Show**.
-3. This generates: `show eileen at right with move`
 
 ### Camera zoom (UPVN extension)
 
-UPVN adds camera zoom transitions not in basic Ren'Py:
+```renpy
+    camera zoom 1.2 duration 0.8 with ease
+```
 
-1. In the **Extras** section, set **Zoom** (e.g. `1.2`), **Duration** (e.g.
-   `1.0`), and **Easing** (ease, linear, easein, easeout).
-2. Click **Add Camera Zoom**.
-
-This generates: `camera zoom 1.2 duration 1.0 with ease`
+This zooms the camera in smoothly. `duration` is in seconds. Easing options:
+`linear`, `ease`, `easein`, `easeout`.
 
 ---
 
-## Part 6 — Music and Sound Effects
+## Part 5 — Music and Sound Effects
 
-Ren'Py uses `play music`, `stop music`, `play sound`. UPVN has buttons for
-these.
+```renpy
+    play music "theme"
+    # starts looping background music
 
-### Background music
+    play music "new_song" fadein 1.0
+    # cross-fade to new song over 1 second
 
-1. In the **Extras** section, set **Audio Asset** to a name (e.g. `theme`).
-2. Optionally, click the folder icon to browse for an audio file
-   (`.ogg`, `.opus`, `.mp3`). UPVN copies it to `assets/audio/`.
-3. Click **Add Music/Sound**.
+    stop music
+    # stops background music
 
-This generates: `play music "theme"`
+    play sound "click.ogg"
+    # plays a sound effect once
+```
 
-### Stopping music
+Place audio files in `assets/audio/` and declare them:
 
-To stop music, add a line manually or use the **Add Dialogue** with the script
-text editor to write `stop music` in the appropriate label.
-
-### Sound effects
-
-Sound effects use `play sound` instead of `play music`. In UPVN, you can
-manually write `play sound "click.ogg"` in the script, or use the panel's
-audio asset browser.
+```renpy
+audio theme = "audio/theme.ogg"
+audio click = "audio/click.ogg"
+```
 
 ---
 
-## Part 7 — Choices and Variables (Branching)
+## Part 6 — Choices and Variables
 
-This is where visual novels get interesting. In Ren'Py, you write `menu:` blocks.
-In UPVN, the panel generates them for you.
+### Making choices
 
-### Adding a menu (choice)
+The `menu` statement presents choices to the player:
 
-1. In the **Menu (Branching)** section, fill in:
-   - **Menu Caption**: `"What will you do?"`
-   - **Choice 1**: `"Help Eileen"` → **Jump 1**: `help_eileen`
-   - **Choice 2**: `"Explore alone"` → **Jump 2**: `explore_alone`
-2. Click **Add Menu**.
+```renpy
+    e "Do you want to help me?"
+    menu:
+        "What will you do?"
+        choice "Yes, I'll help":
+            jump help_eileen
+        choice "No, sorry":
+            jump refuse
 
-This generates:
+label help_eileen:
+    e "Thank you so much!"
+    jump done
+
+label refuse:
+    e "I understand..."
+    jump done
+
+label done:
+    e "Let's continue."
 ```
-menu:
-    "What will you do?"
-    choice "Help Eileen":
-        jump help_eileen
-    choice "Explore alone":
-        jump explore_alone
-```
 
-UPVN automatically creates placeholder labels for the jump targets so they
-always exist. You fill them in later with real content.
+Each choice jumps to a label. The engine creates placeholder labels if they
+don't exist, but you should define them with real content.
 
-### Adding variables (state)
+### State variables
 
-In Ren'Py, you write `$ affection += 1`. In UPVN, you use declarative `set`:
+Define variables in a `state:` block at the top of your script:
 
-1. In the **Variables — State** section:
-   - **Variable**: `affection`
-   - **Type**: `int`
-   - **Value**: `0`
-2. Click **Add Variable**.
-
-This adds to the `state:` block:
-```
+```renpy
 state:
     affection: int = 0
+    has_book: bool = False
+    route: str = "none"
 ```
 
 ### Changing variables
 
-1. In the **Logic — No Python Needed** section:
-   - **Set Variable**: `affection`
-   - **Op**: `+=`
-   - **Expression**: `1`
-2. Click **Add Set**.
+Use `set` to modify variables (instead of Python's `$`):
 
-This generates: `set affection += 1`
+```renpy
+    set affection += 1
+    set has_book = True
+    set route = "help"
+```
 
 ### Conditional branching
 
-1. Set **If Condition** to `affection >= 3`.
-2. Click **Add If**.
-3. Add dialogue for the true case.
-4. Click **Add Else**.
-5. Add dialogue for the false case.
-6. Click **Add End**.
+Use `if` / `elif` / `else` / `end` to branch on variables:
 
-This generates:
+```renpy
+    if affection >= 3:
+        e "You've been so kind to me!"
+        jump good_ending
+    elif affection >= 1:
+        e "We're friends, at least."
+        jump neutral_ending
+    else:
+        e "I barely know you..."
+        jump bad_ending
+    end
 ```
-if affection >= 3:
-    e "You've been so kind!"
-else:
-    e "Maybe next time."
-end
-```
 
-### Full branching example (using the panel)
-
-Here's how to recreate the Ren'Py Tutorial's choice example entirely from the
-panel:
-
-1. **Add Dialogue**: Speaker=`e`, Text=`"Do you like visual novels with choices?"`
-2. **Add Menu**: Caption=`"What do you prefer?"`,
-   Choice1=`"Yes, I do."` → Jump1=`choice_yes`,
-   Choice2=`"No, I don't."` → Jump2=`choice_no`
-3. **Add Label**: Label=`choice_yes`
-4. **Add Set**: Variable=`liked_choices`, Op=`=`, Expr=`True`
-5. **Add Dialogue**: Speaker=`e`, Text=`"Great! Choices make games interactive."`
-6. **Add Jump**: Target=`choice_done`
-7. **Add Label**: Label=`choice_no`
-8. **Add Set**: Variable=`liked_choices`, Op=`=`, Expr=`False`
-9. **Add Dialogue**: Speaker=`e`, Text=`"Kinetic novels are fun too!"`
-10. **Add Jump**: Target=`choice_done`
-11. **Add Label**: Label=`choice_done`
-12. **Add If**: Condition=`liked_choices`
-13. **Add Dialogue**: Speaker=`e`, Text=`"I remember you like choices."`
-14. **Add Else**
-15. **Add Dialogue**: Speaker=`e`, Text=`"I remember you prefer kinetic novels."`
-16. **Add End**
+Note: UPVN uses `end` to close `if` blocks (instead of Ren'Py's implicit
+indentation-based blocks).
 
 ---
 
-## Part 8 — Input and Variable Interpolation
+## Part 7 — Variable Interpolation
 
-Ren'Py lets you show variable values in dialogue using `[variable]`. UPVN
-supports this natively.
+Show variable values in dialogue with `[variable]`:
 
-### Showing variable values
-
-Write dialogue text with `[variable]` syntax:
-
-```
-e "Your affection level is [affection]."
-e "Current route: [route]."
+```renpy
+    e "Your affection is [affection]."
+    e "Current route: [route]."
+    e "Book status: [has_book]."
 ```
 
-The engine replaces `[affection]` with the current value of the `affection`
-variable at runtime.
-
-### Setting variables from choices
-
-Combine menus with `set` to make choices affect the story:
-
-```
-menu:
-    "Give her the book?"
-    choice "Yes":
-        jump give_book
-    choice "No":
-        jump refuse
-
-label give_book:
-    set has_book = True
-    set affection += 2
-    e "Thank you! [affection] affection now."
-    ...
-
-label refuse:
-    set affection -= 1
-    e "Oh... [affection] affection now."
-    ...
-```
+The engine replaces `[affection]` with the current value at runtime.
 
 ---
 
-## Part 9 — Testing and Previewing
+## Part 8 — Setup Scene (UPBGE only)
 
-### Headless preview (no UPBGE needed)
+When you're ready to play in UPBGE (not just headless):
 
-From the command line:
+1. Open your `.blend` file.
+2. In the UPVN panel, click **Setup Scene**.
+3. This creates all the objects the engine needs: cameras, planes, text
+   objects, materials, logic bricks.
+4. Press **P** to play.
 
-```bash
-# Run the full game headlessly
-python -m tools.run_headless game/script.rpy --mode full
+### After Setup Scene — Recolor elements
 
-# Run with specific choices
-python -m tools.run_headless game/script.rpy --mode full --choices 0 1
+The Setup Scene creates objects with default colors. To customize:
 
-# Generate a preview screenshot
-python -m tools.run_headless game/script.rpy --mode full --json
-```
+1. Select `Dialogue_Box` in the outliner → Object Properties → Color →
+   set to `(1.0, 1.0, 1.0, 0.8)` for white or pick your own.
+2. Select `choice_0` through `choice_8` → same process.
+3. Select `BG_Plane` → set to your preferred background tint.
 
-### In-UPBGE preview
+The engine reads `obj.color` every frame, so changes take effect immediately
+when you press P.
 
-1. In the UPVN panel, click **Validate** to check for script errors.
-2. Click **Preview Screenshot** to generate a headless screenshot.
-3. Press **P** in the 3D Viewport to play the game in UPBGE.
+---
+
+## Part 9 — Playing and Testing
 
 ### Controls (in-game)
 
@@ -452,106 +411,136 @@ python -m tools.run_headless game/script.rpy --mode full --json
 | `F1` | Debug state dump |
 | `F12` | Screenshot |
 
----
+### Headless testing
 
-## Full Example: The Ren'Py Tutorial's "The Question" in UPVN
+```bash
+# Run the full game headlessly
+python -m tools.run_headless game/script.rpy --mode full
 
-Here's how to recreate the core of Ren'Py's "The Question" example using only
-the UPVN panel (no `.rpy` typing):
+# Run with specific choices
+python -m tools.run_headless game/script.rpy --mode full --choices 0 1
 
-### 1. Create project
-- Click **Create UPVN Project**
+# JSON output for automation
+python -m tools.run_headless game/script.rpy --mode full --json
+```
 
-### 2. Define characters
-- **Add Character**: ID=`me`, Name=`Me`, Color=`#ffffff`
-- **Add Character**: ID=`s`, Name=`Sylvie`, Color=`#c8c8ff`
+### Running Ren'Py SDK projects directly
 
-### 3. Write the opening
-- **Add Scene**: Background=`bg lecturehall`, With=`fade`
-- **Add Dialogue**: (narration) `"It's only when I hear the sounds of shuffling
-  feet..."`
-- **Add Dialogue**: (narration) `"Professor Eileen's lectures are usually
-  interesting, but today I just couldn't concentrate."`
-- **Add Scene**: Background=`bg uni`, With=`fade`
-- **Add Dialogue**: (narration) `"When we come out of the university, I spot her
-  right away."`
-- **Add Show**: Asset=`sylvie`, Position=`center`, With=`dissolve`
-
-### 4. The first choice
-- **Add Dialogue**: Speaker=`s`, Text=`"Hey... do you have a minute?"`
-- **Add Menu**: Caption=`"How do you respond?"`,
-  Choice1=`"Sure, what's up?"` → Jump1=`sure`,
-  Choice2=`"Sorry, I'm busy."` → Jump2=`busy`
-
-### 5. The "sure" branch
-- **Add Label**: Label=`sure`
-- **Add Set**: Variable=`affection`, Op=`=`, Expr=`1`
-- **Add Dialogue**: Speaker=`s`, Text=`"I wanted to ask you something..."`
-- **Add Jump**: Target=`proposal`
-
-### 6. The "busy" branch
-- **Add Label**: Label=`busy`
-- **Add Dialogue**: Speaker=`s`, Text=`"Oh... okay. Maybe later."`
-- **Add Set**: Variable=`affection`, Op=`=`, Expr=`0`
-- **Add Jump**: Target=`proposal`
-
-### 7. The proposal and ending
-- **Add Label**: Label=`proposal`
-- **Add Dialogue**: Speaker=`s`, Text=`"Will you marry me?"`
-- **Add If**: Condition=`affection >= 1`
-- **Add Dialogue**: Speaker=`me`, Text=`"Of course I will!"`
-- **Add Dialogue**: (narration) `"{b}Good Ending{/b}."`
-- **Add Else**
-- **Add Dialogue**: Speaker=`me`, Text=`"I need time to think..."`
-- **Add Dialogue**: (narration) `"{b}Neutral Ending{/b}."`
-- **Add End**
-- **Add Return**
-
-### 8. Play it
-- Click **Validate** (should say OK)
-- Click **Preview Screenshot** to see the first frame
-- Press **P** to play through in UPBGE
-
----
-
-## Quick Reference — UPVN Panel → Ren'Py Syntax
-
-| UPVN Panel Action | Generated Ren'Py syntax |
-|-------------------|------------------------|
-| Create Project | `character e:` / `label start:` |
-| Add Character | `character l:` / `name "Lucy"` / `color "#ffcccc"` |
-| Add Variable | `state:` / `affection: int = 0` |
-| Add Scene | `scene bg classroom with dissolve` |
-| Add Show | `show eileen at right with move` |
-| Add Hide | `hide eileen with dissolve` |
-| Add Dialogue (narration) | `"The sun was setting."` |
-| Add Dialogue (speaker) | `e "Hello, player!"` |
-| Add Menu | `menu:` / `choice "Option A":` / `jump label_a` |
-| Add Set | `set affection += 1` |
-| Add If / Else / End | `if affection >= 3:` / `else:` / `end` |
-| Add Jump | `jump target_label` |
-| Add Label | `label new_scene:` |
-| Add Pause | `pause 0.5` |
-| Add Music | `play music "theme"` |
-| Add Camera Zoom | `camera zoom 1.2 duration 1.0 with ease` |
-
----
-
-## Running Ren'Py SDK Projects Directly
-
-UPVN can also run existing Ren'Py projects without modification:
+UPVN can run existing Ren'Py projects without copying or conversion:
 
 ```bash
 # The Question (Ren'Py's example game)
 python -m tools.run_headless ~/renpy-8.5.1-sdk/the_question/game/script.rpy \
     --mode full --choices 0 0
 
-# The Ren'Py Tutorial (uses --compat for init python blocks)
+# The Ren'Py Tutorial (needs --compat for init python blocks)
 python -m tools.run_headless ~/renpy-8.5.1-sdk/tutorial/game/script.rpy \
     --mode full --compat
 ```
 
-No copying, no conversion — UPVN reads the `.rpy` files in place from the
-Ren'Py SDK directory. The `--compat` flag is needed for projects that use
-Ren'Py-specific Python modules (`ui`, `renpy.store`, etc.) — init python errors
-are collected rather than fatal.
+The `--compat` flag is needed for projects that use Ren'Py-specific Python
+modules (`ui`, `renpy.store`, etc.). Init python errors are collected rather
+than fatal, so the story still plays.
+
+---
+
+## Quick Reference
+
+| What you want | Script syntax |
+|---------------|--------------|
+| Background | `scene bg classroom with fade` |
+| Show character | `show eileen at center with dissolve` |
+| Hide character | `hide eileen with dissolve` |
+| Narration | `"The sun was setting."` |
+| Spoken line | `e "Hello, player!"` |
+| Define character | `character e:` / `name "Eileen"` / `color "#c8ffc8"` |
+| Define variable | `state:` / `affection: int = 0` |
+| Change variable | `set affection += 1` |
+| Choice menu | `menu:` / `choice "Option A":` / `jump label_a` |
+| Conditional | `if affection >= 3:` / `else:` / `end` |
+| Jump to label | `jump target_label` |
+| Define label | `label new_scene:` |
+| Pause | `pause 0.5` |
+| Play music | `play music "theme"` |
+| Camera zoom | `camera zoom 1.2 duration 1.0 with ease` |
+| Show variable | `e "Value is [affection]."` |
+
+---
+
+## Full Example: "The Question" Recreation
+
+Here's a complete script you can paste into `script.rpy` in the Text Editor.
+It recreates the core of Ren'Py's "The Question" example:
+
+```renpy
+character me:
+    name "Me"
+    color "#ffffff"
+
+character s:
+    name "Sylvie"
+    color "#c8c8ff"
+
+state:
+    affection: int = 0
+
+label start:
+    scene bg lecturehall with fade
+    "It's only when I hear the sounds of shuffling feet that I realize
+     the lecture is over."
+    "Professor Eileen's lectures are usually interesting, but today
+     I just couldn't concentrate."
+    scene bg uni with fade
+    "When we come out of the university, I spot her right away."
+    show sylvie at center with dissolve
+    "I've known Sylvie since we were kids."
+    s "Hey... do you have a minute?"
+    menu:
+        "How do you respond?"
+        choice "Sure, what's up?":
+            jump sure
+        choice "Sorry, I'm busy.":
+
+label sure:
+    set affection = 1
+    s "I wanted to ask you something important."
+    s "Will you marry me?"
+    menu:
+        choice "Of course!":
+            jump marry
+        choice "I need time...":
+            jump later
+
+label busy:
+    set affection = 0
+    s "Oh... okay. Maybe later then."
+    "She looks disappointed as she walks away."
+    jump end_scene
+
+label marry:
+    set affection += 2
+    show sylvie happy at center with dissolve
+    s "Really? You mean it?"
+    me "Of course I will!"
+    "We get married shortly after that."
+    "{b}Good Ending{/b}."
+    return
+
+label later:
+    s "I understand. Take your time."
+    "You part ways, but the question lingers."
+    "{b}Neutral Ending{/b}."
+    return
+
+label end_scene:
+    "Sylvie walks away. You wonder what she wanted to ask."
+    "{b}Alone Ending{/b}."
+    return
+```
+
+### Play it
+
+1. Save the script in Blender's Text Editor.
+2. Click **Setup Scene** in the UPVN panel (first time only).
+3. Recolor elements if desired (see Part 8).
+4. Press **P** to play.
