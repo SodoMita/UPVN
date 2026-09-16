@@ -269,6 +269,8 @@
 
 ## NEXT_STEPS (for next turn)
 
+- **M29 Polish & Automation DONE 2026-09-16 (v0.7.2)** — 4 theme-aware wizards (school/fantasy/scifi/mystery), 9 HQ backgrounds for headless renderer, one-click sway+pixman launcher (tools/play_game.sh), standalone game creator with --preview (tools/upvn_game_creator.py), Ren'Py 8.5.1 SDK validation (The Question: 92 events, both paths validated), 403 passed / 30 skipped, 6 pushes to dev-improve-usability.
+- **Next candidate**: M30 — draw screens in UPBGE 3D scene (call screen visible in-game); interactive playtest on real UPBGE 0.50 with display; publish dist zip + addon zip as GitHub release v0.7.2; third corpus regression (LearnToCodeRPG + tutorial).
 - M17 Blender UX hardening DONE 2026-09-08 — add-on v0.6 (engine discovery: repo/module-dir/zipimport/prefs/blend-file; status rows; Locate/Check/Bundle; friendly reports), one-click Setup Scene (data-API scene + official bpy.ops.logic.* bricks in UI), frontend reads VNController.script_path + sys.path bootstrap, make_template regenerates 110KB template (was brickless 96KB), tools/package_addon.py → dist/upvn_editor_addon_v0.6.0.zip self-contained (zipimport-verified in clean subprocess), tests/test_m17_addon_init.py 5 tests, verified in real UPBGE 0.50 headless (libpulse stub): engine OK/register OK/scene OK; 113 passed 2 skipped
 - M23 screens-draw DONE 2026-09-09 — headless renderer paints M22 widget trees into golden traces (zorder + modal dim); scope overlay makes screen params visible in `if`; 257 passed
 - M25 Usability Stabilization Freeze DONE 2026-09-10 — BUG-001..011 fixed (see BUGS.md):
