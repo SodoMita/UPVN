@@ -554,18 +554,85 @@ for m in result['missing']:
 "
 ```
 
-### After setup — Recolor elements
+### After setup — Customize the layout
 
-Once the scene is built (by either method), customize colors:
+Once the scene is built (by either method), you can customize everything.
 
+**Recolor elements:**
 1. Select `Dialogue_Box` → Object Properties → Viewport Display → Color →
    set to your preferred dialogue box color.
 2. Select `choice_0` through `choice_8` → same process.
 3. Select `BG_Plane` → set to your preferred background tint.
-4. Select sprite planes → tint them to match your characters.
 
-The engine reads `obj.color` every frame, so changes take effect immediately
-when you press P.
+The engine reads `obj.color` every frame, so changes take effect immediately.
+
+**Lock individual objects for custom layout:**
+
+By default, the engine repositions and rescales every UI object every frame.
+To prevent this for a specific object — so you can use Blender drivers,
+constraints, manual positioning, or your own Python logic:
+
+1. Select the object (e.g. `Dialogue_Box`, `choice_0`, `Speaker_Text`).
+2. In **Object Properties → Custom Properties**, add a new property:
+   - Name: `upvn_layout_custom`
+   - Type: Boolean
+   - Value: `True`
+3. Now the engine will **not** override this object's position, scale, or color.
+   You're free to:
+   - Move it manually
+   - Add a **Copy Location** or **Copy Scale** constraint
+   - Add a **Driver** (e.g. `var * aspect_ratio` to make it responsive)
+   - Control it from a Python logic brick or node
+
+The engine still updates the **text content** and **visibility** of the object
+(e.g. it will still set what the dialogue text says, and show/hide it). Only
+the layout (position, scale, color) is skipped.
+
+**What still works on locked objects:**
+- Text content is updated (dialogue, speaker name, choice text)
+- Visibility is toggled (show/hide based on game state)
+- Font color for text objects is still set by the engine
+
+**What is skipped on locked objects:**
+- Position (`worldPosition` / `location`)
+- Scale (`worldScale` / `localScale`)
+- Object color (`obj.color`)
+
+**Example: responsive dialogue box using a driver**
+
+To make the dialogue box scale with the viewport aspect ratio:
+
+1. Select `Dialogue_Box`. Add `upvn_layout_custom = True`.
+2. In the **Drivers** editor (or right-click Scale X → Add Driver):
+   - Expression: `7.5 * (bge.render.getWindowWidth() / bge.render.getWindowHeight()) / (16/9)`
+3. Now the box stretches to fill the screen regardless of window size.
+
+**Example: choices following a custom layout using constraints**
+
+1. Select `choice_0`. Add `upvn_layout_custom = True`.
+2. Add a **Copy Location** constraint targeting an Empty you place wherever
+   you want the first choice.
+3. Add **Copy Location** with offset for `choice_1`, `choice_2`, etc.
+4. Now you control the entire choice layout from the position of your Empty
+   objects — the engine won't fight you.
+
+**Example: all objects unlocked (full custom)**
+
+To unlock every UI object at once, run this in Blender's Python console:
+
+```python
+import bpy
+for ob in bpy.data.objects:
+    if ob.name in ('Dialogue_Box', 'Speaker_Text', 'Dialogue_Text',
+                   'choice_0', 'choice_1', 'choice_2', 'choice_3',
+                   'choice_4', 'choice_5', 'choice_6', 'choice_7',
+                   'choice_8', 'History_Box', 'History_Text', 'Rewind_Text',
+                   'BG_Plane'):
+        ob["upvn_layout_custom"] = True
+```
+
+Now the engine only updates text content and visibility — you have full
+control over positioning, scaling, and coloring via Blender's tools.
 
 ---
 
