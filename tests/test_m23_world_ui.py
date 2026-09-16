@@ -56,7 +56,8 @@ def test_build_menu_payload_hides_unused():
     ev = {"type": "menu", "caption": "Pick",
           "choices": [{"id": "a", "text": "Ask"}, {"id": "b", "text": "Wait"}]}
     p = build_world_ui(ev, n_choices=9)
-    assert p["choices"][0]["visible"] and p["choices"][0]["text"].startswith("1. Ask")
+    # M28 Ren'Py identical: no numbering, just text (Ren'Py choice buttons show raw text)
+    assert p["choices"][0]["visible"] and p["choices"][0]["text"] == "Ask"
     assert p["choices"][1]["visible"]
     assert not p["choices"][2]["visible"]
     assert len(p["choices"]) == 9
@@ -73,7 +74,8 @@ def test_apply_world_ui_writes_fonts_and_visibility():
           "choices": [{"id": "a", "text": "Yes"}]}
     apply_world_ui(scene.get, build_world_ui(ev))
     assert scene["choice_0"].visible is True
-    assert scene["choice_0_text"].text.startswith("1. Yes")
+    # M28 Ren'Py identical: raw text, no numbering
+    assert scene["choice_0_text"].text == "Yes"
     assert scene["choice_1"].visible is False
     assert "Go?" in scene["Dialogue_Text"].text
 
@@ -93,6 +95,7 @@ def test_pointer_click_index():
 
 
 def test_layout_ui_ndc_stable_across_zoom():
+    # M28 Ren'Py identical: dialogue box at fixed DIALOGUE_LOCATION, not NDC-scaled
     class O:
         def __init__(self):
             self.worldPosition = (0, 0, 0)
@@ -104,13 +107,13 @@ def test_layout_ui_ndc_stable_across_zoom():
                               "choice_0", "choice_0_text")}
     payload = build_world_ui({"type": "menu", "caption": "Go?",
                               "choices": [{"id": 0, "text": "Yes"}]})
+    from engine.render.contract import DIALOGUE_LOCATION
     layout_screen_ui(scene.get, payload, ortho=15.0)
     z15 = scene["Dialogue_Box"].worldPosition[2]
     layout_screen_ui(scene.get, payload, ortho=10.0)
     z10 = scene["Dialogue_Box"].worldPosition[2]
-    ndc15 = z15 / (15.0 / 2)
-    ndc10 = z10 / (10.0 / 2)
-    assert abs(ndc15 - ndc10) < 1e-6
+    # Fixed Ren'Py position, should be identical across ortho
+    assert z15 == z10 == DIALOGUE_LOCATION[2]
 
 
 def test_frontend_and_addon_are_3d_unlit():

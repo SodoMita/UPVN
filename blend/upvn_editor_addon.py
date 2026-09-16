@@ -1473,13 +1473,13 @@ except Exception:
             pass
         return img
 
-    def _rewrite_unlit(mat, color, _b=None, tex_capable=False, hq=False):
-        """Emission-only, texture-free — with HQ improvements (M27) + M28 error logging.
-        
-        M27 HQ: slightly higher emission strength for better visibility,
-        better handling of alpha, and improved node graph for edge glow
-        on choice buttons when hq=True.
-        M28: logs material setup failures instead of silent no-op (was BUG M26b: black objects).
+    def _rewrite_unlit(mat, color, _b=None, tex_capable=False, hq=False, renpy_parity=False):
+        """Emission-only, texture-free — Ren'Py identical (M28) + HQ + error logging.
+
+        M28 Ren'Py parity: white semi-transparent textbox (1,1,1,0.8) like textbox.png,
+        choice idle white, hover blue #00189d, flat text no extrusion, no shadow.
+        Alpha blending: when color alpha <1, set blend_method BLEND and transparent shadows.
+        M27 HQ: edge glow when hq=True, but disabled for Ren'Py parity (flat).
         """
         try:
             from engine.render.contract import TEX_NODE_NAME, MIX_NODE_NAME
@@ -1528,7 +1528,8 @@ except Exception:
             except Exception as e:
                 print(f"[UPVN] _rewrite_unlit: tex capable setup failed for {mat.name}: {e}")
 
-        if hq:
+        # Ren'Py parity: disable HQ fresnel for flat UI (Ren'Py has no edge glow)
+        if hq and not renpy_parity:
             try:
                 fresnel = nt.nodes.new("ShaderNodeFresnel")
                 fresnel.inputs[0].default_value = 1.4
@@ -1555,7 +1556,8 @@ except Exception:
 
         try:
             em.inputs["Color"].default_value = color
-            em.inputs["Strength"].default_value = 1.2 if hq else 1.0
+            # Ren'Py: flat white, strength 1.0, not 1.2 glow
+            em.inputs["Strength"].default_value = 1.0 if renpy_parity else (1.2 if hq else 1.0)
         except Exception as e:
             print(f"[UPVN] _rewrite_unlit: emission inputs failed for {mat.name}: {e}")
         if src_color is not None:
@@ -1567,7 +1569,21 @@ except Exception:
             nt.links.new(em.outputs[0], out.inputs[0])
         except Exception as e:
             print(f"[UPVN] _rewrite_unlit: output link failed for {mat.name}: {e}")
-        for attr, val in (("blend_method", "OPAQUE"), ("shadow_method", "NONE"),
+        # Alpha handling: Ren'Py textbox.png is 80% opaque, so need BLEND
+        is_transparent = False
+        try:
+            if len(color) >= 4 and float(color[3]) < 0.99:
+                is_transparent = True
+        except Exception:
+            pass
+        # For Ren'Py identical UI, always allow transparency for white boxes
+        if renpy_parity or is_transparent or "UI" in mat.name or "Choice" in mat.name or "MAUI" in mat.name or "MAChoice" in mat.name:
+            blend_mode = "BLEND"
+            shadow_mode = "NONE"
+        else:
+            blend_mode = "OPAQUE"
+            shadow_mode = "NONE"
+        for attr, val in (("blend_method", blend_mode), ("shadow_method", shadow_mode),
                           ("use_backface_culling", False)):
             try:
                 setattr(mat, attr, val)
@@ -1653,6 +1669,62 @@ except Exception:
         obj.location = loc
         obj.rotation_euler = rot
         return obj
+
+    def _load_adaptive_for_blend(blend_dir=None):
+        """M28 Adaptive: try to load upvn_gui.json from project to get real colors/metrics."""
+        try:
+            import json as _json
+            search_roots = []
+            if blend_dir:
+                search_roots.append(pathlib.Path(blend_dir))
+                search_roots.append(pathlib.Path(blend_dir).parent)
+                search_roots.append(pathlib.Path(blend_dir).parent / "game")
+            try:
+                here = pathlib.Path(__file__).resolve().parent
+                search_roots.append(here.parent)
+                search_roots.append(here.parent / "game")
+                search_roots.append(here.parent / "assets")
+            except Exception:
+                pass
+            for root in list(search_roots):
+                for name in ["upvn_gui.json", "gui_config.json", "assets/gui_config.json", "game/upvn_gui.json", "assets/gui/upvn_gui.json"]:
+                    cand = pathlib.Path(root) / name
+                    if cand.exists():
+                        try:
+                            data = _json.loads(cand.read_text(encoding="utf-8"))
+                            print(f"[UPVN] Adaptive blend: loaded {cand}")
+                            return data
+                        except Exception as e:
+                            print(f"[UPVN] Adaptive blend: failed {cand}: {e}")
+            try:
+                from engine.render.gui_parser import find_and_parse_gui
+                for root in search_roots:
+                    try:
+                        cfg = find_and_parse_gui(root)
+                        if cfg and cfg.get("source") != "generic_defaults":
+                            print(f"[UPVN] Adaptive blend: parsed gui.rpy from {root}")
+                            return cfg
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+        except Exception as e:
+            print(f"[UPVN] Adaptive blend load failed: {e}")
+        return None
+
+    def _hex_to_rgba_adaptive(hex_str, alpha=1.0):
+        try:
+            s = str(hex_str).strip().lstrip("#")
+            if len(s) == 3:
+                s = "".join(c+c for c in s)
+            if len(s) != 6:
+                return (1.0,1.0,1.0,alpha)
+            r = int(s[0:2],16)/255.0
+            g = int(s[2:4],16)/255.0
+            b = int(s[4:6],16)/255.0
+            return (r,g,b,alpha)
+        except Exception:
+            return (1.0,1.0,1.0,alpha)
 
     def build_vn_scene(bpy_module=None, *, scene_name=None,
                        script_path="//game/script.rpy",
@@ -1757,6 +1829,21 @@ except Exception:
         except Exception:
             pass
 
+        # M28 Adaptive: try to load upvn_gui.json for true project colors
+        _adaptive_cfg = None
+        try:
+            # blend_dir from context or bpy_module
+            _blend_dir = None
+            try:
+                import bpy as _bpy_tmp
+                if _bpy_tmp.data.filepath:
+                    _blend_dir = pathlib.Path(_bpy_tmp.data.filepath).parent
+            except Exception:
+                pass
+            _adaptive_cfg = _load_adaptive_for_blend(_blend_dir)
+        except Exception as e:
+            print(f"[UPVN] Adaptive cfg load in build_vn_scene failed: {e}")
+
         # placeholder planes
         try:
             from engine.render.contract import (BG_PLANE, BG_MATERIAL,
@@ -1772,29 +1859,45 @@ except Exception:
                               "right": 3.0, "far_right": 5.0}[p], -0.15, 0.0)
                          for p in SPRITE_POSITIONS}
 
-        def _ensure_material(_b, name, color, tex_capable=False, hq=False):
+        def _ensure_material(_b, name, color, tex_capable=False, hq=False, renpy_parity=False):
             mat = _b.data.materials.get(name)
             if mat is None:
                 mat = _b.data.materials.new(name)
-            _rewrite_unlit(mat, color, _b=_b, tex_capable=tex_capable, hq=hq)
+            _rewrite_unlit(mat, color, _b=_b, tex_capable=tex_capable, hq=hq, renpy_parity=renpy_parity)
             try:
                 mat.use_fake_user = True
             except Exception:
                 pass
             return mat
 
-        # M27 HQ: improved colors — more polished, less flat
-        mat_bg = _ensure_material(_b, BG_MATERIAL, (0.10, 0.12, 0.20, 1.0),
-                                  tex_capable=True)
-        mat_sprite = _ensure_material(_b, SPRITE_MATERIAL, (0.62, 0.78, 0.55, 1.0))
+        # M28 Adaptive: colors from upvn_gui.json if present, else Ren'Py identical defaults
+        # BG: neutral, but will be textured with actual bg images in converted projects
+        _bg_color = (0.95, 0.95, 0.95, 1.0)
+        _ui_color = (1.0, 1.0, 1.0, 0.8)
+        _choice_color = (1.0, 1.0, 1.0, 0.8)
+        try:
+            if _adaptive_cfg:
+                cols = _adaptive_cfg.get("colors", {})
+                # dialogue_box is usually white, but respect if different
+                if "dialogue_box" in cols:
+                    _ui_color = _hex_to_rgba_adaptive(cols["dialogue_box"], 0.8)
+                if "choice_idle" in cols or "idle" in cols:
+                    _choice_color = _hex_to_rgba_adaptive(cols.get("choice_idle") or cols.get("idle") or "#ffffff", 0.8)
+        except Exception as e:
+            print(f"[UPVN] Adaptive colors failed: {e}")
+
+        mat_bg = _ensure_material(_b, BG_MATERIAL, _bg_color,
+                                  tex_capable=True, renpy_parity=True)
+        mat_sprite = _ensure_material(_b, SPRITE_MATERIAL, (0.62, 0.78, 0.55, 1.0), tex_capable=True)
         for _pos in SPRITE_POSITIONS:
             _ensure_material(_b, f"{SPRITE_MATERIAL}_{_pos}",
                              (0.62, 0.78, 0.55, 1.0), tex_capable=True)
-        # HQ dialogue box: darker, more readable, slight blue tint
-        mat_ui = _ensure_material(_b, "MAUI", (0.03, 0.05, 0.12, 1.0), hq=True)
-        # HQ choice buttons: better contrast, edge glow
-        mat_choice = _ensure_material(_b, "MAChoice", (0.10, 0.16, 0.30, 1.0), hq=True)
-        mat_font = _ensure_material(_b, "MAFont", (0.92, 0.93, 1.0, 1.0))
+        # Ren'Py identical: white semi-transparent textbox (255,255,255,204) like gui/textbox.png — adaptive if config has it
+        mat_ui = _ensure_material(_b, "MAUI", _ui_color, renpy_parity=True)
+        # Ren'Py identical: choice idle white, hover blue #00189d — adaptive
+        mat_choice = _ensure_material(_b, "MAChoice", _choice_color, renpy_parity=True)
+        # Font material: white emission so obj.color tint (dark gray, blue) works
+        mat_font = _ensure_material(_b, "MAFont", (1.0, 1.0, 1.0, 1.0), renpy_parity=True)
 
         def _single_material(ob, mat):
             try:
@@ -1826,7 +1929,7 @@ except Exception:
             collections["VN_Backgrounds"].objects.link(bg)
         _apply_2d_layout(bg, (0.0, 0.0, 0.0))
         _single_material(bg, mat_bg)
-        _tint(bg, (0.10, 0.12, 0.20, 1.0))
+        _tint(bg, (0.95, 0.95, 0.95, 1.0))
         dlg = scene.objects.get(DIALOGUE_PLANE)
         if dlg is None:
             dlg = _data_plane(DIALOGUE_PLANE, size=8.0, color=(0.05, 0.05, 0.12, 1.0),
@@ -1835,7 +1938,7 @@ except Exception:
             collections["VN_UI"].objects.link(dlg)
         _apply_2d_layout(dlg, DIALOGUE_LOCATION, DIALOGUE_SCALE)
         _single_material(dlg, mat_ui)
-        _tint(dlg, (0.03, 0.05, 0.12, 1.0))
+        _tint(dlg, (1.0, 1.0, 1.0, 0.8))
         _static_ghost(bg)
         _static_ghost(dlg)
 
@@ -1850,7 +1953,11 @@ except Exception:
             CHOICE_COUNT, CHOICE_PREFIX = 9, "choice_"
 
         def _ensure_font(name, loc, size=0.32, bold=False, shear=None,
-                         shadow=None):
+                         shadow=None, renpy_color=None, font_file=None):
+            try:
+                from engine.render.contract import UI_FONT_NAME as _UI_FONT_NAME_FALLBACK
+            except Exception:
+                _UI_FONT_NAME_FALLBACK = "Hack-Regular.ttf"
             ob = scene.objects.get(name)
             if ob is None:
                 ob = _data_text(name, body="", size=size, loc=loc, rot=PLANE_ROTATION)
@@ -1866,12 +1973,30 @@ except Exception:
                 pass
             try:
                 from engine.render.contract import style_font_curve
-                style_font_curve(ob.data, bold=bold, shear=shear)
+                style_font_curve(ob.data, bold=bold, shear=shear, font_name=getattr(ob, 'upvn_font_name', None) or (_UI_FONT_NAME_FALLBACK if 'Speaker' in name or 'speaker' in name.lower() else None))
             except Exception:
                 pass
-            _tint(ob, (0.92, 0.93, 1.0, 1.0))
+            # Ren'Py identical colors: speaker #002ead blue, dialogue #404040 dark gray
+            if renpy_color:
+                _tint(ob, renpy_color)
+            else:
+                # default fallback — dark gray for dialogue, will be overridden by world_ui
+                _tint(ob, (0.251, 0.251, 0.251, 1.0))
+            if font_file:
+                try:
+                    ob['upvn_font_name']=font_file
+                    from engine.render.contract import style_font_curve, find_ui_font
+                    import bpy as _bpy
+                    fn = find_ui_font(font_file)
+                    if fn:
+                        fnt = _bpy.data.fonts.load(fn, check_existing=True)
+                        if fnt:
+                            ob.data.font = fnt
+                except Exception:
+                    pass
             _static_ghost(ob)
             if shadow is not None:
+                # Shadows disabled for Ren'Py parity — keep object but transparent/hidden
                 sh = scene.objects.get(shadow)
                 if sh is None:
                     sh = _data_text(shadow, body="", size=size, loc=loc,
@@ -1888,14 +2013,48 @@ except Exception:
                     style_font_curve(sh.data, bold=False, shear=None)
                 except Exception:
                     pass
-                _tint(sh, (0.02, 0.03, 0.08, 1.0))
+                _tint(sh, (0.0, 0.0, 0.0, 0.0))
+                try:
+                    sh.hide_viewport = True
+                    sh.hide_render = True
+                    sh.visible = False
+                except Exception:
+                    pass
                 _static_ghost(sh)
             return ob
 
-        _ensure_font(SPEAKER_TEXT, SPEAKER_LOCATION, size=0.28, bold=True,
-                     shadow="Speaker_Shadow")
+        # M28 Adaptive: speaker/dialogue colors & fonts from contract (which loads upvn_gui.json) or fallback
+        try:
+            from engine.render.contract import SPEAKER_DEFAULT_COLOR, DEFAULT_TEXT_COLOR, UI_FONT_NAME, UI_FONT_REGULAR, UI_FONT_INTERFACE
+        except Exception:
+            SPEAKER_DEFAULT_COLOR = (0.0, 0.18, 0.678, 1.0)
+            DEFAULT_TEXT_COLOR = (0.251, 0.251, 0.251, 1.0)
+            UI_FONT_NAME = "Hack-Regular.ttf"
+            UI_FONT_REGULAR = "Lato-Regular.ttf"
+            UI_FONT_INTERFACE = "saxmono.ttf"
+        # Override with adaptive config if present (for projects where engine not yet imported or generic blend)
+        try:
+            if _adaptive_cfg:
+                cols = _adaptive_cfg.get("colors", {})
+                if "accent" in cols:
+                    SPEAKER_DEFAULT_COLOR = _hex_to_rgba_adaptive(cols["accent"], 1.0)
+                if "text" in cols:
+                    DEFAULT_TEXT_COLOR = _hex_to_rgba_adaptive(cols["text"], 1.0)
+                fonts = _adaptive_cfg.get("fonts", {})
+                if "name" in fonts:
+                    import os as _os
+                    UI_FONT_NAME = _os.path.basename(fonts["name"])
+                if "text" in fonts:
+                    UI_FONT_REGULAR = _os.path.basename(fonts["text"])
+                if "interface" in fonts or "choice" in fonts:
+                    UI_FONT_INTERFACE = _os.path.basename(fonts.get("interface") or fonts.get("choice") or UI_FONT_INTERFACE)
+        except Exception as e:
+            print(f"[UPVN] Adaptive font/color override failed: {e}")
+
+        _ensure_font(SPEAKER_TEXT, SPEAKER_LOCATION, size=0.30, bold=True,
+                     shadow="Speaker_Shadow", renpy_color=SPEAKER_DEFAULT_COLOR, font_file=UI_FONT_NAME)
         _ensure_font(DIALOGUE_TEXT, DIALOGUE_TEXT_LOCATION, size=0.26,
-                     shadow="Dialogue_Shadow")
+                     shadow="Dialogue_Shadow", renpy_color=DEFAULT_TEXT_COLOR, font_file=UI_FONT_REGULAR)
 
         try:
             from engine.render.contract import (HISTORY_PLANE, HISTORY_TEXT,
@@ -1917,25 +2076,72 @@ except Exception:
         _ensure_font(HISTORY_TEXT, (-6.0, -0.5, 3.4), size=0.20)
         _ensure_font(REWIND_TEXT, (-6.0, -0.5, 4.4), size=0.17, shear=0.18)
 
-        # M27 HQ: improved choice layout — better spacing, larger click area
+        # M28 Adaptive choice layout — uses config if present, else LearnToCodeRPG parity
+        # Ren'Py: gui.choice_button_width=1185 (61.7% screen), height 52px, ypos 405 centered, spacing 33px
+        # Base Z = half_v*0.25 (405px from top), spacing 0.2578 world — adaptive via _adaptive_cfg world
+        try:
+            from engine.render.contract import CHOICE_IDLE_COLOR, CHOICE_TEXT_IDLE, CHOICE_WIDTH_FACTOR, CHOICE_BASE_Z, CHOICE_SPACING_EM
+            # Use adaptive metrics from contract if available
+            _choice_width_factor = CHOICE_WIDTH_FACTOR
+            _choice_base_z = CHOICE_BASE_Z
+            _choice_spacing = CHOICE_SPACING_EM
+        except Exception:
+            CHOICE_IDLE_COLOR = (1.0, 1.0, 1.0, 0.8)
+            CHOICE_TEXT_IDLE = (0.251, 0.251, 0.251, 1.0)
+            _choice_width_factor = 0.617
+            _choice_base_z = 1.05
+            _choice_spacing = 0.38
+        # Further override with _adaptive_cfg if present
+        try:
+            if _adaptive_cfg:
+                cols = _adaptive_cfg.get("colors", {})
+                if "choice_idle" in cols:
+                    CHOICE_IDLE_COLOR = _hex_to_rgba_adaptive(cols["choice_idle"], 0.8)
+                elif "idle" in cols:
+                    CHOICE_IDLE_COLOR = _hex_to_rgba_adaptive(cols["idle"], 0.8)
+                if "choice_idle" in cols or "text" in cols:
+                    # choice text idle is usually text color
+                    CHOICE_TEXT_IDLE = _hex_to_rgba_adaptive(cols.get("choice_idle") or cols.get("text") or "#404040", 1.0)
+                world = _adaptive_cfg.get("world", {})
+                if "choice_width_factor" in world:
+                    _choice_width_factor = float(world["choice_width_factor"])
+                if "choice_base_z" in world:
+                    _choice_base_z = float(world["choice_base_z"])
+                if "choice_spacing_em" in world:
+                    _choice_spacing = float(world["choice_spacing_em"])
+        except Exception as e:
+            print(f"[UPVN] Adaptive choice override failed: {e}")
         for i in range(CHOICE_COUNT):
-            z = 2.6 - i * 0.75  # slightly more spacing
+            # Adaptive: ypos 405 centered, then each choice below — use _choice_base_z and _choice_spacing
+            try:
+                z = _choice_base_z - i * (_choice_spacing * 0.16 + 0.5 * 0.12 + 0.54)  # approx 0.66 for default
+                # More precise: if we have spacing, use it directly
+                # For default 0.38 em -> 0.66 world, so scale factor ~1.736
+                z = _choice_base_z - i * (0.66 if _choice_spacing==0.38 else _choice_spacing * 1.736)
+            except Exception:
+                z = 1.05 - i * 0.66
             loc = (0.0, -0.5, z)
             cname = f"{CHOICE_PREFIX}{i}"
             try:
                 def _mk(cname=cname):
-                    return _data_plane(cname, size=6.0, color=(0.10, 0.16, 0.30, 1.0),
+                    return _data_plane(cname, size=6.0, color=(1.0, 1.0, 1.0, 0.8),
                                        rot=PLANE_ROTATION)
                 ch = _get_or_create(scene, cname, _mk)
                 _link_ob(scene, ch, collections["VN_UI"])
-                _apply_2d_layout(ch, loc, (3.4, 0.32, 1.0))  # slightly larger
+                # Adaptive width: 1185 => 4.63 scale for 0.617 factor, scale = factor * 7.5
+                try:
+                    _w_scale = _choice_width_factor * 7.5
+                except Exception:
+                    _w_scale = 4.63
+                _apply_2d_layout(ch, loc, (_w_scale, 0.36, 1.0))
                 _single_material(ch, mat_choice)
-                _tint(ch, (0.10, 0.16, 0.30, 1.0))
+                _tint(ch, CHOICE_IDLE_COLOR)
                 _static_ghost(ch)
                 tname = cname + "_text"
-                _ensure_font(tname, (loc[0] - 2.9, loc[1] - 0.05, loc[2] + 0.08),
-                             size=0.24, bold=True,
-                             shadow=cname + "_shadow")
+                # Text centered (Ren'Py xalign 0.5) at -2.1 offset to center 1185 width
+                _ensure_font(tname, (loc[0] - 2.1, loc[1] - 0.05, loc[2] + 0.08),
+                             size=0.22, bold=False,
+                             shadow=cname + "_shadow", renpy_color=CHOICE_TEXT_IDLE, font_file=UI_FONT_INTERFACE)
             except Exception as exc:
                 print(f"[UPVN] choice {cname} create failed: {exc}")
 

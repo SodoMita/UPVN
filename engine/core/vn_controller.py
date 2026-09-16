@@ -902,49 +902,41 @@ class VNController:
         # Headless should start from a clean state, not the pre-advanced
         # state left by load()'s _advance() which pollutes history.
         # Create a fresh VNState + VNInterpreter from same script_dict.
+        # M28 fix: preserve compat, mode, base_dir for full-tier projects (LearnToCodeRPG needs compat=True)
+        def _base_dir():
+            if self.script_path is None:
+                return None
+            return str(self.script_path if self.script_path.is_dir() else self.script_path.parent)
         if self.script_dict is None:
-            # need to load scripts first (without keeping the advanced state)
             self.load()
-            # Now discard the advanced state: recreate fresh
-            # Save script_dict, reset state and interpreter
             script_dict = self.script_dict
             self.state = VNState()
-            # Preserve script_hash if we computed it
-            # Recompute hash if needed (load already set it before, but we reset)
-            # We keep it on fresh state if needed; not critical for headless.
-            self.interp = VNInterpreter(script_dict, self.state)
+            self.interp = VNInterpreter(script_dict, self.state, base_dir=_base_dir(), compat=self.compat)
             self.script_dict = script_dict
-            # Reset UPBGE managers' reference to new state (or just ignore for headless)
             self._gen = self.interp.run()
             self._current_event = None
             self._waiting = False
         else:
-            # script_dict already available but self.state may be polluted
-            # If _current_event was already set (load called), reset fresh
             if self._current_event is not None:
                 script_dict = self.script_dict
                 self.state = VNState()
-                self.interp = VNInterpreter(script_dict, self.state)
+                self.interp = VNInterpreter(script_dict, self.state, base_dir=_base_dir(), compat=self.compat)
                 self._gen = self.interp.run()
                 self._current_event = None
                 self._waiting = False
 
-        # handle script_dict case where interp not yet created (direct script_dict init)
         if self.interp is None and self.script_dict is not None:
             import copy as _copy2
-            self.interp = VNInterpreter(_copy2.deepcopy(self.script_dict), self.state)
+            self.interp = VNInterpreter(_copy2.deepcopy(self.script_dict), self.state, base_dir=_base_dir(), compat=self.compat)
             self._gen = self.interp.run()
             self._current_event = None
             self._waiting = False
         assert self.interp is not None
-        # Ensure fresh interpreter — create one more fresh to avoid mutation from previous run_headless splicing
-        # VNInterpreter splices labels (menu/if); so reuse of same interpreter across multiple run_headless calls would double-splice.
-        # Therefore create a clone of script_dict for each run.
         import copy as _copy
         fresh_script = _copy.deepcopy(self.script_dict)
         fresh_state = VNState()
         fresh_state.script_hash = self.state.script_hash
-        fresh_interp = VNInterpreter(fresh_script, fresh_state)
+        fresh_interp = VNInterpreter(fresh_script, fresh_state, base_dir=_base_dir(), compat=self.compat)
         self.interp = fresh_interp
         self.state = fresh_state
         # also rebind managers if they exist

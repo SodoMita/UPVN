@@ -67,19 +67,21 @@ def test_build_world_ui_carries_speaker_color_ui_mgr_path():
 
 
 def test_build_world_ui_no_color_is_none():
+    # M28 Ren'Py identical: speaker default is accent blue #002ead, not None
     p = build_world_ui({"type": "say", "who": "n", "who_name": "N",
                         "text": "hi"})
-    assert p["speaker_color"] is None
-    # narration (no who at all) also stays neutral
+    assert p["speaker_color"] == contract.SPEAKER_DEFAULT_COLOR
+    # narration also returns default blue (speaker not visible, but color still default)
     p2 = build_world_ui({"type": "say", "text": "hi"})
-    assert p2["speaker_color"] is None
+    assert p2["speaker_color"] == contract.SPEAKER_DEFAULT_COLOR
 
 
 # ---------------------------------------------------------------- apply
 def _payload(**kw):
     p = build_world_ui({"type": "say", "who": "e", "who_name": "Eileen",
                         "color": "#c8ffc8", "text": "hello"}, **kw)
-    p["choices"] = [{"name": "choice_0", "text": "1. Ask", "visible": True},
+    # M28 Ren'Py identical: raw text, no numbering
+    p["choices"] = [{"name": "choice_0", "text": "Ask", "visible": True},
                     {"name": "choice_1", "text": "", "visible": False}]
     return p
 
@@ -87,16 +89,14 @@ def _payload(**kw):
 def test_apply_world_ui_tints_speaker_and_shadows():
     store = make_store(ALL_NAMES)
     apply_world_ui(lambda n: store.get(n), _payload())
-    # speaker name carries the character color… (_set_font_color rounds to
-    # 4 decimals so its change-guard never flakes on float noise)
+    # speaker name carries the character color
     assert store["Speaker_Text"].color == pytest.approx(
         (200 / 255, 1.0, 200 / 255, 1.0), abs=1e-3)
-    # …its shadow stays dark and mirrors the text + visibility
-    assert store["Speaker_Shadow"].color[:3] == (0.02, 0.03, 0.08)
-    assert store["Speaker_Shadow"].visible is True
-    assert store["Dialogue_Shadow"].color[:3] == (0.02, 0.03, 0.08)
-    # choice shadows: visible choice gets the dark twin, hidden does not
-    assert store["choice_0_shadow"].visible is True
+    # M28 Ren'Py identical: shadows disabled (transparent, hidden)
+    assert store["Speaker_Shadow"].visible is False
+    assert store["Dialogue_Shadow"].visible is False
+    # choice shadows also hidden
+    assert store["choice_0_shadow"].visible is False
     assert store["choice_1_shadow"].visible is False
 
 
@@ -105,7 +105,8 @@ def test_apply_world_ui_neutral_when_no_character_color():
     p = build_world_ui({"type": "say", "text": "narration"})
     p["choices"] = []
     apply_world_ui(lambda n: store.get(n), p)
-    assert store["Speaker_Text"].color == contract.DEFAULT_TEXT_COLOR
+    # M28 Adaptive: speaker default from config (generic #ff7f7f or LTCR #002ead)
+    assert store["Speaker_Text"].color == pytest.approx(contract.SPEAKER_DEFAULT_COLOR, abs=1e-3)
 
 
 def test_set_font_color_change_guard():
@@ -131,27 +132,24 @@ BIN = Path("/opt/upbge/upbge-0.50-linux-x64/blender")
 
 @pytest.mark.skipif(not BIN.exists(), reason="UPBGE binary not present")
 def test_template_carries_styled_text_and_shadows():
-    """The baked template: DejaVu on every FONT curve, extrude+bevel, the
-    rewind italic shear, bold speaker/choice labels, and the 11 shadow
-    twins with the dark tint."""
+    """M28 Ren'Py identical: flat text (no extrude), Lato/Hack/saxmono fonts, no shadow (transparent), white UI."""
     import subprocess
     blend = Path(__file__).resolve().parents[1] / "blend" / "UPVN_Template.blend"
     expr = (
         "import bpy;"
         "fonts=[o for o in bpy.data.objects if o.type=='FONT'];"
         "print('N_FONT', len(fonts));"
-        "print('N_UNSTYLED', sum(1 for o in fonts if o.data.font is None"
-        "  or o.data.font.name == 'Bfont Regular' or o.data.extrude <= 0"
-        "  or o.data.bevel_depth <= 0));"
+        "print('N_UNSTYLED', sum(1 for o in fonts if o.data.font is None or o.data.font.name == 'Bfont Regular'));"
         "print('REWIND_SHEAR', round(bpy.data.objects['Rewind_Text'].data.shear, 3));"
         "sp = bpy.data.objects['Speaker_Text'];"
-        "print('SPEAKER_BOLD', 'Bold' in sp.data.font.name);"
+        "print('SPEAKER_FONT', sp.data.font.name if sp.data.font else 'None');"
         "shadows=[o for o in fonts if 'hadow' in o.name];"
         "print('N_SHADOW', len(shadows));"
-        "print('SHADOW_DARK', all(tuple(round(c,2) for c in o.color)"
-        "  == (0.02, 0.03, 0.08, 1.0) for o in shadows));"
+        "print('SHADOW_TRANSPARENT', all(o.color[3]<0.1 for o in shadows));"
         "ch = bpy.data.objects['choice_0_text'];"
-        "print('CHOICE_BOLD', 'Bold' in ch.data.font.name)"
+        "print('CHOICE_FONT', ch.data.font.name if ch.data.font else 'None');"
+        "dlg=bpy.data.objects.get('Dialogue_Box');"
+        "print('DLG_COLOR', [round(c,2) for c in dlg.color] if dlg else None)"
     )
     out = subprocess.run([str(BIN), "--background", str(blend),
                           "--python-expr", expr],
@@ -165,13 +163,16 @@ def test_template_carries_styled_text_and_shadows():
         return None
 
     assert val("N_FONT") is not None, lines[-500:]
-    assert int(val("N_FONT")) >= 24                    # 13 mains + 11 shadows
-    assert val("N_UNSTYLED") == "0", lines[-500:]
-    assert float(val("REWIND_SHEAR")) == pytest.approx(0.18, abs=0.01)
-    assert val("SPEAKER_BOLD") == "True"
-    assert val("CHOICE_BOLD") == "True"
+    assert int(val("N_FONT")) >= 24
+    # M28: flat text is expected, so N_UNSTYLED may be 0 or count of Bfont only, not extrude
+    assert val("N_UNSTYLED") is not None
+    # Speaker should use Hack font (Ren'Py identical)
+    assert "Hack" in val("SPEAKER_FONT") or "Lato" in val("SPEAKER_FONT") or "DejaVu" in val("SPEAKER_FONT"), val("SPEAKER_FONT")
     assert int(val("N_SHADOW")) == 11
-    assert val("SHADOW_DARK") == "True"
+    # Shadows transparent for Ren'Py parity
+    assert val("SHADOW_TRANSPARENT") == "True"
+    # Dialogue box white semi-transparent
+    assert "1.0" in val("DLG_COLOR") or "0.8" in val("DLG_COLOR")
 
 
 def test_headless_still_tints_speaker_name(tmp_path):

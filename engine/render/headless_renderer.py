@@ -24,6 +24,61 @@ import re
 
 W, H = 1280, 720
 
+# M28 Adaptive: try to load upvn_gui.json for true project colors (like contract.py)
+def _load_adaptive_gui():
+    try:
+        from pathlib import Path as _P
+        import json as _json
+        # Search roots similar to gui_config
+        cands = [
+            _P.cwd() / "game" / "upvn_gui.json",
+            _P.cwd() / "assets" / "gui_config.json",
+            _P.cwd() / "upvn_gui.json",
+        ]
+        try:
+            here = _P(__file__).resolve().parents[2]
+            cands += [here / "game" / "upvn_gui.json", here / "assets" / "gui_config.json"]
+        except Exception:
+            pass
+        for cand in cands:
+            if cand.exists():
+                try:
+                    data = _json.loads(cand.read_text(encoding="utf-8"))
+                    return data
+                except Exception:
+                    pass
+        # Try via gui_config module if available
+        try:
+            from .gui_config import load_gui_config
+            cfg = load_gui_config()
+            if cfg and cfg.get("source") != "generic_defaults":
+                return cfg
+        except Exception:
+            pass
+    except Exception:
+        pass
+    return None
+
+_adaptive_gui = _load_adaptive_gui()
+
+def _adaptive_color(key, default_hex):
+    try:
+        if _adaptive_gui:
+            cols = _adaptive_gui.get("colors", {})
+            if key in cols and cols[key]:
+                h = cols[key].lstrip("#")
+                if len(h) == 6:
+                    return tuple(int(h[i:i+2], 16) for i in (0,2,4))
+    except Exception:
+        pass
+    # default_hex
+    try:
+        h = default_hex.lstrip("#")
+        return tuple(int(h[i:i+2], 16) for i in (0,2,4))
+    except Exception:
+        return (255,255,255)
+
+
 # ---------------------------------------------------------------- fonts
 def _load_font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
     for p in [
@@ -397,13 +452,34 @@ def draw_sprite(img: Image.Image, draw: ImageDraw.ImageDraw, tag: str, expr: str
     draw.text((bx0+24,by0+4), txt, fill=(190,220,230), font=F_Small)
 
 def draw_dialogue(img: Image.Image, draw: ImageDraw.ImageDraw, speaker, speaker_color, text):
-    """M27 HQ dialogue — darker, more readable, better speaker badge, subtle glow."""
+    """M27 HQ dialogue — darker, more readable, better speaker badge, subtle glow.
+    M28 Adaptive: if upvn_gui.json exists, uses its accent/text colors for Ren'Py parity.
+    """
     box_y0=538; box_h=H-box_y0
     box=Image.new("RGBA",(W,box_h),(0,0,0,0))
     bd=ImageDraw.Draw(box,"RGBA")
     # HQ: darker, more polished box with inner glow
-    bd.rounded_rectangle([20,12,W-20,box_h-12], radius=18, fill=(8,12,26,240), outline=(42,60,100,255), width=1)
-    bd.rounded_rectangle([22,14,W-22,box_h-14], radius=16, fill=(10,14,28,235))
+    # Adaptive: dialogue box color from gui config, default white 255,255,255,204 for Ren'Py parity
+    try:
+        db = _adaptive_color("dialogue_box", "#FFFFFF")
+        # For Ren'Py parity, white box with alpha 204; if adaptive is not white, use its color with 230 alpha
+        if db == (255,255,255):
+            box_fill = (255,255,255,204)
+            box_outline = (42,60,100,200)
+        else:
+            box_fill = db + (230,)
+            box_outline = (42,60,100,200)
+    except Exception:
+        box_fill = (8,12,26,240)
+        box_outline = (42,60,100,255)
+    bd.rounded_rectangle([20,12,W-20,box_h-12], radius=18, fill=box_fill, outline=box_outline, width=1)
+    # inner fill: if adaptive white, keep white too (Ren'Py parity)
+    try:
+        _db = _adaptive_color('dialogue_box', '#FFFFFF')
+        inner_fill = (255,255,255,204) if _db == (255,255,255) else (_db + (230,))
+    except Exception:
+        inner_fill = (10,14,28,235)
+    bd.rounded_rectangle([22,14,W-22,box_h-14], radius=16, fill=inner_fill)
     bd.line([(34,20),(W-34,20)], fill=(0,184,195,65), width=1)
     bd.line([(34,box_h-18),(W-34,box_h-18)], fill=(255,255,255,12), width=1)
     # inner highlight
