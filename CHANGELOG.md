@@ -1,5 +1,64 @@
 # Changelog
 
+## 0.7.2 — M29: HQ Scene, Packed Art, Zero-Setup Authoring
+
+Same theme as M27/M28 — higher quality scene, less Python, reliability kept — plus the
+bug that made every 2D frame look broken and was misdiagnosed for hours.
+
+### The stage that painted over the story (root cause of "dark bands over the sprite")
+- Long-standing symptom: a brown band across the character plus a grey square dead centre
+  of every 2D frame in the shipped template. Blamed on sprite materials; it was geometry.
+- `tools/make_template.py` had only *unlinked* the factory objects from the master
+  collection, never deleted them, so the default **Cube** shipped in the template
+  (measured: 171 px grey square, straddling the background plane → drawn in front of it).
+- The baked 3D classroom (`VN_3DStage`, 42 objects) is a feature for `show3d` scenes, but
+  for a 2D game it sat on top of the art: `Desk_*`/`Chair_*` poke through the background
+  plane and drew the brown band across the sprite. Live probe of the running scene proved
+  it: only 6 contract objects were visible, none of them was the band.
+- **Fix**: the stage is now script-derived, not author-managed —
+  `engine/render/stage_manager.py:script_uses_stage()` walks the parsed program, and
+  `StageManager.prepare()` (called from `VNController.load()`) hides every object
+  carrying the `upvn_stage` game property when the script never mentions
+  `load_stage`/`show3d`/`anim`/`camera preset`. Same build, both directions verified live:
+  `20_smoke_game` → `stage_visible=0`, `02_sprites_backgrounds` → 43/43 visible.
+- `Setup Scene` and `make_template.py` stamp the flag (`_mark_stage_objects`), the factory
+  Cube/Camera/`Collection` are deleted for real, and the factory lamp moved into the stage.
+- Trap recorded in the code: the flag must be a **STRING** game property — a BOOL game
+  property written through the data API reads back as `False` in the player, and
+  `obj[name] = True` alone writes an ID property the runtime never sees.
+
+### HQ scene / packed art
+- WebP pipeline (`IMAGE_EXTENSIONS` WebP-first): backgrounds, sprites and sample art
+  converted; 15 space-named duplicate `.webp` files (2.7 MB) removed; the packager ships
+  whatever supported format the project has instead of assuming PNG.
+- `image_mode` is detected per project (`_detect_image_mode`): `auto` when the project
+  ships art (image first, palette fallback per asset), `color` when it does not.
+- Readability contract (`ensure_readable`, showcase palette): config-driven projects get a
+  navy dialogue panel with light text and a green speaker tint; a real GUI keeps its own
+  colours. Sprite planes are aspect-fitted to the art and share one ground line
+  (`fit_sprite_plane_scale`, `SPRITE_HEIGHT=3.2`, `SPRITE_FEET_Z=-2.75`).
+
+### Zero-setup authoring
+- Launcher `sys.path` bootstrap walks up to five parents, so a project saved in a
+  subfolder (`scenes/`, a QA copy in `tmp/`) still finds `engine/` — before this the player
+  died with `ModuleNotFoundError: No module named 'bge_frontend'`, which looks like a
+  broken install for a perfectly fine repo.
+
+### Reliability / QA
+- `tools/check_template.py`: shipping gate for the .blend — contract objects only in the
+  master collection, `upvn_stage` stamp present, launcher properties intact. Friendly
+  `file:`/`Hint:` output, non-zero exit, wired into `tools/package_game.py` (the .blend is
+  zstd-compressed, so no byte-level test could ever catch these regressions).
+- `UPVN_SCENE_DUMP` now emits `{"objects": [...], "stage": {...}}`; the heartbeat gained
+  `stage_used` / `stage_visible`; `tools/desktop_shot.sh` captures a non-black WebP frame
+  after a real pixel check.
+- `tests/test_m29_stage_visibility.py` (8 tests): detection covers parser (`cmd`) and
+  interpreter (`type`) shapes, examples split 2D/3D as the contract says, headless
+  `prepare()` records the flag, and the shipped template passes its gate.
+- Two M29-affected expectations updated: `image_mode` is now detected (not the constant),
+  and packaged art is asserted by format-family, not by `*.png`.
+- **385 passed / 16 skipped**, headless traces unchanged, no new Ren'Py syntax (M25 freeze).
+
 ## 0.7.1 — M28: Audit Fixes & Reliability Hardening (no silent failures)
 
 Full engine/UI/frontend/addon hardening — previously silent no-ops now log and degrade gracefully, per M28 audit checklist.

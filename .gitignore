@@ -10,3 +10,5 @@ saves/save_*.json
 saves/save_auto.json
 /dist/saves/
 tmp/
+
+/dist/

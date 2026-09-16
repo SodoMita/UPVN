@@ -675,6 +675,10 @@ def main(cont=None):
         _render_diag(logic)
     except Exception:
         pass
+    try:
+        _scene_dump(logic, ctrl)
+    except Exception:
+        pass
     # M18 debug/QA keys: F1 state dump, F12 in-game screenshot
     try:
         _debug_keys(logic, ctrl)
@@ -731,6 +735,12 @@ def main(cont=None):
                 "interp_warnings": list(_payload.get("interp_warnings", []) or [])[:5],
                 "typewriter_done": bool(_payload.get("typewriter_done", True)),
                 "ui_status": getattr(logic, "_upvn_last_ui_status", None),
+                # M29: 3D-stage visibility rule — "used" is the script-level
+                # decision, "visible" proves the hiding actually happened.
+                "stage_used": bool(getattr(getattr(ctrl, "stage_mgr", None),
+                                           "stage_used", False)),
+                "stage_visible": _stage_stats(_bge.logic.getCurrentScene())[1]
+                if _bge is not None else None,
             }
             try:
                 _sc = logic.getCurrentScene()
@@ -776,6 +786,90 @@ def main(cont=None):
 
 
 _shot_seq = [0]
+
+
+_scene_dump_t = [0.0]
+
+
+def _stage_stats(scene):
+    """(total, visible) objects belonging to the baked 3D stage.
+
+    M29 QA contract: a 2D-only script must report visible == 0. Counted from
+    the `upvn_stage` game property the authoring tools stamp on the VN_3DStage
+    collection, so the answer comes from the running scene, not from a log line.
+    """
+    total = visible = 0
+    names = []
+    try:
+        for ob in scene.objects:
+            try:
+                # `in` is how the rest of this module reads object properties
+                # (KX_GameObject.get is not guaranteed on every build)
+                prop = ob["upvn_stage"] if "upvn_stage" in ob else None
+            except Exception:
+                continue
+            if prop:
+                total += 1
+                if getattr(ob, "visible", False):
+                    visible += 1
+                    if len(names) < 12:
+                        names.append(str(ob.name))
+    except Exception:
+        pass
+    return total, visible, names
+
+
+def _scene_dump(logic, ctrl=None):
+    """Env-gated (UPVN_SCENE_DUMP=/path.json) object-level snapshot, once a second.
+
+    The heartbeat answers "what is the story doing"; this answers "what is on
+    screen": every contract object's visibility, world transform, tint and text
+    body. That is the difference between guessing which quad painted a black
+    band across the frame and knowing. Cheap (few dozen objects), off by
+    default, and it never raises into the game loop.
+    """
+    path = os.environ.get("UPVN_SCENE_DUMP")
+    if not path:
+        return
+    now = time.time()
+    if now - _scene_dump_t[0] < 1.0:
+        return
+    _scene_dump_t[0] = now
+    try:
+        import bge as _bge
+        import json as _json
+        sc = _bge.logic.getCurrentScene()
+        rows = []
+        for ob in sc.objects:
+            nm = str(ob.name)
+            if not (nm.startswith(("Sprite", "choice_", "Dialogue", "Speaker",
+                                   "History", "Rewind", "BG")) or nm == "VNController"):
+                continue
+            row = {"name": nm, "visible": bool(getattr(ob, "visible", False))}
+            try:
+                row["pos"] = [round(float(v), 2) for v in ob.worldPosition]
+                row["scale"] = [round(float(v), 3) for v in ob.worldScale]
+            except Exception:
+                pass
+            try:
+                row["color"] = [round(float(c), 2) for c in ob.color]
+            except Exception:
+                pass
+            bo = getattr(ob, "blenderObject", None)
+            data = getattr(bo, "data", None) if bo is not None else None
+            body = getattr(data, "body", None) if data is not None else None
+            if body is not None:
+                row["body"] = str(body)[:40]
+            rows.append(row)
+        _total, _vis, _names = _stage_stats(sc)
+        payload = {"objects": rows,
+                   "stage": {"used": bool(getattr(getattr(ctrl, "stage_mgr", None),
+                                                 "stage_used", False)),
+                             "total": _total, "visible": _vis, "visible_names": _names}}
+        with open(path, "w") as f:
+            _json.dump(payload, f)
+    except Exception:
+        pass
 
 
 def _render_diag(logic):

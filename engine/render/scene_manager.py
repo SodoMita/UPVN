@@ -21,6 +21,7 @@ except ImportError:
 
 from ..core.vn_state import VNState
 from .contract import (BG_PLANE, BG_MATERIAL, ASSET_BACKGROUNDS,
+                       IMAGE_EXTENSIONS,
                        image_mode_from, stage_color, apply_object_color,
                        plane_material, apply_material_image,
                        reset_material_palette)
@@ -151,8 +152,10 @@ class SceneManager:
                      asset.replace(" ", "/").replace("/", "_"),
                      asset.split()[-1] if " " in asset else asset]
             tex_path = None
+            # M29: WebP first (contract.IMAGE_EXTENSIONS) — the asset pack
+            # writes .webp; PNG/JPG remain supported for converted projects.
             for stem in stems:
-                for ext in (".png", ".jpg", ".webp"):
+                for ext in IMAGE_EXTENSIONS:
                     for prefix in BG_PATH_PREFIXES:
                         alt = bge.logic.expandPath(
                             f"{prefix}{ASSET_BACKGROUNDS}/{stem}{ext}")

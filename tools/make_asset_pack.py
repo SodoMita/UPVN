@@ -13,6 +13,12 @@ raw art (photographs, AI generations, drawings) that is *almost* right:
   * sprites come in wildly different figure scales, so two characters on stage
     look like they live in different universes.
 
+Output format: WebP, always (M29 rule). Backgrounds are lossy WebP
+(`quality`, default 88); sprites are LOSSLESS WebP so the alpha the chroma key
+produced survives bit-for-bit. No PNG, no JPG is written by this tool — WebP
+is 30-70% smaller than both at equivalent quality, and UPBGE/Blender 5.0 loads
+it natively.
+
 This tool does those three jobs deterministically, from a small manifest, with
 no Blender and no Python written by the creator:
 
@@ -26,14 +32,14 @@ Manifest (JSON — asset_pack.json next to your art):
       "canvas":   [1280, 720],           # background target size (16:9 default)
       "sprite":   {"width": 512, "height": 768, "margin": 18},
       "backgrounds": [
-        {"src": "art/bg_classroom.png", "out": "assets/backgrounds/bg_classroom.jpg",
-         "fit": "cover", "quality": 92}
+        {"src": "art/bg_classroom.png", "out": "assets/backgrounds/bg_classroom.webp",
+         "fit": "cover", "quality": 88}
       ],
       "sprites": [
-        {"src": "art/eileen_happy.png", "out": "assets/sprites/eileen_happy.png",
+        {"src": "art/eileen_happy.png", "out": "assets/sprites/eileen_happy.webp",
          "key": "magenta", "trim": true}
       ],
-      "copies": [ {"src": "art/eileen_neutral.png", "out": "assets/sprites/eileen.png"} ]
+      "copies": [ {"src": "art/eileen_neutral.png", "out": "assets/sprites/eileen.webp"} ]
     }
 
 `fit`: "cover" (fill the canvas, crop the overflow — the default, no
@@ -195,17 +201,20 @@ def fit_background(img: Image.Image, width: int, height: int, fit: str = "cover"
     return new.crop((left, top, left + width, top + height))
 
 
-def _save(img: Image.Image, out: Path, quality: int = 92) -> None:
+def _save(img: Image.Image, out: Path, quality: int = 88, lossless: bool = False) -> str:
+    """Write WebP (the pack format) and return the real path written.
+
+    A manifest asking for .png/.jpg is accepted but redirected to .webp, so an
+    older manifest keeps working while the shipped tree stays WebP-only.
+    `lossless=True` for anything with alpha (sprites): keying + resampling must
+    not be re-compressed.
+    """
+    if out.suffix.lower() != ".webp":
+        out = out.with_suffix(".webp")
     out.parent.mkdir(parents=True, exist_ok=True)
-    if out.suffix.lower() in (".jpg", ".jpeg"):
-        bg = Image.new("RGB", img.size, (8, 10, 20))
-        if img.mode in ("RGBA", "LA"):
-            bg.paste(img, mask=img.getchannel("A"))
-        else:
-            bg.paste(img.convert("RGB"))
-        bg.save(out, "JPEG", quality=quality, optimize=True, progressive=True)
-    else:
-        img.save(out, "PNG", optimize=True)
+    img.save(out, "WEBP", quality=int(quality), lossless=bool(lossless),
+             method=6)
+    return out.name
 
 
 def build_pack(manifest: dict, root: Path, check_only: bool = False) -> dict:
@@ -228,6 +237,23 @@ def build_pack(manifest: dict, root: Path, check_only: bool = False) -> dict:
         if base not in seen:
             seen.append(base)
     search = seen
+
+    def prune(out_path: Path) -> list:
+        """Delete stale .png/.jpg/.jpeg twins of a .webp output (M29 rule: the
+        pack is WebP-only, so an old uncompressed file must not shadow or
+        bloat it). Returns the removed names."""
+        removed = []
+        if out_path.suffix.lower() != ".webp":
+            return removed
+        for ext in (".png", ".jpg", ".jpeg", ".bmp"):
+            twin = out_path.with_suffix(ext)
+            if twin.is_file():
+                try:
+                    twin.unlink()
+                    removed.append(twin.name)
+                except Exception:
+                    pass
+        return removed
 
     def resolve(p, for_output: bool = False):
         q = Path(p)
@@ -253,8 +279,11 @@ def build_pack(manifest: dict, root: Path, check_only: bool = False) -> dict:
             img = fit_background(Image.open(src), canvas[0], canvas[1],
                                  entry.get("fit", "cover"),
                                  tuple(entry.get("pad_color", (8, 10, 20))))
-            _save(img, out, int(entry.get("quality", 92)))
-            report["built"].append(f"{out.name} {img.size[0]}x{img.size[1]}")
+            name = _save(img, out, int(entry.get("quality", 88)), lossless=False)
+            pruned = prune(out if out.suffix.lower() == ".webp" else out.with_suffix(".webp"))
+            report["built"].append(
+                f"{name} {img.size[0]}x{img.size[1]} webp/q{int(entry.get('quality', 88))}"
+                + (f" (pruned {', '.join(pruned)})" if pruned else ""))
         except Exception as e:  # one bad file must not stop the pack
             report["failed"].append(f"{src}: {e}")
 
@@ -276,8 +305,13 @@ def build_pack(manifest: dict, root: Path, check_only: bool = False) -> dict:
                              int(entry.get("margin", sprite_cfg["margin"])),
                              bool(entry.get("trim", True)),
                              entry.get("align", "feet"))
-            _save(img, out)
-            report["built"].append(f"{out.name} {img.size[0]}x{img.size[1]} RGBA")
+            # sprites are LOSSLESS: the keyed alpha and the resample must
+            # survive byte-exact, a lossy pass would fringe the outlines
+            name = _save(img, out, lossless=True)
+            pruned = prune(out if out.suffix.lower() == ".webp" else out.with_suffix(".webp"))
+            report["built"].append(
+                f"{name} {img.size[0]}x{img.size[1]} RGBA webp/lossless"
+                + (f" (pruned {', '.join(pruned)})" if pruned else ""))
         except Exception as e:
             report["failed"].append(f"{src}: {e}")
 
@@ -302,20 +336,21 @@ STARTER = {
     "canvas": [1280, 720],
     "sprite": {"width": 512, "height": 768, "margin": 18},
     "backgrounds": [
-        {"src": "art/bg_classroom.png", "out": "assets/backgrounds/bg_classroom.jpg",
-         "fit": "cover", "quality": 92},
+        {"src": "art/bg_classroom.png", "out": "assets/backgrounds/bg_classroom.webp",
+         "fit": "cover", "quality": 88},
     ],
     "sprites": [
-        {"src": "art/eileen_happy.png", "out": "assets/sprites/eileen_happy.png",
+        {"src": "art/eileen_happy.png", "out": "assets/sprites/eileen_happy.webp",
          "key": "magenta", "trim": True},
     ],
     "copies": [],
 }
 
 USAGE_HINTS = [
-    "backgrounds: 16:9 cover-cropped JPEG (quality 92 by default)",
-    "sprites: RGBA PNG on a fixed canvas, feet on the baseline",
+    "backgrounds: 16:9 cover-cropped lossy WebP (quality 88 by default)",
+    "sprites: lossless WebP with alpha, fixed canvas, feet on the baseline",
     "keys: magenta / green / auto",
+    "legacy .png/.jpg outputs are redirected to .webp — the pack is WebP-only",
 ]
 
 

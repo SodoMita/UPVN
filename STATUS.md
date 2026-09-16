@@ -1,6 +1,34 @@
-# Current Status — 2026-09-15 (M28: Audit Fixes & Reliability Hardening, v0.7.1)
+# Current Status — 2026-09-16 (M29: HQ Scene, Packed Art, Zero-Setup Authoring, v0.7.2)
 
 ## Last completed
+- **M29 HQ scene + stage visibility (2026-09-16, v0.7.2)**: the "dark bands over the sprite" bug
+  that blocked this milestone is fixed and understood — they were never materials.
+  - **Root cause**: the shipped template still contained the factory **Cube** (only unlinked
+    from the master collection by `make_template.py`, never deleted → 171 px grey square in
+    front of the background) and the baked 3D classroom in `VN_3DStage` (desks/chairs poke
+    through the background plane → brown band across the character). Live scene dump proved
+    the band was not a contract object.
+  - **Rule** (`engine/render/stage_manager.py` + `VNController.load()`): a script that never
+    uses `load_stage`/`show3d`/`anim`/`camera preset` gets the stage hidden automatically —
+    no author action. Live: `examples/20_smoke_game` → `stage_used=false stage_visible=0`
+    (art/qa/m29_09_clean.webp, clean HQ frame), `examples/02_sprites_backgrounds` → 43/43
+    visible (art/qa/m29_10_stage3d.webp). Headless `prepare()` records the flag for tests.
+  - **Flag**: `upvn_stage` **STRING** game property stamped on every `VN_3DStage` object by
+    `_mark_stage_objects` (Setup Scene) and `make_template.py`. BOOL game properties written
+    through the data API read back as False in the player and `obj[name]=True` writes an ID
+    property the runtime cannot see — both measured, both documented in the code.
+  - **Template hygiene**: factory Cube/Camera/`Collection` deleted, factory lamp moved into
+    `VN_3DStage`, launcher `sys.path` bootstrap walks up to five parents (sub-folder blends).
+  - **Scene/art**: WebP-first pipeline (15 duplicate space-named files removed, 2.7 MB),
+    `image_mode` detected per project, readability palette + `ensure_readable`, sprite
+    aspect-fit with one ground line, template bricks intact.
+  - **QA**: `tools/check_template.py` shipping gate (structure + stamp + launcher props,
+    friendly `Hint:`s, non-zero exit) wired into `tools/package_game.py`; `UPVN_SCENE_DUMP`
+    now `{"objects", "stage"}`; heartbeat `stage_used`/`stage_visible`; `desktop_shot.sh`
+    pixel-gated WebP captures.
+  - **Reliability**: 385 passed / 16 skipped, headless goldens unchanged, no new Ren'Py
+    syntax. Docs: CHANGELOG 0.7.2, docs/M29_HQ_SCENE_VISIBILITY.md.
+
 - **M28 Audit Fixes Phase 1+2 (2026-09-15, v0.7.1)**: full engine/UI/frontend/addon reliability hardening — no silent failures.
   - **vn_interpreter.py**: _execute_node loc-aware — say interpolate with _loc + interp_warnings collection, pause dur safe_eval _loc with logged fallback, jump/call expr eval with _loc, assign safe_exec_assign _loc + div-zero guard, if cond eval failure logged as False, menu cond safe_eval _loc filters false choices, raises ScriptRuntimeError if no choices after filtering, caption preserved, for loop safe_eval iterable _loc + non-iterable handled via list() try/except treating as empty with log, _bind_for_target validates tuple unpack with TypeError/length mismatch warning, python block errors include loc in compat message and _loc in strict, screen render errors propagated to event and logged, camera_zoom/move easing handled, anim target missing logged. run() menu choice validates isinstance int and bounds 0..len-1 before indexing (was only run_headless), raises ScriptRuntimeError on bad choice. _eval_expr signature (_loc) with label/index, _eval_screen_expr returns None in full tier with log instead of crash, _render_screen returns errors dict with traceback snippet and prints, _run_init_python logs line number i+1 in compat errors. strip_tags improved + parse_rich_tags preserved.
   - **parser.py**: bare except at camera_zoom dur parsing (lines 1549/1557) fixed to except ValueError (prevents swallowing KeyboardInterrupt/SystemExit), Character fallback "??" replaced with "Unnamed" + warnings.warn for visibility.
@@ -27,6 +55,6 @@
 - Keep pytest green + headless traces: 363 passed verified after M28 fixes.
 
 ## Recommended next task
-- Publish GitHub release with dist/upvn_editor_addon_v0.7.1.zip
+- Publish GitHub release with dist/upvn_editor_addon_v0.7.2.zip (1419 KB, 43 entries, engine+frontend bundled)
 - Human-in-the-loop acceptance: open blend/UPVN_Template.blend in UPBGE → UPVN tab ✓ Engine → Create Project → Setup Scene HQ → P → click/Space advances, menu filtering, typewriter, interpolation warnings visible in heartbeat
 - Third corpus regression breadth, GitHub release notes

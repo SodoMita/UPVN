@@ -50,6 +50,95 @@ SPRITE_SCALE = (1.8, 3.2, 1.0)
 # ---------------------------------------------------------------------------
 # Adaptive GUI config loading
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# M29 sprite fit: one rule for every character plane.
+#
+# The M26-era template used a fixed (1.8, 3.2) scale for every Sprite_* plane.
+# A 512x768 character art therefore played at aspect 0.5625 instead of 0.667 —
+# about 19% vertical stretch, which reads as "cheap" instantly — and the feet
+# landed wherever the plane happened to sit. Both are now computed from the
+# image: width follows the art's aspect ratio, and the figure stands on one
+# shared ground line so two characters never float relative to each other.
+SPRITE_HEIGHT = 3.2          # world units of a full-body sprite
+SPRITE_FEET_Z = -2.75        # shared ground line (above the dialogue panel)
+
+
+def fit_sprite_plane_scale(img_w, img_h, height: float = SPRITE_HEIGHT,
+                           feet_z: float = SPRITE_FEET_Z):
+    """(scale_xyz, location_z) for a character plane showing an img_w x img_h image.
+
+    Returns ((sx, sy, 1.0), z_center): the plane keeps the art's aspect ratio,
+    is `height` tall, and its BOTTOM edge sits on `feet_z`.
+    """
+    try:
+        iw = float(img_w) or 1.0
+        ih = float(img_h) or 1.0
+    except Exception:
+        iw, ih = 1.0, 1.0
+    h = float(height)
+    w = h * (iw / ih)
+    z_center = float(feet_z) + h / 2.0
+    return (w, h, 1.0), z_center
+
+
+# ---------------------------------------------------------------------------
+# M29 legibility contract.
+#
+# The adaptive GUI introduced in M28 is *correct* for a converted Ren'Py game
+# (its art is drawn for a white 80%-opaque textbox with dark text). Applied to
+# a UPVN project whose background is a bright photograph-like image, the same
+# defaults give a light band and light text on it — "the dialogue vanished"
+# with no error. Rather than betting on the config, colours are now checked
+# for contrast and corrected deterministically; every correction is reported
+# so nothing changes silently.
+def _luma(rgb) -> float:
+    """Perceived brightness, Rec. 709 weights (0=black, 1=white)."""
+    r, g, b = (float(c) for c in rgb[:3])
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+
+def _scale(rgb, factor):
+    return tuple(min(1.0, max(0.0, float(c) * factor)) for c in rgb[:3]) + (1.0,)
+
+
+def ensure_readable(panel, text, speaker=None, min_delta: float = 0.42,
+                    min_panel_alpha: float = 0.78):
+    """Adjust (panel, text, speaker) so the dialogue is legible on any art.
+
+    Rules (all deterministic, all reported):
+      * the panel must be opaque enough to sit over a busy background
+        (`min_panel_alpha`) — a 60%-transparent band over a photo hides text;
+      * |luma(panel) - luma(text)| >= min_delta, i.e. dark text on a light
+        panel or light text on a dark panel;
+      * the speaker colour is pushed toward whichever side the body text took
+        when it sits too close to the panel.
+
+    Returns (panel, text, speaker, notes) — notes is a list of strings for the
+    log/heartbeat ("why did my text change colour?" must be answerable).
+    """
+    notes = []
+    panel = tuple(panel)
+    text = tuple(text)
+    speaker = tuple(speaker) if speaker else None
+
+    if len(panel) >= 4 and panel[3] < min_panel_alpha:
+        notes.append(f"panel alpha {panel[3]:.2f} -> {min_panel_alpha:.2f} (over art)")
+        panel = (panel[0], panel[1], panel[2], min_panel_alpha)
+
+    light_panel = _luma(panel) >= 0.5
+    want_text = (0.08, 0.09, 0.12, 1.0) if light_panel else (0.96, 0.97, 1.0, 1.0)
+    if abs(_luma(text) - _luma(panel)) < min_delta:
+        notes.append(f"text luma {_luma(text):.2f} -> {_luma(want_text):.2f} "
+                     f"({'dark on light' if light_panel else 'light on dark'})")
+        text = want_text
+    if speaker is not None and abs(_luma(speaker) - _luma(panel)) < min_delta * 0.75:
+        tint = speaker[:3]
+        adjusted = _scale(tint, 0.45) if light_panel else _scale(tint, 1.25)
+        notes.append(f"speaker luma {_luma(speaker):.2f} -> {_luma(adjusted):.2f}")
+        speaker = adjusted
+    return panel, text, speaker, notes
+
+
 def _load_adaptive_config():
     """
     Load GUI config from any Ren'Py project.
@@ -83,12 +172,19 @@ def _load_adaptive_config():
         choice_idle_hex = colors.get("choice_idle", "#888888")
         choice_hover_hex = colors.get("choice_hover", "#ffffff")
         
-        # For dialogue box: white semi-transparent like Ren'Py textbox.png
-        # Ren'Py textbox.png is 255,255,255,204 (80% alpha)
+        # Dialogue panel. Two honest cases (M29):
+        #   * a REAL gui config (upvn_gui.json / gui.rpy from a Ren'Py project)
+        #     means the game's art is drawn for Ren'Py's white 80% textbox —
+        #     keep it, the legibility pass below only fixes contrast;
+        #   * generic defaults mean this is a plain UPVN project with its own
+        #     art — a white band over a bright background is invisible, so the
+        #     showcase panel (dark navy, high alpha) is used instead.
         dialogue_box_rgba = (1.0, 1.0, 1.0, 0.8)
-        # If config has dialogue_box color, use it
-        if "dialogue_box" in colors and colors["dialogue_box"] != "#ffffff":
+        real_gui = config.get("source") not in (None, "generic_defaults")
+        if real_gui and "dialogue_box" in colors and colors["dialogue_box"] != "#ffffff":
             dialogue_box_rgba = hex_to_rgba(colors["dialogue_box"], 0.8)
+        elif not real_gui:
+            dialogue_box_rgba = (0.05, 0.07, 0.16, 0.88)
         
         default_text_rgba = hex_to_rgba(text_hex, 1.0)
         speaker_rgba = hex_to_rgba(accent_hex, 1.0)
@@ -119,6 +215,22 @@ def _load_adaptive_config():
         # Check if parsed fonts are in our known set, else use them as-is
         # The actual font file resolution happens in find_ui_font
         
+        if not real_gui:
+            # showcase palette: plates and name colours designed for photo-like
+            # art (dark plates, light text) instead of Ren'Py's grey/white UI
+            choice_idle_rgba = (0.16, 0.20, 0.34, 0.92)
+            choice_hover_rgba = (0.30, 0.40, 0.62, 0.98)
+            choice_text_idle_rgba = (0.96, 0.97, 1.0, 1.0)
+            choice_text_hover_rgba = (1.0, 1.0, 1.0, 1.0)
+            speaker_rgba = (0.78, 1.0, 0.78, 1.0)
+
+        # M29: legibility pass — a config may hand us light-on-light
+        _panel, _text, _speaker, _notes = ensure_readable(
+            dialogue_box_rgba, default_text_rgba, speaker_rgba)
+        for _n in _notes:
+            print(f"[contract] legibility: {_n}")
+        dialogue_box_rgba, default_text_rgba, speaker_rgba = _panel, _text, _speaker
+
         return {
             "dialogue_location": tuple(dialogue_loc),
             "dialogue_scale": tuple(dialogue_scale),
@@ -145,6 +257,9 @@ def _load_adaptive_config():
         # Fallback to generic defaults (not LearnToCodeRPG specific)
         # These are Ren'Py's default template values — NOT hardcoded LTCR
         print(f"[contract] adaptive config load failed: {e}, using generic defaults")
+        # M29 showcase defaults (no config = a UPVN project with its own art):
+        # dark navy panel + light text, i.e. the palette-era look that is
+        # legible over any background, instead of a Ren'Py white box.
         return {
             "dialogue_location": (0.0, -0.4, -3.496),
             "dialogue_scale": (7.5, 0.722, 1.0),
@@ -154,13 +269,13 @@ def _load_adaptive_config():
             "choice_height_factor": 0.096,
             "choice_spacing_em": 0.252,
             "choice_base_z": 1.054,
-            "default_text_color": (1.0, 1.0, 1.0, 1.0),
-            "speaker_default_color": (1.0, 0.498, 0.498, 1.0),
-            "choice_idle_color": (0.533, 0.533, 0.533, 0.8),
-            "choice_hover_color": (1.0, 0.498, 0.498, 0.95),
-            "choice_text_idle": (1.0, 1.0, 1.0, 1.0),
+            "default_text_color": (0.96, 0.97, 1.0, 1.0),
+            "speaker_default_color": (0.78, 1.0, 0.78, 1.0),
+            "choice_idle_color": (0.16, 0.20, 0.34, 0.92),
+            "choice_hover_color": (0.26, 0.34, 0.56, 0.98),
+            "choice_text_idle": (0.96, 0.97, 1.0, 1.0),
             "choice_text_hover": (1.0, 1.0, 1.0, 1.0),
-            "dialogue_box_color": (1.0, 1.0, 1.0, 0.8),
+            "dialogue_box_color": (0.05, 0.07, 0.16, 0.88),
             "ui_font_regular": "DejaVuSans.ttf",
             "ui_font_bold": "DejaVuSans-Bold.ttf",
             "ui_font_name": "DejaVuSans.ttf",
@@ -312,10 +427,24 @@ def find_ui_font(filename: str = None):
         cands.append(Path("/usr/share/fonts/truetype/dejavu") / filename)
         cands.append(Path("/usr/share/fonts/truetype/dejavu") / base)
         cands.append(Path(f"/usr/share/fonts/truetype/lato/{base}"))
+        # M29: LAST-RESORT chain. A requested face that exists nowhere (Ren'Py
+        # interface fonts such as Hack/Lato/saxMono in a project that did not
+        # copy them) used to return None, and a FONT datablock whose file is
+        # missing draws .notdef boxes for EVERY glyph — "the dialogue is little
+        # rectangles", with no error in any log. Falling back to the bundled
+        # DejaVu pair keeps text legible; the caller packs it into the .blend.
+        fallbacks = ("DejaVuSans-Bold.ttf" if "bold" in base.lower()
+                     else "DejaVuSans.ttf", "DejaVuSans.ttf")
+        for fb in fallbacks:
+            cands.append(here.parents[2] / "blend" / "fonts" / fb)
+            cands.append(Path("/usr/share/fonts/truetype/dejavu") / fb)
         
         for c in cands:
-            if c.exists():
-                return str(c)
+            try:
+                if c.exists():
+                    return str(c)
+            except Exception:
+                continue
     except Exception:
         pass
     return None
@@ -335,6 +464,15 @@ def style_font_curve(data, bold: bool = False, shear: float | None = None, font_
             if font is not None:
                 data.font = font
                 status = "dejavu"
+                # M29: pack the bytes into the .blend. An unpacked font is a
+                # path, and a path can be wrong on the player's machine (or
+                # after the project is moved/packaged) — packing removes the
+                # whole failure class.
+                try:
+                    if not font.packed_file:
+                        font.pack()
+                except Exception:
+                    pass
     except Exception:
         pass
     try:
@@ -365,6 +503,14 @@ CONTROLLER = "VNController"
 LAUNCHER_TEXT = "upvn_launcher"
 ASSET_BACKGROUNDS = "assets/backgrounds"
 ASSET_SPRITES = "assets/sprites"
+
+# M29: ONE ordered extension list for asset lookup (M19 rule — no literals
+# scattered through the renderers). WebP first: it is the pack format the
+# asset pipeline writes (tools/make_asset_pack.py), it carries lossless alpha
+# for sprites, and it is 30-70% smaller than PNG/JPG at the same quality,
+# which matters for shipped games. PNG/JPG/JPEG stay supported so a game
+# converted from Ren'Py keeps working unchanged.
+IMAGE_EXTENSIONS = (".webp", ".png", ".jpg", ".jpeg")
 
 IMAGE_MODE_DEFAULT = "color"
 _IMAGE_MODES = ("color", "auto")

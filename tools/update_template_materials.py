@@ -1,10 +1,23 @@
-"""Update blend/UPVN_Template.blend in place — M26 texture-free materials.
+"""Update blend/UPVN_Template.blend in place — M26 palette + M29 alpha/art.
 
 Runs offline (blender --background): rewrites the five VN materials to the
 Object Info -> Emission graph so runtime palette code paints everything via
 KX_GameObject.color, seeds each object's default tint, and writes the
 image_mode policy property. Logic bricks and existing game properties are
 left untouched (make_template cannot rebuild them headless).
+
+M29 additions (all three were field bugs with a live player):
+
+  * ALPHA — tex-capable materials (background + every Sprite_* plane) get a
+    Transparent/Emission pair mixed by the texture's own alpha channel, and
+    `blend_method='HASHED'`. Before this the sprite PNG/WebP was drawn as an
+    opaque quad: the character had a solid black box around her.
+  * FONTS — every FONT datablock is re-pointed at blend/fonts/DejaVu*.ttf and
+    PACKED into the .blend. A template whose font path does not resolve draws
+    .notdef boxes for every glyph ("text is little rectangles") with no error
+    anywhere; packing makes the file self-contained.
+  * ART MODE — `image_mode=auto` so a project with assets/*.webp shows the
+    real art; without assets the palette still paints (same fallback rule).
 
 Usage:
   blender --background blend/UPVN_Template.blend --python tools/update_template_materials.py
@@ -52,11 +65,16 @@ def ensure_white_image():
     return img
 
 
-def rewrite_unlit(mat, color, tex_capable=False):
+def rewrite_unlit(mat, color, tex_capable=False, alpha=False):
     """Output <- Emission <- [ Mix(A=ObjectInfo.Color, B=TexImage, F=0) ].
 
-    tex_capable graphs let the runtime assign real PNGs per material
-    (contract.apply_material_image flips the Factor to 1.0)."""
+    tex_capable graphs let the runtime assign real images per material
+    (contract.apply_material_image flips the Factor to 1.0).
+
+    `alpha=True` adds the transparency path used by sprites: a Transparent
+    BSDF and an Emission are mixed by the texture's ALPHA output, and the
+    material is set to HASHED. Object-color (palette) mode keeps working —
+    the starter image is opaque white, so alpha evaluates to 1."""
     mat.use_nodes = True
     nt = mat.node_tree
     nt.nodes.clear()
@@ -83,11 +101,38 @@ def rewrite_unlit(mat, color, tex_capable=False):
         nt.links.new(objinfo.outputs["Color"], em.inputs["Color"])
     em.inputs["Color"].default_value = color
     em.inputs["Strength"].default_value = 1.0
-    nt.links.new(em.outputs[0], out.inputs[0])
-    for attr, val in (("blend_method", "OPAQUE"), ("shadow_method", "NONE"),
+    if alpha and tex_capable:
+        # M29 sprite transparency: tex.Alpha drives Transparent↔Emission.
+        transp = nt.nodes.new("ShaderNodeBsdfTransparent")
+        mixs = nt.nodes.new("ShaderNodeMixShader")
+        try:
+            mixs.name = "UPVN Alpha Mix"
+        except Exception:
+            pass
+        tex_node = None
+        for n in nt.nodes:
+            if n.type == "TEX_IMAGE":
+                tex_node = n
+                break
+        if tex_node is not None:
+            nt.links.new(tex_node.outputs["Alpha"], mixs.inputs[0])
+        else:
+            mixs.inputs[0].default_value = 1.0
+        nt.links.new(transp.outputs[0], mixs.inputs[1])
+        nt.links.new(em.outputs[0], mixs.inputs[2])
+        nt.links.new(mixs.outputs[0], out.inputs[0])
+    else:
+        nt.links.new(em.outputs[0], out.inputs[0])
+    for attr, val in (("blend_method", "HASHED" if alpha else "OPAQUE"),
+                      ("shadow_method", "NONE"),
                       ("use_backface_culling", False)):
         try:
             setattr(mat, attr, val)
+        except Exception:
+            pass
+    if alpha:
+        try:
+            mat.alpha_threshold = 0.35      # keeps thin hair/outlines solid
         except Exception:
             pass
 
@@ -134,6 +179,45 @@ def set_runtime_prop(obj, name, value):
         print(f"[update_template] value failed for {name}: {e}")
 
 
+def fix_fonts(project_root=None):
+    """Point every FONT datablock at a real, PACKED typeface.
+
+    Why (measured in a sway/pixman player run): a FONT whose filepath does not
+    resolve renders every glyph as an empty box — the dialogue is "little
+    rectangles" and nothing anywhere reports an error. Incoming .blend files
+    reference //fonts/*.ttf that may not ship, so this pins them to the
+    bundled DejaVu pair and packs the bytes into the file.
+
+    Bold-looking names (Bold/Title/Speaker) get DejaVu Sans Bold, everything
+    else DejaVu Sans Book — matching engine.render.contract.style_font_curve.
+    """
+    root = Path(project_root) if project_root else ROOT
+    fonts_dir = root / "blend" / "fonts"
+    regular = fonts_dir / "DejaVuSans.ttf"
+    bold = fonts_dir / "DejaVuSans-Bold.ttf"
+    if not regular.is_file():
+        print(f"[update_template] fonts: {regular} missing — skipped")
+        return
+    fixed, packed = 0, 0
+    for f in bpy.data.fonts:
+        try:
+            if f.name.startswith("Bfont"):
+                continue                     # Blender's builtin
+            want_bold = any(k in f.name for k in ("Bold", "Title", "Speaker"))
+            target = bold if (want_bold and bold.is_file()) else regular
+            current = Path(bpy.path.abspath(f.filepath)) if f.filepath else None
+            if current is None or not current.is_file():
+                f.filepath = str(target)
+                fixed += 1
+            if not f.packed_file:
+                f.pack()
+                packed += 1
+        except Exception as e:
+            print(f"[update_template] font fix failed for {getattr(f, 'name', '?')}: {e}")
+    print(f"[update_template] fonts: {fixed} re-pointed, {packed} packed "
+          f"({len(list(bpy.data.fonts))} total)")
+
+
 def fix_physics():
     """SENSOR objects are not ray-detectable in UPBGE 0.50 — STATIC + BOX."""
     n = 0
@@ -163,6 +247,7 @@ def widen_bg():
 
 
 def main():
+    fix_fonts()
     fix_physics()
     widen_bg()
     ensure_white_image()
@@ -172,7 +257,7 @@ def main():
         mat = bpy.data.materials.get(name)
         if mat is None:
             mat = bpy.data.materials.new(name)
-        rewrite_unlit(mat, MATERIALS["MASprite"], tex_capable=True)
+        rewrite_unlit(mat, MATERIALS["MASprite"], tex_capable=True, alpha=True)
         sp = bpy.data.objects.get(f"Sprite_{pos}")
         if sp is not None:
             try:
@@ -184,7 +269,8 @@ def main():
         mat = bpy.data.materials.get(name)
         if mat is None:
             mat = bpy.data.materials.new(name)
-        rewrite_unlit(mat, color, tex_capable=name in TEX_CAPABLE)
+        rewrite_unlit(mat, color, tex_capable=name in TEX_CAPABLE,
+                      alpha=name in TEX_CAPABLE)
         try:
             mat.use_fake_user = True   # survive save when unused
         except Exception:
@@ -214,8 +300,11 @@ def main():
 
     ctrl = bpy.data.objects.get("VNController")
     if ctrl is not None:
-        set_runtime_prop(ctrl, "image_mode", "color")
-        print("[update_template] image_mode=color written to VNController")
+        # M29: "auto" — use assets/*.webp when the project ships art, fall
+        # back to the palette when it does not (same rule as before, but the
+        # template that ships WITH art should show it).
+        set_runtime_prop(ctrl, "image_mode", "auto")
+        print("[update_template] image_mode=auto written to VNController")
 
     bpy.ops.wm.save_mainfile()
     print("[update_template] saved")

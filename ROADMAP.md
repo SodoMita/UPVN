@@ -256,6 +256,19 @@
     - "pytest tests/ -q green (276 passed, 16 skipped at freeze)"
   example_project: examples/20_smoke_game
   done_when: "feature freeze holds: no new Ren'Py syntax until install/setup/play is boring"
+- id: M29
+  name: HQ scene, packed art, zero-setup authoring — and a stage that gets out of the way
+  status: done   # 2026-09-16: template hygiene + script-derived 3D-stage visibility, WebP pipeline, readability palette, sprite aspect-fit; live-verified in sway/pixman
+  depends_on: [M28]
+  acceptance:
+    - "pytest tests/ -q green (385 passed, 16 skipped)"
+    - "art/qa/m29_09_clean.webp: 2D frame = art + grounded sprite + navy panel, no props or factory Cube"
+    - "heartbeat stage_used=false stage_visible=0 for a 2D script; 43/43 visible for examples/02"
+    - "tools/check_template.py green on the shipped and packaged blend"
+  example_project: examples/20_smoke_game
+  done_when: "an author gets a clean, HQ frame from 'Setup Scene' with no Python and no cleanup, and 3D scenes still work"
+  note: "M26/M27/M28 were recorded in CHANGELOG.md + STATUS.md + docs/*.md only, not in this ledger"
+
 ```
 
 ## Agent protocol (repeat every session)

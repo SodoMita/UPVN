@@ -1,65 +1,28 @@
 {
-  "_comment": "UPVN sample art pipeline (M29). Raw AI/freehand art lives in art/, game-ready assets in assets/. Re-run: python tools/make_asset_pack.py tools/pack/sample_art.json",
+  "_comment": "UPVN sample art pipeline (M29). Raw art lives in art/, game-ready WebP assets in assets/. Re-run: python3 tools/make_asset_pack.py tools/pack/sample_art.json. The pack is WebP-only: backgrounds are lossy q88, sprites lossless with alpha, and any stale .png/.jpg sibling of an output is pruned so the shipped tree never drifts back to uncompressed formats.",
   "root": "../..",
-  "canvas": [
-    1280,
-    720
-  ],
-  "sprite": {
-    "width": 512,
-    "height": 768,
-    "margin": 18
-  },
+  "canvas": [1280, 720],
+  "sprite": {"width": 512, "height": 768, "margin": 18},
+
   "backgrounds": [
-    {
-      "src": "art/bg_classroom.png",
-      "out": "assets/backgrounds/bg_classroom.jpg",
-      "fit": "cover",
-      "quality": 92
-    },
-    {
-      "src": "art/bg_lecturehall.png",
-      "out": "assets/backgrounds/bg_lecturehall.jpg",
-      "fit": "cover",
-      "quality": 92
-    },
-    {
-      "src": "art/bg_meadow.png",
-      "out": "assets/backgrounds/bg_meadow.jpg",
-      "fit": "cover",
-      "quality": 92
-    },
-    {
-      "src": "art/bg_uni.png",
-      "out": "assets/backgrounds/bg_uni.jpg",
-      "fit": "cover",
-      "quality": 92
-    }
+    {"src": "art/bg_classroom.png",   "out": "assets/backgrounds/bg_classroom.webp",   "fit": "cover", "quality": 88},
+    {"src": "art/bg_lecturehall.png", "out": "assets/backgrounds/bg_lecturehall.webp", "fit": "cover", "quality": 88},
+    {"src": "art/bg_meadow.png",      "out": "assets/backgrounds/bg_meadow.webp",      "fit": "cover", "quality": 88},
+    {"src": "art/bg_uni.png",         "out": "assets/backgrounds/bg_uni.webp",         "fit": "cover", "quality": 88}
   ],
+
   "sprites": [
-    {
-      "src": "art/eileen_neutral.png",
-      "out": "assets/sprites/eileen_neutral.png",
-      "key": "magenta",
-      "trim": true
-    },
-    {
-      "src": "art/eileen_happy.png",
-      "out": "assets/sprites/eileen_happy.png",
-      "key": "magenta",
-      "trim": true
-    },
-    {
-      "src": "art/sylvie.png",
-      "out": "assets/sprites/sylvie.png",
-      "key": "magenta",
-      "trim": true
-    }
+    {"src": "art/eileen_neutral.png", "out": "assets/sprites/eileen_neutral.webp", "key": "magenta", "trim": true},
+    {"src": "art/eileen_happy.png",   "out": "assets/sprites/eileen_happy.webp",   "key": "magenta", "trim": true},
+    {"src": "art/sylvie.png",         "out": "assets/sprites/sylvie.webp",         "key": "magenta", "trim": true}
   ],
+
   "copies": [
-    {
-      "src": "assets/sprites/eileen_neutral.png",
-      "out": "assets/sprites/eileen.png"
-    }
+    {"src": "assets/sprites/eileen_neutral.webp", "out": "assets/sprites/eileen.webp"},
+    {"src": "assets/sprites/eileen_happy.webp",   "out": "assets/sprites/eileen happy.webp"},
+    {"src": "assets/backgrounds/bg_classroom.webp",   "out": "assets/backgrounds/bg classroom.webp"},
+    {"src": "assets/backgrounds/bg_lecturehall.webp", "out": "assets/backgrounds/bg lecturehall.webp"},
+    {"src": "assets/backgrounds/bg_meadow.webp",      "out": "assets/backgrounds/bg meadow.webp"},
+    {"src": "assets/backgrounds/bg_uni.webp",         "out": "assets/backgrounds/bg uni.webp"}
   ]
 }

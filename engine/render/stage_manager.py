@@ -27,9 +27,89 @@ except ImportError:
 
 from ..core.vn_state import VNState
 
+# M29 — the stage set is hidden unless the script actually addresses it.
+#
+# The shipped template bakes a 3D classroom into the VN_3DStage collection so
+# `load_stage` / `show3d` work with zero setup. For a pure-2D game those 42
+# objects are not a feature, they are junk painted over the art: live-measured
+# in the M29 template, Desk_*/Chair_*/Wall_*/Blackboard occluded the character
+# planes (a brown band across the sprite) and the leftover factory Cube sat
+# dead centre of every frame. Asking authors to hide them by hand is exactly
+# the kind of chore this project exists to remove, so the rule is automatic
+# and derived from the parsed script: no stage direction -> no stage objects.
+STAGE_COLLECTION = "VN_3DStage"   # collection the authoring tools bake into
+STAGE_PROP = "upvn_stage"         # game property set on every object in it
+STAGE_EVENT_TYPES = ("load_stage", "show3d", "anim", "camera_preset")
+
+
+def script_uses_stage(script_dict) -> bool:
+    """True when the parsed program contains any 3D-stage direction.
+
+    Walks the label bodies generically (nested blocks/ifs included) so it keeps
+    working when the parser grows new container nodes.
+    """
+    if not script_dict:
+        return False
+    labels = script_dict.get("labels") or {}
+    stack = list(labels.values())[:4000]
+    budget = 20000
+    while stack and budget > 0:
+        node = stack.pop()
+        budget -= 1
+        if isinstance(node, dict):
+            # parser output uses "cmd" ({"cmd": "show3d"}), interpreter events
+            # use "type"; accept both so a change of layer cannot silently
+            # re-enable the stage set on a 2D game.
+            if node.get("cmd") in STAGE_EVENT_TYPES \
+                    or node.get("type") in STAGE_EVENT_TYPES:
+                return True
+            stack.extend(node.values())
+        elif isinstance(node, (list, tuple)):
+            stack.extend(node)
+    return False
+
 class StageManager:
     def __init__(self, state: VNState):
         self.state = state
+        self.stage_used = False    # script asks for 3D staging
+        self.stage_hidden = 0      # objects hidden because it does not
+
+    def prepare(self, script_dict):
+        """Decide once, at load, whether the baked 3D stage is on screen.
+
+        Headless-first: without bge this only records the flag (tests assert
+        it); with bge the VN_3DStage objects are switched off before the first
+        frame. Returns the flag so callers can log it.
+        """
+        self.stage_used = script_uses_stage(script_dict)
+        if self.stage_used or not HAS_BGE:
+            return self.stage_used
+        try:
+            import bge
+            scene = bge.logic.getCurrentScene()
+        except Exception as e:                      # pragma: no cover - bge only
+            print(f"[StageManager] stage visibility skipped: {e}")
+            return self.stage_used
+        hidden = 0
+        try:
+            for ob in scene.objects:
+                try:
+                    if STAGE_PROP in ob and ob[STAGE_PROP]:
+                        ob.visible = False
+                        hidden += 1
+                except Exception:
+                    continue
+        except Exception as e:                      # pragma: no cover - bge only
+            print(f"[StageManager] stage hide failed: {e}")
+            return self.stage_used
+        self.stage_hidden = hidden
+        if hidden:
+            print(f"[StageManager] 2D script — hid {hidden} {STAGE_COLLECTION} "
+                  "objects (no load_stage/show3d/camera preset in script)")
+        elif not hidden:
+            print(f"[StageManager] 2D script but no objects carry {STAGE_PROP} "
+                  "(scene built before M29? re-run Setup Scene)")
+        return self.stage_used
 
     def apply_event(self, event: dict):
         t = event.get("type")

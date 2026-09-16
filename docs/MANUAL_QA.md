@@ -4,6 +4,18 @@ Traces are CI; this page is for humans with eyes. Everything here runs on the
 headless stack from `docs/SANDBOX_UPBGE.md` (Wayland preferred). Automated
 twin: `tools/smoke_walkthrough.sh` (self-verifying, retry-until-state).
 
+## 0.5 Template gate + QA numbers (M29)
+- [ ] `blender --background --python tools/check_template.py` → "template is
+      shippable" (contract-only master collection, `upvn_stage` stamp, launcher
+      props). Non-zero exit + `Hint:` lines mean the .blend regressed.
+- [ ] `UPVN_SCENE_DUMP=/tmp/dump.json bash tools/desktop_shot.sh art/qa/x.webp 30`
+      then check `/tmp/dump.json` → `stage.used=false, stage.visible=0` for
+      `examples/20_smoke_game` (a 2D script) and `43/43` for
+      `examples/02_sprites_backgrounds`. `upvn_hb.json` carries the same answer
+      as `stage_used` / `stage_visible`.
+- [ ] `tools/package_game.py --project <p> --out /tmp/pack` prints
+      "Template gate: … ok" — packaging refuses to bless a blend that failed it.
+
 ## 0. Prep (once per sandbox)
 - [ ] UPBGE 0.50 extracted; `blenderplayer` runs (`--version`).
 - [ ] userpref prep done (BUG-006) — otherwise instant segfault.

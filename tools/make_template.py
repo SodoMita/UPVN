@@ -196,9 +196,22 @@ def main(out_path: Path | None = None):
     for sc in list(bpy.data.scenes):
         if sc is not scene:
             bpy.data.scenes.remove(sc, do_unlink=True)
-    # empty master collection of leftover factory objects
+    # Delete the factory objects for real. Unlinking alone left the default
+    # Cube alive in the file: live-measured in the M29 template it rendered as
+    # a 171 px grey square dead centre of every 2D frame (it straddles the
+    # background plane, so it is drawn in front of the art).
     for ob in list(scene.collection.objects):
         scene.collection.objects.unlink(ob)
+        try:
+            bpy.data.objects.remove(ob, do_unlink=True)
+        except Exception:
+            pass
+    for col in list(bpy.data.collections):
+        try:
+            if not col.objects and not col.children and col.users == 0:
+                bpy.data.collections.remove(col)
+        except Exception:
+            pass
     try:
         bpy.context.window.scene = scene
     except Exception:
@@ -292,6 +305,11 @@ def main(out_path: Path | None = None):
     # Placeholder capsule characters — HQ taller, better colors
     _cylinder("Char_Eileen_placeholder", 0.28, 1.5, (-1.6, 1.2, 0.95), eileen_c, stage_col)
     _cylinder("Char_Sylvie_placeholder", 0.28, 1.5, (1.6, 1.2, 0.95), sylvie_c, stage_col)
+
+    # ---- M29: stamp the 3D stage so the runtime can hide it for 2D scripts ----
+    from blend.upvn_editor_addon import _mark_stage_objects
+    marked = _mark_stage_objects(bpy)
+    print(f"[make_template] VN_3DStage: {marked} objects stamped upvn_stage")
 
     # ---- save ----
     out_path = Path(out_path)

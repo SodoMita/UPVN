@@ -54,7 +54,11 @@ def test_whole_project_tree_ships(packaged):
     _, out = packaged
     game = out / "10_full_sample_game" / "game"
     assert (game / "script.rpy").exists()
-    assert any((game / "assets" / "backgrounds").glob("*.png"))
+    # M29: the pipeline packs WebP (was PNG/JPG) — assert that art survives,
+    # not which of the supported extensions it happens to use.
+    _imgs = [f for f in (game / "assets" / "backgrounds").iterdir()
+             if f.suffix.lower() in {".webp", ".png", ".jpg", ".jpeg"}]
+    assert _imgs, "packaged game must keep its background art"
     assert (game / "stages" / "classroom_3d.blend").exists(), (
         "stages/ must ship — StageManager resolves //../game/stages/")
     # engine runtime next to the blend

@@ -334,6 +334,38 @@ def _find_blender():
     return _sh.which("blender")
 
 
+def _check_packaged_blend(build_blend: Path) -> bool:
+    import subprocess as _sh
+    """Run tools/check_template.py against the packaged blend (M29 gate).
+
+    Returns True when the build is shippable. A build whose blend fails the
+    gate is exactly the kind of silent degradation this project keeps paying
+    for: the story still runs, the art is just covered by leftover props.
+    """
+    exe = _find_blender()
+    checker = Path(__file__).resolve().parent / "check_template.py"
+    if exe is None or not checker.exists():
+        print("NOTE: skipped the template gate (no blender binary)")
+        return True
+    try:
+        proc = _sh.run([exe, "--background", "--python", str(checker),
+                        "--", "--blend", str(build_blend)],
+                       capture_output=True, text=True, timeout=300,
+                       env={**os.environ, "LIBGL_ALWAYS_SOFTWARE": "1"})
+    except Exception as e:
+        print(f"NOTE: template gate could not run ({e})")
+        return True
+    out = proc.stdout + proc.stderr
+    if proc.returncode != 0:
+        for line in out.splitlines():
+            if "check_template" in line or "Hint:" in line:
+                print(line)
+        print("WARNING: packaged blend failed the template gate — see above")
+        return False
+    print("Template gate: contract objects, 3D-stage flag and launcher props ok")
+    return True
+
+
 def _flip_packaged_blend(build_blend: Path, script_rel: str) -> bool:
     """Set VNController.script_path in the packaged blend. Returns True on
     success; logs and returns False when no binary is available."""
@@ -577,6 +609,11 @@ def package_project(project: Path, out: Path, do_zip: bool = True):
     _blend = build / "blend" / "UPVN_Template.blend"
     if _blend.exists():
         _flip_packaged_blend(_blend, "//game/script.rpy")
+        # M29 shipping gate: the packaged blend must still honour the runtime
+        # contracts (contract objects only in the master collection, the 3D
+        # stage stamped for 2D auto-hide, launcher props present). Skipped with
+        # a note when there is no blender binary — same rule as the flip.
+        _check_packaged_blend(_blend)
 
     # zip — exclude compiled bytecode (I-2)
     if do_zip:

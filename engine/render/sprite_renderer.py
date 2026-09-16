@@ -19,6 +19,7 @@ except ImportError:
 from ..core.vn_state import VNState
 from .contract import (POSITIONS, SPRITE_MATERIAL, SPRITE_FALLBACK_TAG,
                        SPRITE_TAG_PREFIX, BG_PLANE, ASSET_SPRITES,
+                       IMAGE_EXTENSIONS, fit_sprite_plane_scale,
                        image_mode_from, sprite_color, SPRITE_FALLBACK_COLOR,
                        apply_object_color, plane_material,
                        apply_material_image, reset_material_palette)
@@ -31,6 +32,46 @@ SPRITE_PATH_PREFIXES = ("//", "//game/", "//../", "//../game/",
 
 def _dbg(msg: str):
     print(f"[SpriteRenderer] {msg}")
+
+
+_image_size_cache: dict = {}
+
+
+def _image_size(path):
+    """(w, h) of an image file via bpy (the player has it). Cached — a sprite
+    is shown many times and reading a file every `show` is wasted IO."""
+    key = str(path)
+    if key in _image_size_cache:
+        return _image_size_cache[key]
+    size = None
+    try:
+        import bpy  # available in-editor and in the player
+        img = bpy.data.images.load(key, check_existing=True)
+        size = (int(img.size[0]), int(img.size[1]))
+    except Exception:
+        size = None
+    _image_size_cache[key] = size
+    return size
+
+
+def apply_sprite_fit(plane, tex_path):
+    """M29: aspect-correct + ground-line the character plane from its art.
+
+    Without this a 512x768 sprite stretches to the template's fixed (1.8, 3.2)
+    and every pose has different proportions. Falls back silently to the
+    template scale when the image cannot be read (the plane still shows).
+    """
+    size = _image_size(tex_path) if tex_path else None
+    if not size or not size[0] or not size[1]:
+        return False
+    try:
+        scale, z_center = fit_sprite_plane_scale(size[0], size[1])
+        plane.worldScale = scale
+        pos = list(getattr(plane, "worldPosition", (0.0, -0.15, 0.0)))
+        plane.worldPosition = (pos[0], pos[1], z_center)
+        return True
+    except Exception:
+        return False
 
 # transition durations (seconds)
 TRANS_DUR = {"dissolve": 0.4, "fade": 0.5, None: 0.0}
@@ -95,8 +136,14 @@ class SpriteRenderer:
                 else:
                     _dbg(f"show {tag}: no plane object in scene — skipped")
                     return
-            # place at correct world position
-            plane.worldPosition = POSITIONS[position]  # type: ignore
+            # place at correct world position; palette planes (no art) keep the
+            # template scale but still stand on the shared ground line (M29)
+            try:
+                _, z_center = fit_sprite_plane_scale(2, 3)
+                pos = POSITIONS[position]
+                plane.worldPosition = (pos[0], pos[1], z_center)
+            except Exception:
+                plane.worldPosition = POSITIONS[position]  # type: ignore
             plane.visible = True
             plane["upvn_asset"] = asset
             # M26 policy: "color" never touches image files; "auto" tries
@@ -111,19 +158,23 @@ class SpriteRenderer:
                 stem = asset.replace(" ", "_")
                 slash = asset.replace(" ", "/")
                 last = asset.split()[-1] if " " in asset else "neutral"
+                # M29: every naming convention × every supported extension,
+                # WebP first (contract.IMAGE_EXTENSIONS) — a pack built by
+                # tools/make_asset_pack.py is found on the first probe, and a
+                # hand-named PNG/JPG conversion still resolves.
                 candidates = []
                 for prefix in SPRITE_PATH_PREFIXES:
-                    candidates.extend([
-                        bge.logic.expandPath(f"{prefix}{ASSET_SPRITES}/{slash}.png"),
-                        bge.logic.expandPath(f"{prefix}{ASSET_SPRITES}/{stem}.png"),
-                        bge.logic.expandPath(f"{prefix}{ASSET_SPRITES}/{tag}.png"),
-                    ])
-                candidates.append(
-                    bge.logic.expandPath(f"//assets/characters/{tag}/{last}.png"))
-                for ext in (".png", ".jpg", ".webp"):
-                    for prefix in SPRITE_PATH_PREFIXES:
-                        candidates.append(
-                            bge.logic.expandPath(f"{prefix}{ASSET_SPRITES}/{stem}{ext}"))
+                    for name in (slash, stem, tag):
+                        if not name:
+                            continue
+                        for ext in IMAGE_EXTENSIONS:
+                            candidates.append(
+                                bge.logic.expandPath(
+                                    f"{prefix}{ASSET_SPRITES}/{name}{ext}"))
+                for ext in IMAGE_EXTENSIONS:
+                    candidates.append(
+                        bge.logic.expandPath(
+                            f"//assets/characters/{tag}/{last}{ext}"))
                 for p in candidates:
                     try:
                         if os.path.exists(p):
@@ -201,12 +252,15 @@ class SpriteRenderer:
                     except Exception:
                         pass
                     plane.visible = True
+                    fitted = apply_sprite_fit(plane, tex_path)
                     self.planes[tag] = {"obj": plane, "asset": asset,
                                         "position": position,
                                         "t0": time.time(),
                                         "transition": transition,
-                                        "tint": (1.0, 1.0, 1.0)}
-                    _dbg(f"show {tag} '{asset}' → material texture {tex_path}")
+                                        "tint": (1.0, 1.0, 1.0),
+                                        "fitted": fitted}
+                    _dbg(f"show {tag} '{asset}' → material texture {tex_path} "
+                         f"(fit={'art aspect' if fitted else 'template scale'})")
                     if transition in ("dissolve", "fade"):
                         plane.color = (1, 1, 1, 1.0)
                     return

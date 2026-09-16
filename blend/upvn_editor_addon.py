@@ -1,6 +1,6 @@
 """
 UPVN Blender Editor Tools — create visual novel inside Blender with minimal coding
-v0.7.1 (2026-09-15): Creator Quality & No-Code Workflow — declarative builder, quick wizard, HQ scene
+v0.7.2 (2026-09-16): M29 HQ scene + zero-setup stage visibility — clean 2D frame, packed WebP art
 
 Why v0.6 exists
     Installing the old add-on copied this single .py into Blender's add-ons folder,
@@ -21,7 +21,7 @@ Why v0.6 exists
 
 Install (two supported ways)
   A. Dist zip (recommended):
-        dist/upvn_editor_addon_v0.7.1.zip  → Edit → Preferences → Add-ons →
+        dist/upvn_editor_addon_v0.7.2.zip  → Edit → Preferences → Add-ons →
            Install from Disk… (or Install…) → select the .zip → enable "UPVN".
      Engine, frontend and template travel inside the zip; nothing else needed.
   B. Repo checkout:
@@ -47,7 +47,7 @@ Headless fallback: when bpy unavailable (CI), the module still imports and expos
 bl_info = {
     "name": "UPVN — Visual Novel Editor",
     "author": "UPVN",
-    "version": (0, 7, 1),
+    "version": (0, 7, 2),
     "blender": (4, 2, 0),
     "location": "View3D > Sidebar > UPVN, Text Editor > Sidebar > UPVN",
     "description": "Create Ren'Py-like visual novel inside UPBGE with minimal coding — declarative builder, quick wizard, HQ scene, no Python required",
@@ -1381,7 +1381,18 @@ if '_upvn_booted' not in bge.logic.__dict__:
     if 'upvn_root' in _owner:
         _roots.append(bge.logic.expandPath(str(_owner['upvn_root'])))
     _base = os.path.dirname(bge.logic.expandPath('//'))
-    _roots += [_base, os.path.normpath(os.path.join(_base, os.pardir))]
+    # M29: walk up to four parents. A .blend saved in a subfolder (a QA copy in
+    # tmp/qa, an artist's 'scenes/' folder) must still find <root>/engine/ —
+    # before this only the blend dir and one parent were probed and the game
+    # died with 'No module named bge_frontend' in the player, which is a
+    # confusing error for a working repo.
+    _here = _base
+    for _ in range(5):
+        _roots.append(_here)
+        _up = os.path.normpath(os.path.join(_here, os.pardir))
+        if _up == _here:
+            break
+        _here = _up
     for _r in _roots:
         if _r and os.path.isdir(os.path.join(_r, 'engine')) and _r not in sys.path:
             sys.path.append(_r)
@@ -1473,8 +1484,16 @@ except Exception:
             pass
         return img
 
-    def _rewrite_unlit(mat, color, _b=None, tex_capable=False, hq=False, renpy_parity=False):
+    def _rewrite_unlit(mat, color, _b=None, tex_capable=False, hq=False, renpy_parity=False,
+                       alpha=False):
         """Emission-only, texture-free — Ren'Py identical (M28) + HQ + error logging.
+
+        M29 `alpha=True` (sprite / background planes): the texture's ALPHA
+        output mixes a Transparent BSDF against the Emission, and the material
+        is set to HASHED. Without it a character WebP/PNG draws as an opaque
+        quad — the field symptom is "my sprite has a black box around it".
+        Palette mode (object color, no texture) still works: the starter image
+        is opaque white, so alpha evaluates to 1.
 
         M28 Ren'Py parity: white semi-transparent textbox (1,1,1,0.8) like textbox.png,
         choice idle white, hover blue #00189d, flat text no extrusion, no shadow.
@@ -1565,10 +1584,36 @@ except Exception:
                 nt.links.new(src_color, em.inputs["Color"])
             except Exception as e:
                 print(f"[UPVN] _rewrite_unlit: object color link failed for {mat.name}: {e}")
-        try:
-            nt.links.new(em.outputs[0], out.inputs[0])
-        except Exception as e:
-            print(f"[UPVN] _rewrite_unlit: output link failed for {mat.name}: {e}")
+        if alpha and tex_capable:
+            # M29 sprite transparency (A/B-verified in the player: real alpha,
+            # no dark halo): Transparent <-> Emission mixed by tex.Alpha.
+            try:
+                tex_node = None
+                for n in nt.nodes:
+                    if n.type == "TEX_IMAGE":
+                        tex_node = n
+                        break
+                transp = nt.nodes.new("ShaderNodeBsdfTransparent")
+                mixs = nt.nodes.new("ShaderNodeMixShader")
+                mixs.name = "UPVN Alpha Mix"
+                if tex_node is not None:
+                    nt.links.new(tex_node.outputs["Alpha"], mixs.inputs[0])
+                else:
+                    mixs.inputs[0].default_value = 1.0
+                nt.links.new(transp.outputs[0], mixs.inputs[1])
+                nt.links.new(em.outputs[0], mixs.inputs[2])
+                nt.links.new(mixs.outputs[0], out.inputs[0])
+            except Exception as e:
+                print(f"[UPVN] _rewrite_unlit: alpha path failed for {mat.name}: {e}")
+                try:
+                    nt.links.new(em.outputs[0], out.inputs[0])
+                except Exception:
+                    pass
+        else:
+            try:
+                nt.links.new(em.outputs[0], out.inputs[0])
+            except Exception as e:
+                print(f"[UPVN] _rewrite_unlit: output link failed for {mat.name}: {e}")
         # Alpha handling: Ren'Py textbox.png is 80% opaque, so need BLEND
         is_transparent = False
         try:
@@ -1576,8 +1621,13 @@ except Exception:
                 is_transparent = True
         except Exception:
             pass
+        # M29: an alpha-mixed texture material needs HASHED (dithered) — BLEND
+        # sorts whole quads and makes stage sprites flicker against the bg.
+        if alpha and tex_capable:
+            blend_mode = "HASHED"
+            shadow_mode = "NONE"
         # For Ren'Py identical UI, always allow transparency for white boxes
-        if renpy_parity or is_transparent or "UI" in mat.name or "Choice" in mat.name or "MAUI" in mat.name or "MAChoice" in mat.name:
+        elif renpy_parity or is_transparent or "UI" in mat.name or "Choice" in mat.name or "MAUI" in mat.name or "MAChoice" in mat.name:
             blend_mode = "BLEND"
             shadow_mode = "NONE"
         else:
@@ -1859,11 +1909,45 @@ except Exception:
                               "right": 3.0, "far_right": 5.0}[p], -0.15, 0.0)
                          for p in SPRITE_POSITIONS}
 
-        def _ensure_material(_b, name, color, tex_capable=False, hq=False, renpy_parity=False):
+        def _detect_image_mode(script_path):
+            """M29: ship art when the project has it, palette when it does not.
+
+            'auto' means the renderers try assets/{backgrounds,sprites}/*.webp
+            first and fall back to the palette color per asset — the M26
+            guarantee (a missing image never equals a missing stage) still
+            holds, so 'auto' is the honest setting for a project with art.
+            A project with no assets/ images keeps 'color' (zero image IO).
+            """
+            try:
+                import os
+                p = str(script_path or "")
+                if p.startswith("//"):
+                    base = _b.path.abspath(p)
+                else:
+                    base = p
+                project_dir = base if os.path.isdir(base) else os.path.dirname(base)
+                if not project_dir or not os.path.isdir(project_dir):
+                    return IMAGE_MODE_DEFAULT
+                exts = (".webp", ".png", ".jpg", ".jpeg")
+                for sub in ("assets/backgrounds", "assets/sprites", "assets"):
+                    d = os.path.join(project_dir, sub)
+                    if not os.path.isdir(d):
+                        continue
+                    for root, _dirs, files in os.walk(d):
+                        for f in files:
+                            if f.lower().endswith(exts):
+                                return "auto"
+                return IMAGE_MODE_DEFAULT
+            except Exception:
+                return IMAGE_MODE_DEFAULT
+
+        def _ensure_material(_b, name, color, tex_capable=False, hq=False, renpy_parity=False,
+                             alpha=False):
             mat = _b.data.materials.get(name)
             if mat is None:
                 mat = _b.data.materials.new(name)
-            _rewrite_unlit(mat, color, _b=_b, tex_capable=tex_capable, hq=hq, renpy_parity=renpy_parity)
+            _rewrite_unlit(mat, color, _b=_b, tex_capable=tex_capable, hq=hq,
+                           renpy_parity=renpy_parity, alpha=alpha)
             try:
                 mat.use_fake_user = True
             except Exception:
@@ -1888,10 +1972,11 @@ except Exception:
 
         mat_bg = _ensure_material(_b, BG_MATERIAL, _bg_color,
                                   tex_capable=True, renpy_parity=True)
-        mat_sprite = _ensure_material(_b, SPRITE_MATERIAL, (0.62, 0.78, 0.55, 1.0), tex_capable=True)
+        mat_sprite = _ensure_material(_b, SPRITE_MATERIAL, (0.62, 0.78, 0.55, 1.0),
+                                      tex_capable=True, alpha=True)
         for _pos in SPRITE_POSITIONS:
             _ensure_material(_b, f"{SPRITE_MATERIAL}_{_pos}",
-                             (0.62, 0.78, 0.55, 1.0), tex_capable=True)
+                             (0.62, 0.78, 0.55, 1.0), tex_capable=True, alpha=True)
         # Ren'Py identical: white semi-transparent textbox (255,255,255,204) like gui/textbox.png — adaptive if config has it
         mat_ui = _ensure_material(_b, "MAUI", _ui_color, renpy_parity=True)
         # Ren'Py identical: choice idle white, hover blue #00189d — adaptive
@@ -2241,7 +2326,7 @@ except Exception:
         except Exception:
             pass
         _set_runtime_prop(_b, ctrl, "script_path", effective_script_path)
-        _set_runtime_prop(_b, ctrl, "image_mode", IMAGE_MODE_DEFAULT)
+        _set_runtime_prop(_b, ctrl, "image_mode", _detect_image_mode(effective_script_path))
         try:
             if "parse_mode" not in ctrl:
                 _set_runtime_prop(_b, ctrl, "parse_mode", "safe")
@@ -2277,8 +2362,42 @@ except Exception:
                     need_sensor=need_sensor, need_controller=need_controller,
                     need_keys=need_keys, need_mouse=need_mouse)
                 _set_runtime_prop(_b, ctrl, "upvn_bricks", brick_state)
+        _mark_stage_objects(_b)
         return ctrl
 
+
+    def _mark_stage_objects(_b, collection_name="VN_3DStage"):
+        """M29: stamp `upvn_stage` on every object of the baked 3D stage.
+
+        The runtime hides that collection unless the script uses it (see
+        engine/render/stage_manager.py) and finds the objects by this game
+        property — so the authoring side has to write it. Without the stamp a
+        2D game keeps the classroom props painted over its backgrounds, which
+        is exactly the bug M29 fixed; the flag is what keeps the fix working
+        for scenes built by hand or by an older add-on.
+        """
+        try:
+            col = _b.data.collections.get(collection_name)
+        except Exception:
+            return 0
+        if col is None:
+            return 0
+        marked = 0
+        for ob in col.objects:
+            try:
+                if "upvn_stage" not in ob.game.properties:
+                    # Must be a real *game* property: obj[name]=True alone only
+                    # writes an ID property and the player never sees it
+                    # (measured). And it must be a STRING, not a BOOL — a BOOL
+                    # game property created through the data API reads back as
+                    # False no matter what is assigned (its value lives in a
+                    # float slot that the bool accessor does not read), and the
+                    # whole point of this flag is that the runtime sees it.
+                    _set_runtime_prop(_b, ob, "upvn_stage", "1")
+                marked += 1
+            except Exception:
+                pass
+        return marked
 
     def _set_runtime_prop(_b, obj, name, value):
         obj[name] = value
@@ -3357,7 +3476,7 @@ except Exception:
             ok, info = ensure_engine(retry=True)
             ver = ".".join(str(x) for x in bl_info.get("version", ()))
             print(f"[UPVN] Editor addon v{ver} registered — engine: {'OK via ' + str(info['source']) if ok else 'NOT FOUND (' + str(info['message'])[:120] + ')'}")
-            print("[UPVN] Panels: View3D > Sidebar > UPVN | Text Editor > Sidebar > UPVN — HQ No-Code v0.7.1 (M28 audit fixes)")
+            print("[UPVN] Panels: View3D > Sidebar > UPVN | Text Editor > Sidebar > UPVN — HQ No-Code v0.7.2 (M29 stage visibility + HQ scene)")
             if not ok:
                 print(f"[UPVN] Engine search details: {info.get('searched', [])}")
         except Exception as exc:

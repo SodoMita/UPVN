@@ -277,6 +277,16 @@ class VNController:
             pass
             self.screen_mgr = None
 
+        # M29: hide the baked 3D stage for scripts that never use it (clean
+        # 2D frame, no author action). Headless without bge just records the
+        # flag on stage_mgr, which the tests assert.
+        try:
+            _sm = getattr(self, "stage_mgr", None)
+            if _sm is not None:
+                _sm.prepare(self.script_dict)
+        except Exception as e:
+            print(f"[VNController] stage prepare skipped: {e}")
+
         # advance to first wait event
         self._advance()
 

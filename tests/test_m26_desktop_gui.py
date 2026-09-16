@@ -138,11 +138,20 @@ def test_resolve_script_path_still_finds_files(tmp_path):
 
 
 def test_image_mode_prop_written_by_builder(tmp_path):
-    """The addon builder writes image_mode next to script_path (source-level
-    check — bpy is unavailable headless)."""
+    """The addon builder writes image_mode next to script_path.
+
+    M29: the value is *detected*, not the constant — a project that ships art
+    gets "auto" (try assets/{backgrounds,sprites}/*.webp, fall back to the
+    palette colour per asset) and a project with no art keeps "color" (zero
+    image IO). Source-level check: bpy is unavailable headless.
+    """
     src = (Path(__file__).resolve().parents[1] / "blend" /
            "upvn_editor_addon.py").read_text()
-    assert '_set_runtime_prop(_b, ctrl, "image_mode", IMAGE_MODE_DEFAULT)' in src
+    assert ('_set_runtime_prop(_b, ctrl, "image_mode", '
+            '_detect_image_mode(effective_script_path))') in src
+    assert "def _detect_image_mode(" in src
+    # webp first: the pipeline's packed format
+    assert '(\".webp\", \".png\", \".jpg\", \".jpeg\")' in src
     # and never clobbers a configured script_path with the default
     assert "effective_script_path" in src
 
