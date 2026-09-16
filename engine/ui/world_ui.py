@@ -370,9 +370,30 @@ def _set_visible(obj: Any, vis: bool) -> bool:
             return False
 
 
+def _is_custom_layout(obj: Any) -> bool:
+    """Check if an object has custom layout — the engine should not override its position/scale."""
+    if obj is None:
+        return False
+    try:
+        if obj.get("upvn_layout_custom"):
+            return True
+    except Exception:
+        pass
+    bo = getattr(obj, "blenderObject", None)
+    if bo is not None:
+        try:
+            if bo.get("upvn_layout_custom"):
+                return True
+        except Exception:
+            pass
+    return False
+
+
 def _set_pos(obj: Any, loc) -> bool:
     if obj is None:
         return False
+    if _is_custom_layout(obj):
+        return True  # user positioned this object — don't override
     try:
         obj.worldPosition = loc
         return True
@@ -387,6 +408,8 @@ def _set_pos(obj: Any, loc) -> bool:
 def _set_scale(obj: Any, scl) -> bool:
     if obj is None:
         return False
+    if _is_custom_layout(obj):
+        return True  # user scaled this object — don't override
     try:
         obj.worldScale = scl
         return True
@@ -419,8 +442,13 @@ def _set_font_color(obj: Any, rgba) -> None:
 
 
 def _set_object_color(obj: Any, rgba) -> None:
-    """Set object color (for UI planes — adaptive white/blue)."""
+    """Set object color (for UI planes — adaptive white/blue).
+    
+    Skipped if obj has upvn_layout_custom set (user controls color via drivers/etc).
+    """
     if obj is None or rgba is None:
+        return
+    if _is_custom_layout(obj):
         return
     try:
         obj.color = rgba
@@ -452,6 +480,8 @@ _font_scale_cache: dict = {}
 def set_font_size(obj: Any, em: float) -> None:
     if obj is None:
         return
+    if _is_custom_layout(obj):
+        return  # user controls font size via drivers/constraints
     try:
         target = round(float(em), 5)
     except Exception:
