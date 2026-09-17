@@ -92,9 +92,24 @@ def resolve_script_path(logic, owner=None, extra_candidates=None):
             candidates.append(c)
     for c in candidates:
         try:
-            p = logic.expandPath(c)
+            if c.startswith("//"):
+                # M29 fix: bge.logic.expandPath('//…') can yield a relative
+                # path in the standalone player (bpy.data.filepath handling
+                # differs from the editor), which made every converted game
+                # fall through to the "script not found" screen. Anchor '//'
+                # to the .blend directory ourselves.
+                import bpy as _bpy
+                bp = getattr(getattr(_bpy, "data", None), "filepath", "") or ""
+                base = os.path.dirname(os.path.abspath(bp)) if bp else ""
+                p = (os.path.normpath(os.path.join(base, c[2:])) if base
+                     else logic.expandPath(c))
+            else:
+                p = logic.expandPath(c)
         except Exception:
             p = c
+        if not getattr(logic, "_upvn_resolve_logged", False):
+            print(f"[UPVN] resolve try {c!r} -> {p!r} "
+                  f"(blend={getattr(getattr(__import__('bpy'), 'data', None), 'filepath', '')!r})")
         tried.append(p)
         try:
             # M26: directories are valid script sources — VNController.load()
@@ -104,6 +119,7 @@ def resolve_script_path(logic, owner=None, extra_candidates=None):
                 return os.path.abspath(p), tried
         except Exception:
             pass
+    logic._upvn_resolve_logged = True
     return None, tried
 
 

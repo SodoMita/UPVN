@@ -226,10 +226,24 @@ class VNController:
                 # Scan the whole game/ dir and merge — exactly what Ren'Py does.
                 # Each file is parsed on its own so errors keep their real
                 # file:line, and `start` may live in any file.
+                files = sorted(set(list(self.script_path.rglob("*.rpy"))
+                                   + list(self.script_path.rglob("*.urpy"))))
+                # M29: a renpy.register_statement(...) registration may live in
+                # a different file than its uses (the SDK tutorial registers
+                # `example` in 01example.rpy but uses it in indepth_*.rpy), so
+                # pre-scan every source and hand the registry to each parse.
+                regs: dict = {}
+                try:
+                    from ..script.parser import scan_register_statements
+                    for p in files:
+                        regs.update(scan_register_statements(
+                            p.read_text(encoding="utf-8")))
+                except Exception:
+                    pass
                 merged = None
-                for p in sorted(set(list(self.script_path.rglob("*.rpy"))
-                                    + list(self.script_path.rglob("*.urpy")))):
-                    d = parse_file(str(p), mode=self.mode, require_start=False)
+                for p in files:
+                    d = parse_file(str(p), mode=self.mode, require_start=False,
+                                   custom_statements=regs)
                     merged = _merge_scripts(merged, d)
                 if merged is None:
                     raise ValueError(f"no .rpy/.urpy scripts found in {self.script_path}")
