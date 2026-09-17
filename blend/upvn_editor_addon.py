@@ -1585,57 +1585,13 @@ if HAS_BPY:
         char_id: bpy.props.StringProperty(name="ID", default="e")
         char_name: bpy.props.StringProperty(name="Name", default="Eileen")
         char_color: bpy.props.FloatVectorProperty(name="Color", subtype='COLOR', size=4, default=(0.78, 1.0, 0.78, 1.0), min=0, max=1)
-        bg_name: bpy.props.EnumProperty(name="Background", items=[
-            ("bg classroom", "Classroom", "Warm room with windows"),
-            ("bg lecturehall", "Lecture Hall", "Dark atmospheric hall"),
-            ("bg library", "Library", "Quiet library"),
-            ("bg meadow", "Meadow", "Green hills with clouds"),
-            ("bg forest", "Forest", "Dark forest with light shafts"),
-            ("bg castle", "Castle", "Stone walls with torchlight"),
-            ("bg mountain", "Mountain", "Misty peaks with snow"),
-            ("bg bridge", "Space Bridge", "Sci-fi holographic bridge"),
-            ("bg corridor", "Corridor", "Sci-fi corridor"),
-            ("bg planet", "Planet", "Space view with planet"),
-            ("bg office", "Office", "Noir office with blinds"),
-            ("bg manor", "Manor", "Dark wood with chandelier"),
-            ("bg garden", "Garden", "Moonlit garden with mist"),
-            ("bg uni", "University", "University exterior"),
-            ("black", "Black", "Dark background"),
-            ("custom", "Custom (type below)", "Enter a custom background name"),
-        ], default="bg classroom")
-        bg_name_custom: bpy.props.StringProperty(name="Custom BG name", default="", description="Used when Background is set to Custom")
+        bg_name: bpy.props.StringProperty(name="Background", default="bg classroom")
         bg_image: bpy.props.StringProperty(name="BG Image (optional)", default="", subtype='FILE_PATH')
-        speaker: bpy.props.EnumProperty(name="Speaker", items=[
-            ("", "Narration", "No speaker name shown"),
-            ("e", "Eileen (e)", "Character e"),
-            ("s", "Sylvie (s)", "Character s"),
-            ("l", "Lucy (l)", "Character l"),
-            ("me", "Me", "Character me"),
-            ("custom", "Custom (type below)", "Enter a custom character ID"),
-        ], default="e")
-        speaker_custom: bpy.props.StringProperty(name="Custom speaker ID", default="", description="Used when Speaker is set to Custom")
+        speaker: bpy.props.StringProperty(name="Speaker (empty=narration)", default="e")
         dialogue: bpy.props.StringProperty(name="Text", default="Hello from Blender!")
-        show_asset: bpy.props.EnumProperty(name="Sprite", items=[
-            ("eileen", "Eileen", "Default Eileen sprite"),
-            ("eileen happy", "Eileen (happy)", "Eileen happy expression"),
-            ("eileen sad", "Eileen (sad)", "Eileen sad expression"),
-            ("sylvie", "Sylvie", "Default Sylvie sprite"),
-            ("sylvie happy", "Sylvie (happy)", "Sylvie happy expression"),
-            ("kael", "Kael", "Fantasy knight"),
-            ("lyra", "Lyra", "Fantasy mage"),
-            ("zara", "Captain Zara", "Sci-fi captain"),
-            ("detective", "Detective", "Mystery detective"),
-            ("ms_gray", "Ms. Gray", "Mystery client"),
-            ("custom", "Custom (type below)", "Enter a custom sprite name"),
-        ], default="eileen")
-        show_asset_custom: bpy.props.StringProperty(name="Custom sprite name", default="", description="Used when Sprite is set to Custom")
+        show_asset: bpy.props.StringProperty(name="Asset", default="eileen")
         show_pos: bpy.props.EnumProperty(name="Position", items=[("left", "Left", ""), ("center", "Center", ""), ("right", "Right", ""), ("far_left", "Far Left", ""), ("far_right", "Far Right", "")], default="center")
-        show_trans: bpy.props.EnumProperty(name="Transition", items=[
-            ("", "None", "Instant change, no transition"),
-            ("dissolve", "Dissolve", "Cross-fade between old and new"),
-            ("fade", "Fade", "Fade to black then fade in"),
-            ("move", "Move", "Slide sprite from old position to new"),
-        ], default="dissolve")
+        show_trans: bpy.props.StringProperty(name="With (move/dissolve/fade)", default="move")
         sprite_image: bpy.props.StringProperty(name="Sprite Image (optional)", default="", subtype='FILE_PATH')
         side_image: bpy.props.StringProperty(name="Side Image Tag", default="")
         menu_caption: bpy.props.StringProperty(name="Menu Caption", default="What do you do?")
@@ -2928,7 +2884,7 @@ except Exception:
             p = context.scene.upvn_props
             path = bpy.path.abspath(p.project_path)
             builder = _builder_from_file(path)
-            bg = p.bg_name if p.bg_name != "custom" else (p.bg_name_custom.strip() or "bg classroom")
+            bg = p.bg_name
             if p.bg_image:
                 try:
                     src = pathlib.Path(bpy.path.abspath(p.bg_image))
@@ -2952,7 +2908,7 @@ except Exception:
             p = context.scene.upvn_props
             path = bpy.path.abspath(p.project_path)
             builder = _builder_from_file(path)
-            who = (p.speaker if p.speaker != "custom" else p.speaker_custom.strip()) or None
+            who = p.speaker.strip() or None
             builder.add_say(who, p.dialogue)
             builder.write()
             self.report({'INFO'}, f"Added say {who or 'Narration'}: {p.dialogue[:30]}")
@@ -2965,8 +2921,8 @@ except Exception:
             p = context.scene.upvn_props
             path = bpy.path.abspath(p.project_path)
             builder = _builder_from_file(path)
-            trans = (p.show_trans or None)
-            asset = p.show_asset if p.show_asset != "custom" else (p.show_asset_custom.strip() or "eileen")
+            trans = p.show_trans.strip() or None
+            asset = p.show_asset
             if p.sprite_image:
                 try:
                     src = pathlib.Path(bpy.path.abspath(p.sprite_image))
@@ -3437,13 +3393,9 @@ except Exception:
             box = layout.box()
             box.label(text="Scene & Sprites (Asset Browser)", icon='IMAGE_DATA')
             box.prop(props, "bg_name")
-            if props.bg_name == "custom":
-                box.prop(props, "bg_name_custom")
             box.prop(props, "bg_image")
             box.operator("upvn.add_scene", icon='SCENE_DATA')
             box.prop(props, "show_asset")
-            if props.show_asset == "custom":
-                box.prop(props, "show_asset_custom")
             box.prop(props, "show_pos")
             box.prop(props, "show_trans")
             box.prop(props, "sprite_image")
@@ -3456,8 +3408,6 @@ except Exception:
             box = layout.box()
             box.label(text="Dialogue", icon='SPEAKER')
             box.prop(props, "speaker")
-            if props.speaker == "custom":
-                box.prop(props, "speaker_custom")
             box.prop(props, "dialogue")
             box.operator("upvn.add_dialogue", icon='ADD')
 
