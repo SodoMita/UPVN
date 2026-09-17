@@ -39,6 +39,9 @@ except Exception:
 
 HISTORY_MAX_LINES = 8
 HISTORY_WRAP = 44
+# char width of a stock 1280px Ren'Py gui dialogue column (~700px at 22px);
+# 42-char wraps made converted projects look narrow next to the original
+DIALOGUE_WRAP = 66
 HISTORY_PITCH_EM = 1.0
 HISTORY_ADVANCE_EM = 0.62
 HISTORY_FIT_SLACK = 0.85
@@ -224,15 +227,16 @@ def build_world_ui(event: Optional[dict], ui_mgr=None, diag=None,
                     rev = ui_mgr.revealed_text()
                     if not rev and hasattr(ui_mgr, 'current_text'):
                         rev = ui_mgr.current_text
-                    dialogue = wrap_text(rev or "")
+                    dialogue = wrap_text(rev or "", width=DIALOGUE_WRAP)
                 except Exception:
-                    dialogue = wrap_text(event.get("display_text") or event.get("text") or "")
+                    dialogue = wrap_text(event.get("display_text") or event.get("text") or "",
+                                         width=DIALOGUE_WRAP)
                 speaker_color = getattr(ui_mgr, "current_color", None)
                 interp_warnings = getattr(ui_mgr, '_interp_warnings', []) or event.get("interp_warnings", []) or []
             else:
                 speaker = event.get("who_name") or event.get("who") or ""
                 raw_text = event.get("display_text") or event.get("text") or ""
-                dialogue = wrap_text(raw_text)
+                dialogue = wrap_text(raw_text, width=DIALOGUE_WRAP)
                 speaker_color = event.get("color")
                 interp_warnings = event.get("interp_warnings", []) or []
             dialogue_on = True
