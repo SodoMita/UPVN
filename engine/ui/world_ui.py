@@ -602,12 +602,16 @@ def layout_screen_ui(get_obj: Callable[[str], Any], payload: dict, ortho: float 
     # sit at y ~= -0.15, camera at y ~= -3.5). The old values (-0.4..-0.55)
     # let semi-transparent choice boxes lose the draw-order fight against
     # opaque desks/characters, so choices rendered BEHIND the scene.
-    y_box = -1.00      # dialogue box
-    y_text = -1.08     # speaker / dialogue text (in front of the box)
-    y_choice = -1.05   # choice button planes
-    y_choice_text = -1.13  # choice text (in front of its button)
-    y_hist = -1.20     # history box
-    y_hist_text = -1.26
+    # Layer depths: 1 m apart (user directive; old -0.4..-1.26 band had
+    # layers 0.05-0.15 m apart or at identical Y, losing draw-order fights).
+    # Camera_UI sits at y=-10, so the stack stays inside the frustum.
+    y_box = -2.0         # dialogue box
+    y_speaker = -3.0     # speaker name
+    y_text = -4.0        # dialogue text
+    y_choice = -5.0      # choice button planes
+    y_choice_text = -6.0  # choice text
+    y_hist = -7.0        # history box
+    y_hist_text = -8.0   # history + rewind text
 
     bg = get_obj("BG_Plane")
     box = get_obj("Dialogue_Box")
@@ -636,7 +640,7 @@ def layout_screen_ui(get_obj: Callable[[str], Any], payload: dict, ortho: float 
     # Speaker and dialogue at adaptive positions
     spl = tuple(SPEAKER_LOCATION)
     dtl = tuple(DIALOGUE_TEXT_LOCATION)
-    _set_pos(sp, (spl[0], y_text, spl[2]))
+    _set_pos(sp, (spl[0], y_speaker, spl[2]))
     _set_pos(dt, (dtl[0], y_text, dtl[2]))
     # Font sizes from config: name 40px, dialogue 33px mapped to world scale
     # Use adaptive sizes if available from gui_config

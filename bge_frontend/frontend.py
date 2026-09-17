@@ -268,6 +268,12 @@ def _apply_gui_par():
                     if nt is not None:
                         for n in nt.nodes:
                             if n.type == "EMISSION":
+                                # llvmpipe reads ObjectInfo.Color as white: an
+                                # emission linked from ObjectInfo would stay
+                                # white no matter what we set (M30 font fix,
+                                # same class of bug for the box).
+                                for lk in list(n.inputs["Color"].links):
+                                    nt.links.remove(lk)
                                 n.inputs["Color"].default_value = rgba
                             if n.type == "BSDF_PRINCIPLED":
                                 n.inputs["Base Color"].default_value = rgba

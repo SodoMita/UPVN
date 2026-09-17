@@ -313,10 +313,10 @@ def gui_to_upvn_config(gui_dict: Dict[str, Any]) -> Dict[str, Any]:
         "ortho": ortho,
         "total_h": total_h,
         "half_v": half_v,
-        "dialogue_location": [0.0, -0.4, dialogue_z],
+        "dialogue_location": [0.0, -2.0, dialogue_z],
         "dialogue_scale": [ortho/2, textbox_h_world/2, 1.0],
-        "speaker_location": [name_x_world, -0.55, dialogue_z + textbox_h_world/2 - name_y_offset - 0.1],
-        "dialogue_text_location": [dialogue_x_world, -0.55, dialogue_z + textbox_h_world/2 - dialogue_y_offset - 0.1],
+        "speaker_location": [name_x_world, -3.0, dialogue_z + textbox_h_world/2 - name_y_offset - 0.1],
+        "dialogue_text_location": [dialogue_x_world, -4.0, dialogue_z + textbox_h_world/2 - dialogue_y_offset - 0.1],
         "choice_width_factor": (choice_width / init_w) if init_w else 0.617,
         "choice_height_factor": 0.048,  # 52px default, computed below if height given
         "choice_spacing_em": 0.38,  # will be computed from spacing
