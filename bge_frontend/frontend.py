@@ -600,7 +600,15 @@ def main(cont=None):
         parse_mode = _prop(owner, "parse_mode") or "safe"
 
         def _load_with(mode):
-            ctrl = VNController(script_path=path, mode=mode)
+            # M29: converted/drop-in projects (full tier) run real Ren'Py
+            # python blocks that the safe sandbox cannot execute; compat mode
+            # collects those failures instead of aborting the whole load.
+            comp = _prop(owner, "compat")
+            if comp in (None, ""):
+                comp = (mode == "full")
+            elif isinstance(comp, str):
+                comp = comp.strip().lower() in ("1", "true", "yes")
+            ctrl = VNController(script_path=path, mode=mode, compat=bool(comp))
             ctrl.load()
             logic._upvn_ctrl = ctrl
             _unregister_overlay()
