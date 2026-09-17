@@ -2541,6 +2541,14 @@ except Exception:
         return ctrl
 
 
+    # Properties that should be ENUM (dropdown) instead of STRING (free text)
+    _ENUM_PROPS = {
+        "image_mode": [("color", "Color", "Palette only, no image files"),
+                       ("auto", "Auto", "Use images when available, palette fallback")],
+        "parse_mode": [("safe", "Safe", "Declarative subset only"),
+                       ("full", "Full", "Full Ren'Py-compatible parsing")],
+    }
+
     def _set_runtime_prop(_b, obj, name, value):
         obj[name] = value
         try:
@@ -2563,16 +2571,32 @@ except Exception:
             p = obj.game.properties[-1]
             p.name = name
             p = obj.game.properties.get(name) or p
-        typ = ("STRING" if isinstance(value, str) else
-               "BOOL" if isinstance(value, bool) else
-               "INT" if isinstance(value, int) else "FLOAT")
-        if p.type != typ:
-            p.type = typ
-            p = obj.game.properties.get(name) or p
-        try:
-            p.value = value
-        except Exception:
-            pass
+        # Use ENUM for known dropdown properties
+        if name in _ENUM_PROPS:
+            if p.type != "ENUM":
+                p.type = "ENUM"
+                p = obj.game.properties.get(name) or p
+            try:
+                enum_items = _ENUM_PROPS[name]
+                p.enum_items = enum_items
+                p.enum_flag = False  # single select
+            except Exception:
+                pass
+            try:
+                p.value = value
+            except Exception:
+                pass
+        else:
+            typ = ("STRING" if isinstance(value, str) else
+                   "BOOL" if isinstance(value, bool) else
+                   "INT" if isinstance(value, int) else "FLOAT")
+            if p.type != typ:
+                p.type = typ
+                p = obj.game.properties.get(name) or p
+            try:
+                p.value = value
+            except Exception:
+                pass
 
 
     def _add_logic_bricks(_b, obj, launcher_text, controller_module,
