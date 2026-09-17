@@ -172,6 +172,7 @@ def test_template_carries_styled_text_and_shadows():
     # Shadows transparent for Ren'Py parity
     assert val("SHADOW_TRANSPARENT") == "True"
     # Dialogue box white semi-transparent
-    assert "1.0" in val("DLG_COLOR") or "0.8" in val("DLG_COLOR")
+    # Ren'Py parity: dark translucent box (white text on it) — the old white box made text invisible
+    assert "0.0" in val("DLG_COLOR") and "0.35" in val("DLG_COLOR"), val("DLG_COLOR")
 
 
