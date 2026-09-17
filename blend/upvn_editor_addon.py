@@ -2148,11 +2148,18 @@ except Exception:
             p = obj.game.properties[-1]
             p.name = name
             p = obj.game.properties.get(name) or p
-        # Use ENUM for known dropdown properties
+        # Use ENUM for known dropdown properties. UPBGE 0.50 (Blender 5.0)
+        # removed the ENUM game-property type — fall back to STRING so
+        # Setup Scene survives; dropdowns degrade to plain text fields.
         if name in _ENUM_PROPS:
-            if p.type != "ENUM":
-                p.type = "ENUM"
-                p = obj.game.properties.get(name) or p
+            try:
+                if p.type != "ENUM":
+                    p.type = "ENUM"
+                    p = obj.game.properties.get(name) or p
+            except TypeError:
+                if p.type != "STRING":
+                    p.type = "STRING"
+                    p = obj.game.properties.get(name) or p
             try:
                 enum_items = _ENUM_PROPS[name]
                 p.enum_items = enum_items

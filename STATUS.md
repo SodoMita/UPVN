@@ -1,5 +1,20 @@
 # Current Status — 2026-09-15 (M28: Audit Fixes & Reliability Hardening, v0.7.1)
 
+## Branch refactor/sprite-position-empties (2026-09-17, in progress)
+- Sprite stage layout moved from five per-position image planes (Sprite_<pos>)
+  to Pos_<pos> empties + ONE Sprite_pool plane, duplicated per tag at runtime
+  with single-user MASprite_<tag> material copies. Template blend migrated via
+  tools/refactor_sprite_positions.py; addon Setup Scene, contract inventory,
+  tests and tools/update_template_materials.py updated to match.
+- Addon: STRING fallback where UPBGE 0.50 (Blender 5.0) removed the ENUM game
+  property type (Setup Scene crashed in _set_runtime_prop before this).
+- Currently failing: test_m27_gui_addon_operators.py::test_addon_all_operators_
+  execute_and_build_valid_script — PRE-EXISTING gap: bpy.ops.upvn.preview_arbitrary
+  / preview operators are not implemented anywhere in the addon (test only runs
+  where UPBGE+Pillow exist; CI skips it).
+- Env notes: UPBGE 0.50 at /opt/upbge, headless sway+pixman desktop via
+  tools/desktop_sway.sh; Pillow installed into UPBGE's bundled python.
+
 ## Last completed
 - **M28 Audit Fixes Phase 1+2 (2026-09-15, v0.7.1)**: full engine/UI/frontend/addon reliability hardening — no silent failures.
   - **vn_interpreter.py**: _execute_node loc-aware — say interpolate with _loc + interp_warnings collection, pause dur safe_eval _loc with logged fallback, jump/call expr eval with _loc, assign safe_exec_assign _loc + div-zero guard, if cond eval failure logged as False, menu cond safe_eval _loc filters false choices, raises ScriptRuntimeError if no choices after filtering, caption preserved, for loop safe_eval iterable _loc + non-iterable handled via list() try/except treating as empty with log, _bind_for_target validates tuple unpack with TypeError/length mismatch warning, python block errors include loc in compat message and _loc in strict, screen render errors propagated to event and logged, camera_zoom/move easing handled, anim target missing logged. run() menu choice validates isinstance int and bounds 0..len-1 before indexing (was only run_headless), raises ScriptRuntimeError on bad choice. _eval_expr signature (_loc) with label/index, _eval_screen_expr returns None in full tier with log instead of crash, _render_screen returns errors dict with traceback snippet and prints, _run_init_python logs line number i+1 in compat errors. strip_tags improved + parse_rich_tags preserved.

@@ -31,7 +31,7 @@ MATERIALS = {
     "MAChoice": (0.12, 0.18, 0.32, 1.0),
     "MAFont": (0.92, 0.93, 1.0, 1.0),
 }
-TEX_CAPABLE = {"MABackground"} | {f"MASprite_{p}" for p in SPRITE_POSITIONS}
+TEX_CAPABLE = {"MABackground", "MASprite"}
 
 # object name -> default object tint (what the rasterizer multiplies in)
 OBJECT_TINTS = {
@@ -166,20 +166,19 @@ def main():
     fix_physics()
     widen_bg()
     ensure_white_image()
-    # per-position texture-capable sprite materials + assignment per plane
-    for pos in SPRITE_POSITIONS:
-        name = f"MASprite_{pos}"
-        mat = bpy.data.materials.get(name)
-        if mat is None:
-            mat = bpy.data.materials.new(name)
-        rewrite_unlit(mat, MATERIALS["MASprite"], tex_capable=True)
-        sp = bpy.data.objects.get(f"Sprite_{pos}")
-        if sp is not None:
-            try:
-                sp.data.materials.clear()
-                sp.data.materials.append(mat)
-            except Exception:
-                pass
+    # single texture-capable sprite material on the pool plane; per-tag
+    # copies are made at runtime, stage positions live on Pos_* empties
+    mat = bpy.data.materials.get("MASprite")
+    if mat is None:
+        mat = bpy.data.materials.new("MASprite")
+    rewrite_unlit(mat, MATERIALS["MASprite"], tex_capable=True)
+    sp = bpy.data.objects.get("Sprite_pool")
+    if sp is not None:
+        try:
+            sp.data.materials.clear()
+            sp.data.materials.append(mat)
+        except Exception:
+            pass
     for name, color in MATERIALS.items():
         mat = bpy.data.materials.get(name)
         if mat is None:
