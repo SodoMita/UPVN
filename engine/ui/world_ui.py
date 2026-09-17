@@ -546,53 +546,21 @@ def _set_object_color(obj: Any, rgba) -> None:
 
 
 def aspect_wh() -> float:
-    try:
-        import bge
-        w = float(bge.render.getWindowWidth())
-        h = float(bge.render.getWindowHeight())
-        if w > 0.0 and h > 0.0:
-            return max(0.5, w / h)
-    except Exception:
-        pass
+    # REMOVED: responsive layout — was dynamic aspect from bge.render window, returned w/h or 16/9
+    # Now fixed 16/9 for compatibility, responsive deleted per user request
     return 16.0 / 9.0
 
 
 def view_metrics(ortho: float) -> tuple[float, float, float, float, float]:
-    """Ren'Py-8.5 window scaling, mirrored from grim A/B evidence
-    (parity/orig_169 + orig_43 vs stock the_question):
-
-    * vertical scale is locked to the window HEIGHT: proj_h virtual pixels
-      span the full window height, at any aspect (a 720px sprite fills the
-      window height identically at 16:9 and 4:3);
-    * horizontal is LEFT-ANCHORED: virtual x=0 sits at the window left edge
-      and widths wider than the window crop (4:3: the `right` sprite is
-      almost off-screen, 790px choice bars clip at the right edge);
-
-    so the uniform world-per-virtual-pixel scale is
-    wpp = (ortho * H / W) / proj_h, with
-      x_world(px) = -half + px * wpp        (left anchor)
-      z_world(py) = +half_v - py * wpp      (top-down pixel rows)
-
-    Returns (half, half_v, wpp, proj_w, proj_h). half_v is the visible
-    vertical half-extent (ortho*aspect^-1 / 2) — the M25 fill formula was
-    right; what was missing was the left-anchored horizontal origin.
-    """
+    # REMOVED: responsive layout — was complex calculation of half, half_v, wpp, proj_w, proj_h
+    # from ortho, aspect_wh(), gui_config resolution, left-anchored virtual frame model
+    # wpp = (ortho*H/W)/proj_h, x_world(px) = -half+px*wpp, z_world(py)=half_v-py*wpp
+    # This tried to match Ren'Py 8.5 window model but never worked reliably, distracted agents
+    # Now fixed values for compatibility
     half = max(1.0, float(ortho) / 2.0)
-    half_v = max(0.5, half / aspect_wh())
-    proj_w = proj_h = 0.0
-    try:
-        from ..render.gui_config import get_gui_config
-        res = (get_gui_config() or {}).get("resolution") or None
-        if isinstance(res, dict):
-            proj_w = float(res.get("width") or 0.0)
-            proj_h = float(res.get("height") or 0.0)
-        elif res and len(res) >= 2:
-            proj_w, proj_h = float(res[0]), float(res[1])
-    except Exception:
-        proj_w = proj_h = 0.0
-    if proj_w <= 0.0 or proj_h <= 0.0:
-        proj_w, proj_h = 1280.0, 720.0
-    wpp = (2.0 * half_v) / proj_h
+    half_v = half * 9.0 / 16.0
+    proj_w, proj_h = 1280.0, 720.0
+    wpp = (2.0 * half_v) / proj_h if proj_h else 0.01
     return half, half_v, wpp, proj_w, proj_h
 
 
@@ -659,81 +627,59 @@ def set_font_size(obj: Any, em: float) -> None:
 def layout_screen_ui(get_obj: Callable[[str], Any], payload: dict, ortho: float = 15.0,
                      hovered: str | None = None) -> None:
     """
-    Adaptive layout — reads from contract.py which reads from gui_config.py
-    which was generated from ANY Ren'Py project's gui.rpy.
-    
-    This means UPVN automatically adapts to any Ren'Py project's UI without hardcoding.
+    FIXED layout — no responsive, no aspect adaptation, no gui_config scaling.
+    Positions are constant world coordinates, works for any mesh anywhere for buttons.
+
+    REMOVED responsive code that was here:
+    - half, half_v, wpp, proj_w, proj_h = view_metrics(ortho)
+    - x_of(px) = -half + px*wpp, z_of(py) = half_v - py*wpp
+    - borders, pad_x, pad_y, em, gap, btn_w_fixed from wpp and gui_config
+    - x_center = x_of(proj_w/2), z_center = z_of(0.375*proj_h)
+    - band_top/band_bot clamping for long menus
+    All replaced by fixed simple stack.
     """
-    half, half_v, wpp, proj_w, proj_h = view_metrics(ortho)
-
-    def x_of(px):  # virtual column, left-anchored at window left
-        return -half + float(px) * wpp
-
-    def z_of(py):  # virtual row measured from the top
-        return half_v - float(py) * wpp
-    # UI y-depths: all UI lives WELL in front of scene geometry (scene planes
-    # sit at y ~= -0.15, camera at y ~= -3.5). The old values (-0.4..-0.55)
-    # let semi-transparent choice boxes lose the draw-order fight against
-    # opaque desks/characters, so choices rendered BEHIND the scene.
-    # Layer depths: 1 m apart (user directive; old -0.4..-1.26 band had
-    # layers 0.05-0.15 m apart or at identical Y, losing draw-order fights).
-    # Camera_UI sits at y=-10, so the stack stays inside the frustum.
-    y_box = -2.0         # dialogue box
-    y_speaker = -3.0     # speaker name
-    y_text = -4.0        # dialogue text
-    y_choice = -5.0      # choice button planes
-    y_choice_text = -6.0  # choice text
-    y_hist = -7.0        # history box
-    y_hist_text = -8.0   # history + rewind text
+    # Fixed depths: 1 m apart (user directive, avoids draw-order fights)
+    y_box = -2.0
+    y_speaker = -3.0
+    y_text = -4.0
+    y_choice = -5.0
+    y_choice_text = -6.0
+    y_hist = -7.0
+    y_hist_text = -8.0
 
     bg = get_obj("BG_Plane")
     box = get_obj("Dialogue_Box")
     sp = get_obj("Speaker_Text")
     dt = get_obj("Dialogue_Text")
 
-    # Background: full-bleed over the VISIBLE frame (original at 4:3 fills
-    # the whole window; the virtual frame is cropped, not letterboxed).
-    if bg is not None and not _is_custom_layout(bg):
-        try:
-            dims = bg.dimensions  # world bounding-box size (BGE)
-            if dims and dims[0] > 0.01 and dims[2] > 0.01:
-                cover = max(half / (dims[0] / 2.0), half_v / (dims[2] / 2.0))
-                if cover > 1.001:
-                    sc = bg.worldScale
-                    _set_scale(bg, (sc[0] * cover, sc[1] * cover, sc[2] * cover))
-        except Exception:
-            pass
+    # Background: keep simple, don't try to cover visible frame responsively
+    # (REMOVED: old code tried to scale BG to cover half/half_v)
 
-    # Dialogue box: adaptive position/scale from contract (which comes from gui_config)
+    # Dialogue box: fixed position from contract (no NDC scaling)
     loc = tuple(DIALOGUE_LOCATION)
     _set_pos(box, (loc[0], y_box, loc[2]))
     _set_scale(box, DIALOGUE_SCALE)
     _set_object_color(box, DIALOGUE_BOX_COLOR)
 
-    # Speaker and dialogue at adaptive positions
+    # Speaker and dialogue at fixed positions
     spl = tuple(SPEAKER_LOCATION)
     dtl = tuple(DIALOGUE_TEXT_LOCATION)
     _set_pos(sp, (spl[0], y_speaker, spl[2]))
     _set_pos(dt, (dtl[0], y_text, dtl[2]))
-    # Font sizes from config: name 40px, dialogue 33px mapped to world scale
-    # Use adaptive sizes if available from gui_config
-    try:
-        from ..render.gui_config import get_gui_config
-        cfg = get_gui_config()
-        name_size = cfg.get("sizes", {}).get("name", 40)
-        text_size = cfg.get("sizes", {}).get("text", 33)
-        # Map pixel sizes to world scale: 40px/1080*half_v*~2, etc.
-        # Keep simple: use contract's logic but allow override
-        set_font_size(sp, half * (0.065 * name_size / 40))
-        set_font_size(dt, half * (0.055 * text_size / 33))
-    except Exception:
-        set_font_size(sp, half * 0.065)
-        set_font_size(dt, half * 0.055)
+    # Fixed font sizes — no adaptive mapping from gui_config pixel sizes
+    # (REMOVED: cfg.get("sizes") -> name_size/text_size -> half * factor)
+    # Keep simple: use fixed em based on ortho for readability, but not wpp
+    half = max(1.0, float(ortho) / 2.0)
+    set_font_size(sp, half * 0.065)
+    set_font_size(dt, half * 0.055)
 
-    # History / rewind
+    # History / rewind — keep original logic for payload but fixed positions for panel
+    # Original had panel_h = half_v*0.92 etc., now fixed but still uses payload for text
     hbox = get_obj(HISTORY_BOX)
     htext = get_obj(HISTORY_TEXT)
     rtext = get_obj(REWIND_TEXT)
+    # Use fixed half_v for history calculations (was from view_metrics)
+    half_v = half * 9.0 / 16.0
     panel_h = half_v * 0.92
     first_row_z = half_v * BACKLOG_TOP
     band = half_v * (BACKLOG_TOP - BACKLOG_BOTTOM)
@@ -756,62 +702,25 @@ def layout_screen_ui(get_obj: Callable[[str], Any], payload: dict, ortho: float 
                          first_row_z - hist_em * HISTORY_PITCH_EM))
     set_font_size(rtext, half * 0.030)
 
-    # Choices — mirrors the stock Ren'Py choice screen (SDK 8.5.3
-    # gui/game/screens.rpy + the_question/game/{screens,gui}.rpy):
-    #   style choice_vbox: xalign 0.5; ypos 270; yanchor 0.5;
-    #                      spacing gui.choice_spacing
-    #   buttons: xsize gui.choice_button_width (None -> text-sized),
-    #            text gui.choice_button_text_size, padding from
-    #            gui.choice_button_borders.
-    # All metrics are virtual pixels of the project resolution converted
-    # with px2wu, so the menu keeps the original's size and placement at
-    # ANY window aspect (design frame above; Ren'Py letterboxes).
-    cfg = {}
-    try:
-        from ..render.gui_config import get_gui_config
-        cfg = get_gui_config() or {}
-    except Exception:
-        cfg = {}
-    chc = cfg.get("choice") or {}
-    # borders = (left, top, right, bottom) padding in px
-    borders = chc.get("borders") or (100, 5, 100, 5)
-    try:
-        pad_x = float(borders[0]) * wpp
-        pad_y = float(borders[1]) * wpp
-    except Exception:
-        pad_x, pad_y = 100 * wpp, 5 * wpp
-    em = float((cfg.get("sizes") or {}).get("text") or 22) * wpp  # choice text em
-    char_w = em * 0.56         # avg sans-serif char width at this em
-    try:
-        gap = float(chc.get("spacing") or 22) * wpp
-    except Exception:
-        gap = 22 * wpp
-    try:
-        bw_px = chc.get("button_width")
-        btn_w_fixed = float(bw_px) * wpp if bw_px else None
-    except Exception:
-        btn_w_fixed = None
-    # vbox xalign 0.5 in the VIRTUAL frame -> left-anchored world x; at 4:3
-    # this pushes the (790px) bar right of screen-center and the camera
-    # crops it, exactly like the original
-    x_center = x_of(proj_w / 2.0)
-    # template choice planes are 2x2 meshes -> world size = 2 * scale
-    db_z = tuple(DIALOGUE_LOCATION)[2] + tuple(DIALOGUE_SCALE)[1]  # dialogue box top
+    # Choices — FIXED simple vertical stack, centered at x=0, no virtual pixels
+    # REMOVED: chc = cfg.get("choice"), borders, pad_x/wpp, em/wpp, gap/wpp,
+    # btn_w_fixed/wpp, x_center = x_of(proj_w/2), z_center = z_of(0.375*proj_h),
+    # db_z, band_top/band_bot, etc.
+    # Now fixed but still respects visible choices and hover
+    x_center = 0.0
+    # Fixed button metrics — no longer derived from gui_config or wpp
+    # Keep em based on half for readability
+    em = half * 0.04
+    char_w = em * 0.56
+    gap = em * 1.2
+    pad_x = em * 2.0
+    pad_y = em * 0.2
+    btn_h = em + 2 * pad_y
+    # vbox centered at z=1.0 fixed
+    z_center = 1.0
     visible = [ch for ch in payload.get("choices", []) if ch.get("visible")]
     n_vis = max(1, len(visible))
-    btn_h = em + 2 * pad_y
     block_h = n_vis * btn_h + (n_vis - 1) * gap
-    # vbox anchor: xalign 0.5, yanchor 0.5 at ypos 270 on the 720px stock
-    # frame = 0.375 of the frame height -> row 0.375*proj_h, top-down.
-    z_center = z_of(0.375 * proj_h)
-    # safety: a long menu must never overlap the dialogue box or leave the
-    # frame — shrink the gap first (Ren'Py would scroll instead; we clamp).
-    band_top = half_v * 0.92
-    band_bot = db_z + em * 1.2
-    if block_h > (band_top - band_bot):
-        gap = max(em * 0.2, (band_top - band_bot - n_vis * btn_h) / max(1, n_vis - 1))
-        block_h = n_vis * btn_h + (n_vis - 1) * gap
-        z_center = (band_top + band_bot) / 2.0
     z_top = z_center + block_h / 2.0
 
     for i, ch in enumerate(payload.get("choices", [])):
@@ -822,23 +731,18 @@ def layout_screen_ui(get_obj: Callable[[str], Any], payload: dict, ortho: float 
         text = ch.get("text") or ""
         lines = [l for l in str(text).split("\n") if l] or [""]
         text_w = max(len(l) for l in lines) * char_w
-        btn_w = btn_w_fixed if btn_w_fixed is not None else text_w + 2 * pad_x
+        btn_w = text_w + 2 * pad_x
+        btn_w = max(btn_w, 4.0 * em)  # min width scales with ortho/em, not fixed
         z = z_top - i * (btn_h + gap) - btn_h / 2.0
         is_hover = hovered and ch["name"] == hovered
         bump = HOVER_SCALE if is_hover else 1.0
-        # world size = 2 * scale on the 2x2 plane; keep y-scale (plane depth) minimal
-        # keep physics at base size when hovered to avoid hover triggering outside
         _set_scale(plane, (btn_w / 2.0 * bump, btn_h / 2.0 * bump, 0.01), reinstance=not is_hover)
         _set_pos(plane, (x_center, y_choice, z))
-        # text left-anchored font -> place its start so the block is centered
         _set_pos(text_obj, (x_center - text_w / 2.0, y_choice_text, z))
         set_font_size(text_obj, em)
         _set_font_color(text_obj, CHOICE_TEXT_HOVER if is_hover else CHOICE_TEXT_IDLE)
 
     # Generic button support: button can be any mesh anywhere in the world
-    # (user directive). If hovered object is not a choice_ plane but is a
-    # known hotspot (any mesh), tint it with hover color for feedback.
-    # This is in addition to the choice_ handling above.
     if hovered and not hovered.startswith(CHOICE_PREFIX):
         try:
             gen = get_obj(hovered)
@@ -848,16 +752,12 @@ def layout_screen_ui(get_obj: Callable[[str], Any], payload: dict, ortho: float 
                 except Exception:
                     vis = True
                 if vis:
-                    # tint the generic mesh with hover color if it's not custom
-                    # (custom layout objects keep their own color)
                     if not _is_custom_layout(gen):
                         _set_object_color(gen, CHOICE_HOVER_COLOR)
         except Exception:
             pass
 
     # Shadows deleted — they have no visual meaning and were ray-blocking
-    # (invisible but STATIC+BOX, so _object_under_cursor could hit them,
-    # causing hover to miss or click to fail). User directive: delete them.
     try:
         ssp = get_obj(SPEAKER_SHADOW)
         sdt = get_obj(DIALOGUE_SHADOW)
@@ -869,7 +769,6 @@ def layout_screen_ui(get_obj: Callable[[str], Any], payload: dict, ortho: float 
             stext = get_obj(ch["name"] + CHOICE_SHADOW_SUFFIX)
             if stext:
                 _disable_obj(stext)
-        # also clean up any leftover shadow objects even if choice not visible
         for i in range(CHOICE_COUNT):
             sh = get_obj(f"{CHOICE_PREFIX}{i}{CHOICE_SHADOW_SUFFIX}")
             if sh:

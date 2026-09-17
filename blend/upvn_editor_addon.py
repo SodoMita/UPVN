@@ -2410,415 +2410,115 @@ except Exception:
                 self.report({"INFO"}, "Wiring OK — all scene items required by the engine are present.")
             return {"FINISHED"}
 
-    class UPVN_OT_CreateProject(bpy.types.Operator):
-        bl_idname = "upvn.create_project"
-        bl_label = "Create UPVN Project (Declarative)"
-        bl_description = "Create //game/script.rpy with HQ declarative starter (no coding, high quality)"
+    # REMOVED: UPVN_OT_CreateProject — Blender UI button to edit rpy, never worked, distracts other agents
+    # What was here: UPVN_OT_CreateProject operator to edit script.rpy via Blender panel, with bl_idname upvn.createproject, bl_label, execute() that appended to file via UPVN_GameBuilder
+    # Original had ~30 lines, deleted per user request. Leave comment what was there.
 
-        def execute(self, context):
-            props = context.scene.upvn_props
-            path = bpy.path.abspath(props.project_path)
-            try:
-                existing = pathlib.Path(path)
-                if existing.exists() and existing.read_text(encoding="utf-8").strip():
-                    self.report(
-                        {"ERROR"},
-                        f"Refusing to overwrite existing script: {path} — change Script Path or delete that file first")
-                    return {"CANCELLED"}
-            except OSError:
-                pass
-            builder = UPVN_GameBuilder(path, use_declarative=True)
-            builder.create_starter_declarative()
-            # ensure asset folders exist
-            try:
-                root = pathlib.Path(path).parent.parent if pathlib.Path(path).parent.name == "game" else pathlib.Path(path).parent
-                for sub in ["backgrounds", "sprites", "audio", "stages"]:
-                    (root / "assets" / sub).mkdir(parents=True, exist_ok=True)
-                (root / "screenshots").mkdir(parents=True, exist_ok=True)
-            except Exception:
-                pass
-            builder.write()
-            self.report({'INFO'}, f"Created declarative project {path} (HQ, no coding)")
-            return {'FINISHED'}
 
-    class UPVN_OT_QuickWizard(bpy.types.Operator):
-        bl_idname = "upvn.quick_wizard"
-        bl_label = "Quick VN Wizard (1-Click Game)"
-        bl_description = "Create a full branching visual novel with 2 endings, variables, 3D stage — one click, no coding, HQ"
+    # REMOVED: UPVN_OT_QuickWizard — Blender UI button to edit rpy, never worked, distracts other agents
+    # What was here: UPVN_OT_QuickWizard operator to edit script.rpy via Blender panel, with bl_idname upvn.quickwizard, bl_label, execute() that appended to file via UPVN_GameBuilder
+    # Original had ~31 lines, deleted per user request. Leave comment what was there.
 
-        def execute(self, context):
-            props = context.scene.upvn_props
-            path = bpy.path.abspath(props.project_path)
-            # allow overwrite for wizard? Create new file with wizard suffix if exists
-            p = pathlib.Path(path)
-            if p.exists() and p.read_text(encoding="utf-8").strip():
-                # create as game_wizard/script.rpy to avoid destroying
-                alt = p.parent / "script_wizard.rpy"
-                path = str(alt)
-                self.report({"WARNING"}, f"Existing script kept, wizard wrote to {alt}")
-            builder = UPVN_GameBuilder(path, use_declarative=True)
-            builder.create_quick_wizard(title=props.wizard_title, theme=props.wizard_theme)
-            # ensure folders
-            try:
-                root = pathlib.Path(path).parent.parent if pathlib.Path(path).parent.name == "game" else pathlib.Path(path).parent
-                for sub in ["backgrounds", "sprites", "audio", "stages"]:
-                    (root / "assets" / sub).mkdir(parents=True, exist_ok=True)
-            except Exception:
-                pass
-            out = builder.write()
-            ok, msg = builder.validate()
-            if ok:
-                self.report({'INFO'}, f"Wizard created {out} — {msg} — Press P to play!")
-            else:
-                self.report({'WARNING'}, f"Wizard created {out} but validation: {msg}")
-            return {'FINISHED'}
 
-    class UPVN_OT_AddCharacter(bpy.types.Operator):
-        bl_idname = "upvn.add_character"
-        bl_label = "Add Character (Declarative)"
-        def execute(self, context):
-            p = context.scene.upvn_props
-            path = bpy.path.abspath(p.project_path)
-            builder = _builder_from_file(path)
-            col = p.char_color
-            hexcol = "#{:02x}{:02x}{:02x}".format(int(col[0] * 255), int(col[1] * 255), int(col[2] * 255))
-            builder.add_character(p.char_id, p.char_name, hexcol)
-            builder.write()
-            self.report({'INFO'}, f"Added character {p.char_id}={p.char_name} (declarative, preserved)")
-            return {'FINISHED'}
+    # REMOVED: UPVN_OT_AddCharacter — Blender UI button to edit rpy, never worked, distracts other agents
+    # What was here: UPVN_OT_AddCharacter operator to edit script.rpy via Blender panel, with bl_idname upvn.addcharacter, bl_label, execute() that appended to file via UPVN_GameBuilder
+    # Original had ~13 lines, deleted per user request. Leave comment what was there.
 
-    class UPVN_OT_AddVariable(bpy.types.Operator):
-        bl_idname = "upvn.add_variable"
-        bl_label = "Add Variable (State)"
-        bl_description = "Add a typed variable to state: block — no coding, declarative"
 
-        def execute(self, context):
-            p = context.scene.upvn_props
-            path = bpy.path.abspath(p.project_path)
-            builder = _builder_from_file(path)
-            builder.add_state_var(p.var_name, p.var_type, p.var_value)
-            builder.write()
-            self.report({'INFO'}, f"Added variable {p.var_name}: {p.var_type} = {p.var_value}")
-            return {'FINISHED'}
+    # REMOVED: UPVN_OT_AddVariable — Blender UI button to edit rpy, never worked, distracts other agents
+    # What was here: UPVN_OT_AddVariable operator to edit script.rpy via Blender panel, with bl_idname upvn.addvariable, bl_label, execute() that appended to file via UPVN_GameBuilder
+    # Original had ~13 lines, deleted per user request. Leave comment what was there.
 
-    class UPVN_OT_AddScene(bpy.types.Operator):
-        bl_idname = "upvn.add_scene"
-        bl_label = "Add Scene"
-        def execute(self, context):
-            p = context.scene.upvn_props
-            path = bpy.path.abspath(p.project_path)
-            builder = _builder_from_file(path)
-            bg = p.bg_name
-            if p.bg_image:
-                try:
-                    src = pathlib.Path(bpy.path.abspath(p.bg_image))
-                    if src.exists():
-                        dest_dir = _get_project_asset_dir(path, "backgrounds")
-                        dest = dest_dir / src.name
-                        shutil.copy2(src, dest)
-                        bg = f"bg {src.stem}"
-                        self.report({'INFO'}, f"Copied BG {src.name} → {dest}")
-                except Exception as e:
-                    self.report({'WARNING'}, f"BG copy failed {e}")
-            builder.add_scene(bg)
-            builder.write()
-            self.report({'INFO'}, f"Added scene {bg}")
-            return {'FINISHED'}
 
-    class UPVN_OT_AddDialogue(bpy.types.Operator):
-        bl_idname = "upvn.add_dialogue"
-        bl_label = "Add Dialogue"
-        def execute(self, context):
-            p = context.scene.upvn_props
-            path = bpy.path.abspath(p.project_path)
-            builder = _builder_from_file(path)
-            who = p.speaker.strip() or None
-            builder.add_say(who, p.dialogue)
-            builder.write()
-            self.report({'INFO'}, f"Added say {who or 'Narration'}: {p.dialogue[:30]}")
-            return {'FINISHED'}
+    # REMOVED: UPVN_OT_AddScene — Blender UI button to edit rpy, never worked, distracts other agents
+    # What was here: UPVN_OT_AddScene operator to edit script.rpy via Blender panel, with bl_idname upvn.addscene, bl_label, execute() that appended to file via UPVN_GameBuilder
+    # Original had ~23 lines, deleted per user request. Leave comment what was there.
 
-    class UPVN_OT_AddShow(bpy.types.Operator):
-        bl_idname = "upvn.add_show"
-        bl_label = "Add Show"
-        def execute(self, context):
-            p = context.scene.upvn_props
-            path = bpy.path.abspath(p.project_path)
-            builder = _builder_from_file(path)
-            trans = p.show_trans.strip() or None
-            asset = p.show_asset
-            if p.sprite_image:
-                try:
-                    src = pathlib.Path(bpy.path.abspath(p.sprite_image))
-                    if src.exists():
-                        dest_dir = _get_project_asset_dir(path, "sprites")
-                        dest = dest_dir / src.name
-                        shutil.copy2(src, dest)
-                        asset = src.stem
-                        self.report({'INFO'}, f"Copied sprite {src.name} → {dest}")
-                except Exception as e:
-                    self.report({'WARNING'}, f"Sprite copy failed {e}")
-            builder.add_show(asset, p.show_pos, trans)
-            if p.side_image.strip():
-                builder.add_side_image(asset, p.side_image.strip(), p.show_pos)
-            builder.write()
-            self.report({'INFO'}, f"Added show {asset} at {p.show_pos} with {trans}")
-            return {'FINISHED'}
 
-    class UPVN_OT_AddMenu(bpy.types.Operator):
-        bl_idname = "upvn.add_menu"
-        bl_label = "Add Menu (Choice → Jump)"
-        def execute(self, context):
-            p = context.scene.upvn_props
-            path = bpy.path.abspath(p.project_path)
-            builder = _builder_from_file(path)
-            builder.add_menu(p.menu_caption, [(p.menu_choice1, p.menu_jump1), (p.menu_choice2, p.menu_jump2)])
-            builder.write()
-            self.report({'INFO'}, f"Added menu {p.menu_caption} (choice declarative)")
-            return {'FINISHED'}
+    # REMOVED: UPVN_OT_AddDialogue — Blender UI button to edit rpy, never worked, distracts other agents
+    # What was here: UPVN_OT_AddDialogue operator to edit script.rpy via Blender panel, with bl_idname upvn.adddialogue, bl_label, execute() that appended to file via UPVN_GameBuilder
+    # Original had ~12 lines, deleted per user request. Leave comment what was there.
 
-    class UPVN_OT_AddStage(bpy.types.Operator):
-        bl_idname = "upvn.add_stage"
-        bl_label = "Add 3D Stage"
-        def execute(self, context):
-            p = context.scene.upvn_props
-            path = bpy.path.abspath(p.project_path)
-            builder = _builder_from_file(path)
-            builder.add_stage(p.stage_name)
-            builder.add_show3d("eileen", "marker_eileen")
-            builder.write()
-            self.report({'INFO'}, f"Added 3D stage {p.stage_name} + show3d")
-            return {'FINISHED'}
 
-    class UPVN_OT_AddSet(bpy.types.Operator):
-        bl_idname = "upvn.add_set"
-        bl_label = "Add Set (Variable Change)"
-        bl_description = "Add set var op expr — declarative assignment, no $"
+    # REMOVED: UPVN_OT_AddShow — Blender UI button to edit rpy, never worked, distracts other agents
+    # What was here: UPVN_OT_AddShow operator to edit script.rpy via Blender panel, with bl_idname upvn.addshow, bl_label, execute() that appended to file via UPVN_GameBuilder
+    # Original had ~26 lines, deleted per user request. Leave comment what was there.
 
-        def execute(self, context):
-            p = context.scene.upvn_props
-            path = bpy.path.abspath(p.project_path)
-            builder = _builder_from_file(path)
-            builder.add_set(p.set_target, p.set_op, p.set_expr)
-            builder.write()
-            self.report({'INFO'}, f"Added set {p.set_target} {p.set_op} {p.set_expr}")
-            return {'FINISHED'}
 
-    class UPVN_OT_AddIf(bpy.types.Operator):
-        bl_idname = "upvn.add_if"
-        bl_label = "Add If"
-        bl_description = "Add if condition: — for branching without coding"
+    # REMOVED: UPVN_OT_AddMenu — Blender UI button to edit rpy, never worked, distracts other agents
+    # What was here: UPVN_OT_AddMenu operator to edit script.rpy via Blender panel, with bl_idname upvn.addmenu, bl_label, execute() that appended to file via UPVN_GameBuilder
+    # Original had ~11 lines, deleted per user request. Leave comment what was there.
 
-        def execute(self, context):
-            p = context.scene.upvn_props
-            path = bpy.path.abspath(p.project_path)
-            builder = _builder_from_file(path)
-            builder.add_if(p.if_cond)
-            builder.write()
-            self.report({'INFO'}, f"Added if {p.if_cond}: (add dialogue after, then Add Else/End)")
-            return {'FINISHED'}
 
-    class UPVN_OT_AddElse(bpy.types.Operator):
-        bl_idname = "upvn.add_else"
-        bl_label = "Add Else"
-        def execute(self, context):
-            p = context.scene.upvn_props
-            path = bpy.path.abspath(p.project_path)
-            builder = _builder_from_file(path)
-            builder.add_else()
-            builder.write()
-            self.report({'INFO'}, "Added else:")
-            return {'FINISHED'}
+    # REMOVED: UPVN_OT_AddStage — Blender UI button to edit rpy, never worked, distracts other agents
+    # What was here: UPVN_OT_AddStage operator to edit script.rpy via Blender panel, with bl_idname upvn.addstage, bl_label, execute() that appended to file via UPVN_GameBuilder
+    # Original had ~12 lines, deleted per user request. Leave comment what was there.
 
-    class UPVN_OT_AddEnd(bpy.types.Operator):
-        bl_idname = "upvn.add_end"
-        bl_label = "Add End"
-        def execute(self, context):
-            p = context.scene.upvn_props
-            path = bpy.path.abspath(p.project_path)
-            builder = _builder_from_file(path)
-            builder.add_end()
-            builder.write()
-            self.report({'INFO'}, "Added end")
-            return {'FINISHED'}
 
-    class UPVN_OT_AddJump(bpy.types.Operator):
-        bl_idname = "upvn.add_jump"
-        bl_label = "Add Jump"
-        def execute(self, context):
-            p = context.scene.upvn_props
-            path = bpy.path.abspath(p.project_path)
-            builder = _builder_from_file(path)
-            builder.add_jump(p.jump_target)
-            builder.write()
-            self.report({'INFO'}, f"Added jump {p.jump_target}")
-            return {'FINISHED'}
+    # REMOVED: UPVN_OT_AddSet — Blender UI button to edit rpy, never worked, distracts other agents
+    # What was here: UPVN_OT_AddSet operator to edit script.rpy via Blender panel, with bl_idname upvn.addset, bl_label, execute() that appended to file via UPVN_GameBuilder
+    # Original had ~13 lines, deleted per user request. Leave comment what was there.
 
-    class UPVN_OT_AddLabel(bpy.types.Operator):
-        bl_idname = "upvn.add_label"
-        bl_label = "Add Label"
-        def execute(self, context):
-            p = context.scene.upvn_props
-            path = bpy.path.abspath(p.project_path)
-            builder = _builder_from_file(path)
-            builder.ensure_label(p.label_name)
-            builder.add_say(None, f"Label {p.label_name} — new scene.")
-            builder.write()
-            self.report({'INFO'}, f"Added label {p.label_name}")
-            return {'FINISHED'}
 
-    class UPVN_OT_AddPause(bpy.types.Operator):
-        bl_idname = "upvn.add_pause"
-        bl_label = "Add Pause"
-        def execute(self, context):
-            p = context.scene.upvn_props
-            path = bpy.path.abspath(p.project_path)
-            builder = _builder_from_file(path)
-            builder.add_pause(p.pause_duration)
-            builder.write()
-            self.report({'INFO'}, f"Added pause {p.pause_duration}")
-            return {'FINISHED'}
+    # REMOVED: UPVN_OT_AddIf — Blender UI button to edit rpy, never worked, distracts other agents
+    # What was here: UPVN_OT_AddIf operator to edit script.rpy via Blender panel, with bl_idname upvn.addif, bl_label, execute() that appended to file via UPVN_GameBuilder
+    # Original had ~13 lines, deleted per user request. Leave comment what was there.
 
-    class UPVN_OT_AddAudio(bpy.types.Operator):
-        bl_idname = "upvn.add_audio"
-        bl_label = "Add Music/Sound"
-        def execute(self, context):
-            p = context.scene.upvn_props
-            path = bpy.path.abspath(p.project_path)
-            builder = _builder_from_file(path)
-            asset = p.audio_name
-            if p.audio_file:
-                try:
-                    src = pathlib.Path(bpy.path.abspath(p.audio_file))
-                    if src.exists():
-                        dest_dir = _get_project_asset_dir(path, "audio")
-                        dest = dest_dir / src.name
-                        shutil.copy2(src, dest)
-                        asset = src.stem
-                        builder.add_audio(asset, f"audio/{src.name}")
-                        self.report({'INFO'}, f"Copied audio {src.name} → {dest}")
-                except Exception as e:
-                    self.report({'WARNING'}, f"Audio copy failed {e}")
-            builder.add_play_music(asset)
-            builder.write()
-            self.report({'INFO'}, f"Added play music {asset}")
-            return {'FINISHED'}
 
-    class UPVN_OT_AddCamera(bpy.types.Operator):
-        bl_idname = "upvn.add_camera"
-        bl_label = "Add Camera Zoom"
-        def execute(self, context):
-            p = context.scene.upvn_props
-            path = bpy.path.abspath(p.project_path)
-            builder = _builder_from_file(path)
-            builder.add_camera_zoom(p.camera_zoom, p.camera_duration, p.camera_easing)
-            builder.write()
-            self.report({'INFO'}, f"Added camera zoom {p.camera_zoom} duration {p.camera_duration} with {p.camera_easing}")
-            return {'FINISHED'}
+    # REMOVED: UPVN_OT_AddElse — Blender UI button to edit rpy, never worked, distracts other agents
+    # What was here: UPVN_OT_AddElse operator to edit script.rpy via Blender panel, with bl_idname upvn.addelse, bl_label, execute() that appended to file via UPVN_GameBuilder
+    # Original had ~11 lines, deleted per user request. Leave comment what was there.
 
-    class UPVN_OT_Validate(bpy.types.Operator):
-        bl_idname = "upvn.validate"
-        bl_label = "Validate Script"
-        def execute(self, context):
-            p = context.scene.upvn_props
-            path = bpy.path.abspath(p.project_path)
-            ok, _info = ensure_engine(retry=True)
-            if not ok:
-                print("[UPVN] " + engine_diag_text())
-                self.report({'ERROR'}, "Engine not found. " + str(ENGINE_INFO.get("message", ""))[:200])
-                return {'FINISHED'}
-            text = _get_script_text(context, path)
-            try:
-                _p, _vc, _sm = _engine_api
-                _p.parse_string(text, filename=path)
-                self.report({'INFO'}, "Validate OK — no errors (declarative HQ)")
-            except Exception as e:
-                self.report({'ERROR'}, str(e).splitlines()[0][:200])
-            return {'FINISHED'}
 
-    class UPVN_OT_SaveSlotDemo(bpy.types.Operator):
-        bl_idname = "upvn.save_demo"
-        bl_label = "Save Demo (arbitrary slot)"
-        bl_description = "Demo arbitrary save slots: saves to next available slot or chosen slot"
-        def execute(self, context):
-            ok, _info = ensure_engine(retry=True)
-            if not ok:
-                self.report({'ERROR'}, "Engine not found — " + str(ENGINE_INFO.get("message", ""))[:200])
-                return {'FINISHED'}
-            p = context.scene.upvn_props
-            from engine.core.vn_state import VNState
-            from engine.save.save_manager import SaveManager
-            state = VNState()
-            state.variables["demo"] = 1
-            sm = SaveManager(state)
-            slot = int(p.arbitrary_slot) if p.arbitrary_slot else sm.next_available_slot()
-            sm.save(slot)
-            self.report({'INFO'}, f"Saved to arbitrary slot {slot} (1..∞)")
-            ids = sm.list_slot_ids()
-            self.report({'INFO'}, f"Slots now: {ids} — pagination 6/page, page {(slot - 1) // 6 + 1}")
-            return {'FINISHED'}
+    # REMOVED: UPVN_OT_AddEnd — Blender UI button to edit rpy, never worked, distracts other agents
+    # What was here: UPVN_OT_AddEnd operator to edit script.rpy via Blender panel, with bl_idname upvn.addend, bl_label, execute() that appended to file via UPVN_GameBuilder
+    # Original had ~11 lines, deleted per user request. Leave comment what was there.
 
-    class UPVN_OT_ExportPackage(bpy.types.Operator):
-        bl_idname = "upvn.export_package"
-        bl_label = "Export Playable Package"
-        bl_description = "Package game to dist/ zip — playable, locale, accessibility, HQ assets"
 
-        def execute(self, context):
-            ok, _info = ensure_engine(retry=True)
-            if not ok:
-                self.report({"ERROR"}, "Engine not found — " + str(ENGINE_INFO.get("message", ""))[:150])
-                return {"FINISHED"}
-            p = context.scene.upvn_props
-            script_path = pathlib.Path(bpy.path.abspath(p.project_path))
-            project_root = script_path.parent.parent if script_path.parent.name == "game" else script_path.parent
-            out_dir = project_root / "dist"
-            try:
-                from tools.package_game import package_project
-                # ensure package_game finds engine
-                result = package_project(str(project_root), str(out_dir))
-                self.report({"INFO"}, f"Packaged to {out_dir} — {result.get('zip_path','zip')} ({result.get('events',0)} events)")
-            except Exception as e:
-                import traceback
-                traceback.print_exc()
-                self.report({"ERROR"}, f"Package failed: {e}")
-            return {"FINISHED"}
+    # REMOVED: UPVN_OT_AddJump — Blender UI button to edit rpy, never worked, distracts other agents
+    # What was here: UPVN_OT_AddJump operator to edit script.rpy via Blender panel, with bl_idname upvn.addjump, bl_label, execute() that appended to file via UPVN_GameBuilder
+    # Original had ~11 lines, deleted per user request. Leave comment what was there.
 
-    class UPVN_OT_ScriptOutline(bpy.types.Operator):
-        bl_idname = "upvn.script_outline"
-        bl_label = "Script Outline"
-        bl_description = "Show labels, characters, variables in Text Editor"
 
-        def execute(self, context):
-            p = context.scene.upvn_props
-            path = bpy.path.abspath(p.project_path)
-            ok, _info = ensure_engine(retry=True)
-            if not ok:
-                self.report({"ERROR"}, "Engine not found")
-                return {"FINISHED"}
-            try:
-                _p, _vc, _sm = _engine_api
-                text = _get_script_text(context, path)
-                data = _p.parse_string(text, filename=path)
-                lines = [f"UPVN Script Outline — {path}"]
-                lines.append(f"Labels: {', '.join(sorted(data.get('labels', {}).keys()))}")
-                lines.append(f"Characters: {', '.join(sorted(data.get('characters', {}).keys()))}")
-                lines.append(f"Defaults: {', '.join(f'{k}={v}' for k,v in data.get('defaults', {}).items())}")
-                lines.append(f"State types: {data.get('types', {})}")
-                lines.append(f"Assets: {data.get('assets', {})}")
-                lines.append("")
-                for lbl, nodes in data.get('labels', {}).items():
-                    lines.append(f"label {lbl}: {len(nodes)} statements")
-                    for n in nodes[:5]:
-                        lines.append(f"  - {n.get('cmd')}: {str(n)[:80]}")
-                tb = bpy.data.texts.get("UPVN_OUTLINE")
-                if tb is None:
-                    tb = bpy.data.texts.new("UPVN_OUTLINE")
-                tb.clear()
-                tb.write("\n".join(lines) + "\n")
-                self.report({"INFO"}, f"Outline: {len(data.get('labels', {}))} labels, {len(data.get('characters', {}))} chars — see UPVN_OUTLINE")
-            except Exception as e:
-                self.report({"ERROR"}, f"Outline failed: {e}")
-            return {"FINISHED"}
+    # REMOVED: UPVN_OT_AddLabel — Blender UI button to edit rpy, never worked, distracts other agents
+    # What was here: UPVN_OT_AddLabel operator to edit script.rpy via Blender panel, with bl_idname upvn.addlabel, bl_label, execute() that appended to file via UPVN_GameBuilder
+    # Original had ~12 lines, deleted per user request. Leave comment what was there.
+
+
+    # REMOVED: UPVN_OT_AddPause — Blender UI button to edit rpy, never worked, distracts other agents
+    # What was here: UPVN_OT_AddPause operator to edit script.rpy via Blender panel, with bl_idname upvn.addpause, bl_label, execute() that appended to file via UPVN_GameBuilder
+    # Original had ~11 lines, deleted per user request. Leave comment what was there.
+
+
+    # REMOVED: UPVN_OT_AddAudio — Blender UI button to edit rpy, never worked, distracts other agents
+    # What was here: UPVN_OT_AddAudio operator to edit script.rpy via Blender panel, with bl_idname upvn.addaudio, bl_label, execute() that appended to file via UPVN_GameBuilder
+    # Original had ~24 lines, deleted per user request. Leave comment what was there.
+
+
+    # REMOVED: UPVN_OT_AddCamera — Blender UI button to edit rpy, never worked, distracts other agents
+    # What was here: UPVN_OT_AddCamera operator to edit script.rpy via Blender panel, with bl_idname upvn.addcamera, bl_label, execute() that appended to file via UPVN_GameBuilder
+    # Original had ~11 lines, deleted per user request. Leave comment what was there.
+
+
+    # REMOVED: UPVN_OT_Validate — Blender UI button to edit rpy, never worked, distracts other agents
+    # What was here: UPVN_OT_Validate operator to edit script.rpy via Blender panel, with bl_idname upvn.validate, bl_label, execute() that appended to file via UPVN_GameBuilder
+    # Original had ~19 lines, deleted per user request. Leave comment what was there.
+
+
+    # REMOVED: UPVN_OT_SaveSlotDemo — Blender UI button to edit rpy, never worked, distracts other agents
+    # What was here: UPVN_OT_SaveSlotDemo operator to edit script.rpy via Blender panel, with bl_idname upvn.saveslotdemo, bl_label, execute() that appended to file via UPVN_GameBuilder
+    # Original had ~21 lines, deleted per user request. Leave comment what was there.
+
+
+    # REMOVED: UPVN_OT_ExportPackage — Blender UI button to edit rpy, never worked, distracts other agents
+    # What was here: UPVN_OT_ExportPackage operator to edit script.rpy via Blender panel, with bl_idname upvn.exportpackage, bl_label, execute() that appended to file via UPVN_GameBuilder
+    # Original had ~24 lines, deleted per user request. Leave comment what was there.
+
+
+    # REMOVED: UPVN_OT_ScriptOutline — Blender UI button to edit rpy, never worked, distracts other agents
+    # What was here: UPVN_OT_ScriptOutline operator to edit script.rpy via Blender panel, with bl_idname upvn.scriptoutline, bl_label, execute() that appended to file via UPVN_GameBuilder
+    # Original had ~36 lines, deleted per user request. Leave comment what was there.
+
 
     def _get_project_asset_dir(script_path: str, category: str) -> pathlib.Path:
         p = pathlib.Path(script_path)
@@ -2879,19 +2579,9 @@ except Exception:
             layout.operator("upvn.reload_addon", icon='FILE_REFRESH')
             layout.separator()
 
-            # Project
-            box = layout.box()
-            box.label(text="Project — No Coding Required", icon='FILE_FOLDER')
-            box.prop(props, "project_path")
-            row = box.row(align=True)
-            row.operator("upvn.create_project", icon='ADD')
-            row.operator("upvn.quick_wizard", icon='OUTLINER_OB_FORCE_FIELD')
-            box.prop(props, "wizard_title")
-            box.prop(props, "wizard_theme")
-            box.operator("upvn.script_outline", icon='TEXT')
-            box.operator("upvn.export_package", icon='EXPORT')
+            # REMOVED: Project box with Create Project / Quick Wizard / Script Outline / Export Package
+            # What was here: project_path prop, create_project, quick_wizard, wizard_title/theme, script_outline, export_package
 
-            layout.separator()
             if _has_game_support():
                 box = layout.box()
                 box.label(text="Play in UPBGE — HQ Scene", icon='PLAY')
@@ -2905,96 +2595,23 @@ except Exception:
                 layout.label(text="Run inside UPBGE for play (Setup Scene HQ)", icon='INFO')
                 layout.separator()
 
-            # Characters
-            box = layout.box()
-            box.label(text="Characters (Declarative)", icon='USER')
-            box.prop(props, "char_id")
-            box.prop(props, "char_name")
-            box.prop(props, "char_color")
-            box.operator("upvn.add_character", icon='ADD')
+            # REMOVED: Characters, Variables, Scene & Sprites, Dialogue, Logic, Menu, Extras, Tools & QA boxes
+            # What was here:
+            # - Characters: char_id, char_name, char_color, add_character
+            # - Variables: var_name, var_type, var_value, add_variable
+            # - Scene & Sprites: bg_name, bg_image, add_scene, show_asset/pos/trans, sprite_image/side_image, add_show, stage_name, add_stage
+            # - Dialogue: speaker, dialogue, add_dialogue
+            # - Logic: set_target/op/expr, add_set, if_cond, add_if/else/end, jump_target, add_jump/label, label_name
+            # - Menu: menu_caption, menu_choice1/2, menu_jump1/2, add_menu
+            # - Extras: pause_duration, add_pause, audio_name/file, add_audio, camera_zoom/duration/easing, add_camera
+            # - Tools & QA: validate, check_wiring, save_demo, arbitrary_slot, etc.
+            # All deleted per user request — never worked, distracted other agents.
 
-            # Variables
             box = layout.box()
-            box.label(text="Variables — State (No Code)", icon='LINENUMBERS_ON')
-            box.prop(props, "var_name")
-            box.prop(props, "var_type")
-            box.prop(props, "var_value")
-            box.operator("upvn.add_variable", icon='ADD')
-
-            # Scene & Sprites
-            box = layout.box()
-            box.label(text="Scene & Sprites (Asset Browser)", icon='IMAGE_DATA')
-            box.prop(props, "bg_name")
-            box.prop(props, "bg_image")
-            box.operator("upvn.add_scene", icon='SCENE_DATA')
-            box.prop(props, "show_asset")
-            box.prop(props, "show_pos")
-            box.prop(props, "show_trans")
-            box.prop(props, "sprite_image")
-            box.prop(props, "side_image")
-            box.operator("upvn.add_show", icon='OBJECT_DATA')
-            box.prop(props, "stage_name")
-            box.operator("upvn.add_stage", icon='MESH_CUBE')
-
-            # Dialogue
-            box = layout.box()
-            box.label(text="Dialogue", icon='SPEAKER')
-            box.prop(props, "speaker")
-            box.prop(props, "dialogue")
-            box.operator("upvn.add_dialogue", icon='ADD')
-
-            # Logic — Set / If / Jump
-            box = layout.box()
-            box.label(text="Logic — No Python Needed", icon='CONSOLE')
-            box.prop(props, "set_target")
-            box.prop(props, "set_op")
-            box.prop(props, "set_expr")
-            box.operator("upvn.add_set", icon='ADD')
-            box.prop(props, "if_cond")
-            row = box.row(align=True)
-            row.operator("upvn.add_if", icon='ADD')
-            row.operator("upvn.add_else", icon='ADD')
-            row.operator("upvn.add_end", icon='REMOVE')
-            box.prop(props, "jump_target")
-            row = box.row(align=True)
-            row.operator("upvn.add_jump", icon='FORWARD')
-            row.operator("upvn.add_label", icon='ADD')
-            box.prop(props, "label_name")
-
-            # Menu
-            box = layout.box()
-            box.label(text="Menu (Branching)", icon='QUESTION')
-            box.prop(props, "menu_caption")
-            box.prop(props, "menu_choice1")
-            box.prop(props, "menu_jump1")
-            box.prop(props, "menu_choice2")
-            box.prop(props, "menu_jump2")
-            box.operator("upvn.add_menu", icon='ADD')
-
-            # Extras
-            box = layout.box()
-            box.label(text="Extras — Camera, Audio, Pause", icon='CAMERA_DATA')
-            box.prop(props, "pause_duration")
-            box.operator("upvn.add_pause", icon='PAUSE')
-            box.prop(props, "audio_name")
-            box.prop(props, "audio_file")
-            box.operator("upvn.add_audio", icon='SOUND')
-            box.prop(props, "camera_zoom")
-            box.prop(props, "camera_duration")
-            box.prop(props, "camera_easing")
-            box.operator("upvn.add_camera", icon='CAMERA_DATA')
-
-            layout.separator()
-            box = layout.box()
-            box.label(text="Tools & QA", icon='TOOL_SETTINGS')
-            row = box.row(align=True)
-            row.operator("upvn.validate", icon='CHECKMARK')
-            if not _has_game_support():
-                row.operator("upvn.check_wiring", icon='VIEWZOOM')
-            box.operator("upvn.save_demo", icon='FILE_TICK')
-            box.prop(props, "arbitrary_slot")
+            box.label(text="Tools — Minimal", icon='TOOL_SETTINGS')
             box.label(text="Saves: arbitrary slots 1..∞ (←→ pagination)", icon='INFO')
             box.label(text="H: history  Q: quick menu  Ctrl+S/L: save/load", icon='INFO')
+
 
     class UPVN_PT_TextPanel(bpy.types.Panel):
         bl_label = "UPVN — Script (HQ)"
@@ -3012,9 +2629,8 @@ except Exception:
                 layout.operator("upvn.check_engine", text="Re-check", icon='FILE_REFRESH')
             layout.separator()
             layout.label(text="Declarative — No Python Coding")
-            layout.operator("upvn.validate", icon='CHECKMARK')
-            layout.operator("upvn.script_outline", icon='TEXT')
-            layout.operator("upvn.export_package", icon='EXPORT')
+            # REMOVED: validate, script_outline, export_package buttons (never worked)
+
 
     class UPVN_OT_ReloadAddon(bpy.types.Operator):
         """Apply an add-on update WITHOUT restarting UPBGE."""
@@ -3055,14 +2671,7 @@ except Exception:
     classes = (UPVN_Prefs,
                UPVN_SceneProps, UPVN_OT_LocateEngine, UPVN_OT_CheckEngine, UPVN_OT_BundleEngine,
                UPVN_OT_ReloadAddon,
-               UPVN_OT_CreateProject, UPVN_OT_QuickWizard,
-               UPVN_OT_AddCharacter, UPVN_OT_AddVariable, UPVN_OT_AddScene,
-               UPVN_OT_AddDialogue, UPVN_OT_AddShow, UPVN_OT_AddMenu, UPVN_OT_AddStage,
-               UPVN_OT_AddSet, UPVN_OT_AddIf, UPVN_OT_AddElse, UPVN_OT_AddEnd,
-               UPVN_OT_AddJump, UPVN_OT_AddLabel, UPVN_OT_AddPause, UPVN_OT_AddAudio, UPVN_OT_AddCamera,
-               UPVN_OT_SetupScene, UPVN_OT_CheckWiring, UPVN_OT_Validate,
-               UPVN_OT_SaveSlotDemo,
-               UPVN_OT_ExportPackage, UPVN_OT_ScriptOutline,
+               UPVN_OT_SetupScene, UPVN_OT_CheckWiring,
                UPVN_PT_MainPanel, UPVN_PT_TextPanel)
 
     def _purge_stale_registrations():
