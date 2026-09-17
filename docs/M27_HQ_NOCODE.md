@@ -31,6 +31,9 @@ No new Ren'Py syntax until install/setup/play boring (M25 freeze rule) — we di
   - Characters: taller capsules (0.28 radius, 1.5 height)
 
 ### headless_renderer.py
+> **DEPRECATED (M29):** this Pillow simulator was removed from the engine — it confused
+> automation about what actually renders. The game renders only via UPBGE (bge/blf);
+> screenshots come from in-game `F12` captures. This section is kept as history.
 - **BGs HQ**: 
   - classroom: warmer gradient, glass highlights, center glow, vignette 140px
   - lecturehall: light rays with varying alpha, audience silhouettes

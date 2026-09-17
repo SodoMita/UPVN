@@ -61,7 +61,7 @@ Expected: all 4 examples + *The Question* parse and trace cleanly. No YAML.
    - `Add Scene` / `Add Show` (asset, position `left/center/right`, `with move/dissolve`) → writes `scene`/`show`
    - `Add Dialogue` (speaker, text with `[var]` and `{b}`) → writes `say`
    - `Add Menu` (caption, 2 choices + jumps) → writes `menu:` with automatic `jump` targets
-   - `Validate` → parser checks line/col + hint (friendly errors), `Preview` → headless screenshot to `screenshots/upvn_preview.png`
+   - `Validate` → parser checks line/col + hint (friendly errors)
 6. The frontend reads **`script_path` from the `VNController` object** — exactly what the
    panel's `project_path` writes — so the game you build is the game that plays
    (legacy `//game/script.rpy`, `//script.rpy`, `//examples/…` are fallbacks).
@@ -119,10 +119,9 @@ button died with a bare **"Engine not available"**. Since v0.6:
 | Add-on installed from an old single `.py` | Enable, then in Preferences → Add-ons → UPVN press *Copy engine next to add-on* (or reinstall from the zip). |
 | "no game script found" (red text on screen when pressing P) | Since 0.6.7 the runtime searches the .blend's parent/grandparent folders too (`//../game/script.rpy`…), so packaged layouts work out of the box. If it still fails: set panel `project_path`, press `Create Project`, then `Setup Scene`, then P. |
 | Pressing P shows a frozen viewport-like scene, no dialogue | The template had no logic bricks (old file). In the UPVN tab press **Setup Scene** once and File → Save; the committed `blend/UPVN_Template.blend` already includes the bricks. |
-| Running in plain Blender (not UPBGE) | Editing/Validate/Preview work; *Setup Scene* and *P to play* need UPBGE (has the game engine). |
+| Running in plain Blender (not UPBGE) | Editing/Validate work; *Setup Scene* and *P to play* need UPBGE (has the game engine). |
 | Setup Scene in `--background` | Logic-brick operators need the UPBGE UI context — run Setup Scene from the panel, not headless. |
 | `blf.color() takes exactly 5 arguments` in the game console | Fixed in 0.6.5 — reinstall the add-on zip so the updated `bge_frontend` is used. |
-| `Preview failed: … Pillow (PIL) is not installed…` | UPBGE uses its own bundled Python, where Pillow may be missing even if the system has it. Press **Install Pillow** in the UPVN panel (installs into the running interpreter's site-packages; works without restarting Blender since 0.6.6). |
 | Player segfaults instantly on any blend (Linux) | Audio userpref requests PulseAudio with no sound server (BUG-016). Once: `blender --background --python-expr "import bpy; bpy.context.preferences.system.audio_device='None'; bpy.ops.wm.save_userpref()"` (Blender 5.0 keeps audio prefs in `preferences.system`). |
 | Mouse click on a choice does nothing (keys 1-9 work) | Old blend with SENSOR physics (BUG-012) — run Setup Scene again, or `tools/update_template_materials.py` on the blend. |
 | `Setup failed: bpy_prop_collection: attribute "remove" not found` | Fixed in 0.6.6 — Setup Scene reuses the existing `VNController` and only adds missing bricks; it is safe to press repeatedly. |

@@ -280,15 +280,6 @@ def engine_diag_text():
     return "\n".join(lines)
 
 
-def pil_live_available():
-    """Live probe for Pillow in the CURRENT interpreter."""
-    try:
-        import PIL  # noqa: F401
-        return True
-    except Exception:
-        return False
-
-
 def engine_parser_available():
     """(parse_string, parse_file) or (None, None) once engine is bound."""
     if not ENGINE_AVAILABLE or _engine_api is None:
@@ -1059,107 +1050,6 @@ class UPVN_GameBuilder:
         except Exception as e:
             return False, str(e)
 
-    def preview_screenshot(self, out_path: str = "screenshots/upvn_preview.png"):
-        """Headless screenshot via headless_renderer."""
-        self.last_error = None
-        if not ENGINE_AVAILABLE or _engine_api is None:
-            self.last_error = "engine not found"
-            return None
-        try:
-            from engine.render.headless_renderer import render_state
-        except ImportError as e:
-            self.last_error = f"headless renderer import failed: {e}"
-            return None
-        if not pil_live_available():
-            self.last_error = ("Pillow (PIL) is not visible to this Python "
-                               "interpreter — press 'Install Pillow' in the UPVN panel "
-                               "(if you already did, restart Blender/UPBGE once)")
-            return None
-        from engine.core.vn_state import VNState
-        from engine.core.vn_interpreter import VNInterpreter
-        _p, _vc, _sm = _engine_api
-        from pathlib import Path as _P
-        _P(out_path).parent.mkdir(parents=True, exist_ok=True)
-        if self.script_path.exists():
-            try:
-                script = _p.parse_file(str(self.script_path))
-            except Exception:
-                rpy = self.build_rpy()
-                script = _p.parse_string(rpy)
-        else:
-            rpy = self.build_rpy()
-            try:
-                script = _p.parse_string(rpy)
-            except Exception as e:
-                self.last_error = f"script parse failed: {e}"
-                return None
-        state = VNState()
-        interp = VNInterpreter(script, state)
-        gen = interp.run()
-        try:
-            ev = next(gen)
-            while not ev.get("wait"):
-                ev = next(gen)
-        except StopIteration:
-            ev = {"type": "say", "who": None, "text": "Preview"}
-        try:
-            img = render_state(state, ev, pathlib.Path(out_path))
-        except Exception as e:
-            self.last_error = f"rendering failed: {e}"
-            return None
-        return pathlib.Path(out_path)
-
-    def preview_all_paths(self, out_dir: str = "screenshots/preview_paths"):
-        """Generate screenshots for all choice paths (for QA)."""
-        self.last_error = None
-        if not ENGINE_AVAILABLE or _engine_api is None:
-            self.last_error = "engine not found"
-            return None
-        try:
-            from engine.render.headless_renderer import render_state
-            from engine.core.vn_state import VNState
-            from engine.core.vn_interpreter import VNInterpreter
-            from pathlib import Path as _P
-            _p, _vc, _sm = _engine_api
-            out_dir = _P(out_dir)
-            out_dir.mkdir(parents=True, exist_ok=True)
-            if self.script_path.exists():
-                script = _p.parse_file(str(self.script_path))
-            else:
-                script = _p.parse_string(self.build_rpy())
-            # simple path enumeration: try choices 0,0,0 etc
-            paths = []
-            for choices in [[0], [1], [0,0], [0,1], [1,0], [1,1]]:
-                try:
-                    state = VNState()
-                    interp = VNInterpreter(script, state)
-                    gen = interp.run()
-                    cidx = 0
-                    ev = next(gen)
-                    step = 0
-                    while True:
-                        if ev.get("wait"):
-                            p = out_dir / f"path_{'_'.join(map(str,choices))}_step{step}.png"
-                            render_state(state, ev, p)
-                            paths.append(p)
-                            step += 1
-                        if ev.get("type") == "menu" and ev.get("wait"):
-                            pick = choices[cidx] if cidx < len(choices) else 0
-                            cidx += 1
-                            ev = gen.send(pick)
-                        elif ev.get("wait"):
-                            ev = gen.send(None)
-                        else:
-                            ev = next(gen)
-                except StopIteration:
-                    pass
-                except Exception as e:
-                    print(f"[preview_all] path {choices} failed: {e}")
-            return paths
-        except Exception as e:
-            self.last_error = f"preview all failed: {e}"
-            return None
-
     def engine_ok(self):
         return bool(ENGINE_AVAILABLE)
 
@@ -1249,76 +1139,6 @@ if HAS_BPY:
             self.report({"INFO"}, msg)
             return {"FINISHED"}
 
-    def _upbge_python_path():
-        """Path to the Python interpreter bundled with UPBGE/Blender, or None."""
-        import glob as _glob
-        if bpy is None:
-            return None
-        try:
-            base = pathlib.Path(bpy.app.binary_path).resolve().parent
-        except Exception:
-            return None
-        for rel in ("5.0", "4.5", "4.6", "python"):
-            for name in ("python3.11", "python3.10", "python3.9"):
-                c = base / rel / "python" / "bin" / name
-                if c.exists():
-                    return str(c)
-        for rel in ("5.0", "python"):
-            hits = sorted(_glob.glob(str(base / rel / "python" / "bin" / "python3*")))
-            if hits:
-                return hits[-1]
-        return None
-
-    class UPVN_OT_InstallPillow(bpy.types.Operator):
-        bl_idname = "upvn.install_pillow"
-        bl_label = "Install Pillow (Preview)"
-        bl_description = ("Install Pillow into UPBGE's bundled Python so 'Preview' can render PNG screenshots")
-
-        def execute(self, context):
-            py = _upbge_python_path()
-            target = None
-            try:
-                import sysconfig
-                target = sysconfig.get_paths().get("purelib")
-            except Exception:
-                target = None
-            cross_flags = []
-            if not py:
-                import shutil
-                py = shutil.which("python3")
-                if not py:
-                    self.report({"ERROR"},
-                                "No bundled Python binary next to " +
-                                str(getattr(bpy.app, "binary_path", "")) +
-                                " and no python3 on PATH.")
-                    return {"FINISHED"}
-                cross_flags = ["--python-version", "3.11",
-                               "--only-binary=:all:"]
-                if not target:
-                    self.report({"ERROR"}, "Cannot determine this interpreter's site-packages (sysconfig).")
-                    return {"FINISHED"}
-            import subprocess
-            cmd = [py, "-m", "pip", "install", "pillow"]
-            if target:
-                cmd += ["--target", target]
-            cmd += cross_flags
-            try:
-                r = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
-            except Exception as e:
-                self.report({"ERROR"}, f"pip failed: {e}")
-                return {"FINISHED"}
-            if r.returncode == 0:
-                if pil_live_available():
-                    self.report({"INFO"}, "Pillow installed and visible — Preview should work now.")
-                else:
-                    self.report({"WARNING"},
-                                "Pillow installed into the bundled Python, but this Blender session does not see it yet — restart Blender/UPBGE once, then Preview.")
-            else:
-                tail = (r.stderr or r.stdout or "").strip().splitlines()
-                self.report({"ERROR"}, "pip install failed: " + ("; ".join(tail[-3:]) if tail else "?"))
-            return {"FINISHED"}
-
-    # properties — M27 extended for no-code workflow
     class UPVN_SceneProps(bpy.types.PropertyGroup):
         project_path: bpy.props.StringProperty(name="Script Path", default="//game/script.rpy", subtype='FILE_PATH')
         char_id: bpy.props.StringProperty(name="ID", default="e")
@@ -2851,53 +2671,6 @@ except Exception:
                 self.report({'ERROR'}, str(e).splitlines()[0][:200])
             return {'FINISHED'}
 
-    class UPVN_OT_Preview(bpy.types.Operator):
-        bl_idname = "upvn.preview"
-        bl_label = "Preview Screenshot"
-        def execute(self, context):
-            p = context.scene.upvn_props
-            path = bpy.path.abspath(p.project_path)
-            builder = _builder_from_file(path)
-            out = builder.preview_screenshot()
-            if out and out.exists():
-                self.report({'INFO'}, f"Preview at {out} ({out.stat().st_size // 1024}KB)")
-                try:
-                    img = bpy.data.images.load(str(out), check_existing=True)
-                    for area in bpy.context.screen.areas:
-                        if area.type == 'IMAGE_EDITOR':
-                            area.spaces.active.image = img
-                except Exception:
-                    pass
-            else:
-                reason = getattr(builder, "last_error", None)
-                ok, _info = ensure_engine()
-                if not ok:
-                    self.report({'ERROR'}, "Engine not found — install the UPVN .zip release or set engine folder in add-on preferences.")
-                elif reason:
-                    self.report({'ERROR'}, "Preview failed: " + str(reason)[:250])
-                    print("[UPVN] preview error:", reason)
-                else:
-                    self.report({'ERROR'}, "Preview failed — see console.")
-                    print("[UPVN] " + engine_diag_text())
-            return {'FINISHED'}
-
-    class UPVN_OT_PreviewAll(bpy.types.Operator):
-        bl_idname = "upvn.preview_all"
-        bl_label = "Preview All Paths"
-        bl_description = "Generate screenshots for all choice paths (HQ preview)"
-
-        def execute(self, context):
-            p = context.scene.upvn_props
-            path = bpy.path.abspath(p.project_path)
-            builder = _builder_from_file(path)
-            outs = builder.preview_all_paths()
-            if outs:
-                self.report({'INFO'}, f"Generated {len(outs)} previews in screenshots/preview_paths/")
-            else:
-                reason = getattr(builder, "last_error", None)
-                self.report({'ERROR'}, f"Preview all failed: {reason}")
-            return {'FINISHED'}
-
     class UPVN_OT_SaveSlotDemo(bpy.types.Operator):
         bl_idname = "upvn.save_demo"
         bl_label = "Save Demo (arbitrary slot)"
@@ -2918,51 +2691,6 @@ except Exception:
             self.report({'INFO'}, f"Saved to arbitrary slot {slot} (1..∞)")
             ids = sm.list_slot_ids()
             self.report({'INFO'}, f"Slots now: {ids} — pagination 6/page, page {(slot - 1) // 6 + 1}")
-            return {'FINISHED'}
-
-    class UPVN_OT_QuickPreviewArbitrary(bpy.types.Operator):
-        bl_idname = "upvn.preview_arbitrary"
-        bl_label = "Preview Arbitrary Saves"
-        def execute(self, context):
-            ok, _info = ensure_engine(retry=True)
-            if not ok:
-                self.report({'ERROR'}, "Engine not found — " + str(ENGINE_INFO.get("message", ""))[:200])
-                return {'FINISHED'}
-            p = context.scene.upvn_props
-            try:
-                from engine.render.headless_renderer import render_state
-            except ImportError as e:
-                self.report({'ERROR'}, f"headless renderer import failed: {e}")
-                return {'FINISHED'}
-            if not pil_live_available():
-                self.report({'ERROR'},
-                            "Pillow (PIL) is not visible to this Python — press 'Install Pillow' in the UPVN panel.")
-                return {'FINISHED'}
-            try:
-                from engine.core.vn_state import VNState
-                from engine.save.save_manager import SaveManager
-                from engine.ui.screen_manager import ScreenManager
-                from engine.ui.screen_manager import SaveScreen
-                state = VNState()
-                state.history.append({"who": None, "who_name": "Narrator", "text": "Arbitrary save demo", "stripped": "Arbitrary save demo"})
-                sm = SaveManager(state, save_dir=str(pathlib.Path(bpy.path.abspath(p.project_path)).parent / "saves"))
-                for i in [1, 2, 7, 42, 100, 500]:
-                    try:
-                        state.variables["slot_test"] = i
-                        sm.save(i)
-                    except Exception:
-                        pass
-                mgr = ScreenManager(state, sm)
-                save_screen = SaveScreen(sm)
-                save_screen.page = (int(p.arbitrary_slot) - 1) // 6
-                mgr.show("save", save_screen)
-                from pathlib import Path
-                out = Path("screenshots/upvn_arbitrary_preview.png")
-                out.parent.mkdir(parents=True, exist_ok=True)
-                render_state(state, {"type": "say", "who": None, "text": "Arbitrary preview"}, out, screen_mgr=mgr)
-                self.report({'INFO'}, f"Arbitrary preview at {out} page {save_screen.page + 1}")
-            except Exception as e:
-                self.report({'ERROR'}, f"Arbitrary preview failed {e}")
             return {'FINISHED'}
 
     class UPVN_OT_ExportPackage(bpy.types.Operator):
@@ -3196,18 +2924,10 @@ except Exception:
             box.label(text="Tools & QA", icon='TOOL_SETTINGS')
             row = box.row(align=True)
             row.operator("upvn.validate", icon='CHECKMARK')
-            row.operator("upvn.preview", icon='RENDER_RESULT')
-            row.operator("upvn.preview_all", icon='IMAGE_REFERENCE')
             if not _has_game_support():
                 row.operator("upvn.check_wiring", icon='VIEWZOOM')
             box.operator("upvn.save_demo", icon='FILE_TICK')
-            if pil_live_available():
-                box.label(text="✓ Pillow installed (Preview active)", icon='CHECKMARK')
-            else:
-                box.operator("upvn.install_pillow", icon='CONSOLE',
-                                text="Install Pillow (for Preview)")
             box.prop(props, "arbitrary_slot")
-            box.operator("upvn.preview_arbitrary", icon='IMAGE_REFERENCE')
             box.label(text="Saves: arbitrary slots 1..∞ (←→ pagination)", icon='INFO')
             box.label(text="H: history  Q: quick menu  Ctrl+S/L: save/load", icon='INFO')
 
@@ -3228,7 +2948,6 @@ except Exception:
             layout.separator()
             layout.label(text="Declarative — No Python Coding")
             layout.operator("upvn.validate", icon='CHECKMARK')
-            layout.operator("upvn.preview", icon='RENDER_RESULT')
             layout.operator("upvn.script_outline", icon='TEXT')
             layout.operator("upvn.export_package", icon='EXPORT')
 
@@ -3270,14 +2989,14 @@ except Exception:
 
     classes = (UPVN_Prefs,
                UPVN_SceneProps, UPVN_OT_LocateEngine, UPVN_OT_CheckEngine, UPVN_OT_BundleEngine,
-               UPVN_OT_InstallPillow, UPVN_OT_ReloadAddon,
+               UPVN_OT_ReloadAddon,
                UPVN_OT_CreateProject, UPVN_OT_QuickWizard,
                UPVN_OT_AddCharacter, UPVN_OT_AddVariable, UPVN_OT_AddScene,
                UPVN_OT_AddDialogue, UPVN_OT_AddShow, UPVN_OT_AddMenu, UPVN_OT_AddStage,
                UPVN_OT_AddSet, UPVN_OT_AddIf, UPVN_OT_AddElse, UPVN_OT_AddEnd,
                UPVN_OT_AddJump, UPVN_OT_AddLabel, UPVN_OT_AddPause, UPVN_OT_AddAudio, UPVN_OT_AddCamera,
                UPVN_OT_SetupScene, UPVN_OT_CheckWiring, UPVN_OT_Validate,
-               UPVN_OT_Preview, UPVN_OT_PreviewAll, UPVN_OT_SaveSlotDemo, UPVN_OT_QuickPreviewArbitrary,
+               UPVN_OT_SaveSlotDemo,
                UPVN_OT_ExportPackage, UPVN_OT_ScriptOutline,
                UPVN_PT_MainPanel, UPVN_PT_TextPanel)
 
