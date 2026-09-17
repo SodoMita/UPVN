@@ -1499,8 +1499,37 @@ except Exception:
         return obj
 
     def _static_ghost(obj):
-        """Static, ray-hittable physics for VN plates."""
+        """Static, ray-hittable physics for VN plates — but text should NOT be hittable to avoid outside trigger."""
         try:
+            # Text objects should have NO collision to avoid triggering button outside visible mesh
+            # User reported buttons triggered outside visible mesh — text collision was part of it
+            name = getattr(obj, "name", "")
+            is_text = obj.type == "FONT" if hasattr(obj, "type") else ("_text" in str(name))
+            if is_text:
+                # Disable collision for text — only button plane should be hittable
+                try:
+                    g = obj.game
+                    try:
+                        g.physics_type = "NO_COLLISION"
+                    except Exception:
+                        pass
+                    try:
+                        g.use_collision_bounds = False
+                    except Exception:
+                        pass
+                    try:
+                        g.use_ghost = True
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
+                # Also try to set collision group 0
+                try:
+                    obj.collisionGroup = 0
+                    obj.collisionMask = 0
+                except Exception:
+                    pass
+                return
             g = obj.game
             try:
                 g.physics_type = "STATIC"
@@ -2032,8 +2061,9 @@ except Exception:
                 _tint(ch, CHOICE_IDLE_COLOR)
                 _static_ghost(ch)
                 tname = cname + "_text"
-                # Text centered (Ren'Py xalign 0.5) at -2.1 offset to center 1185 width
-                _ensure_font(tname, (loc[0] - 2.1, -6.0, loc[2] + 0.08),
+                # Text Middle vertical alignment per user request — CENTER/CENTER
+                # Previously at -2.1 offset for LEFT alignment, now centered at loc[0] for CENTER alignment
+                _ensure_font(tname, (loc[0], -6.0, loc[2] + 0.08),
                              size=0.22, bold=False,
                              shadow=cname + "_shadow", renpy_color=CHOICE_TEXT_IDLE, font_file=UI_FONT_INTERFACE)
             except Exception as exc:

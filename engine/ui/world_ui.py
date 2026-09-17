@@ -829,20 +829,50 @@ def layout_screen_ui(get_obj: Callable[[str], Any], payload: dict, ortho: float 
         bump = HOVER_SCALE if is_hover else 1.0
 
         # Only stretch/translate if not custom
+        # Physics collision fix: always reinstance so collision matches visual exactly
+        # Previously reinstance=False when hovered to avoid outside trigger, but that caused visual larger than collision (fails to trigger on button)
+        # Now always reinstance, so collision = visual, no outside trigger, no miss
+        # User reported buttons triggered outside visible mesh — due to stale collision from _data_plane 9.26 width and text collision
+        # Fixed by disabling text collision and always reinstance plane to match btn_w/btn_h
         if not is_custom_plane:
-            _set_scale(plane, (btn_w / 2.0 * bump, btn_h / 2.0 * bump, 0.01), reinstance=not is_hover)
+            _set_scale(plane, (btn_w / 2.0 * bump, btn_h / 2.0 * bump, 0.01), reinstance=True)
             _set_pos(plane, (x_center, y_choice, z))
             _set_object_color(plane, CHOICE_IDLE_COLOR if not is_hover else CHOICE_HOVER_COLOR)
         else:
-            # Custom layout: only handle hover color, not scale/pos
+            # Custom layout: only handle hover color, not scale/pos, but ensure collision is correct
+            # For custom, we should still reinstance once to ensure collision matches custom scale from Blender
+            try:
+                if hasattr(plane, "reinstancePhysicsMesh"):
+                    plane.reinstancePhysicsMesh()
+            except Exception:
+                pass
             if is_hover:
                 _set_object_color(plane, CHOICE_HOVER_COLOR)
             else:
                 _set_object_color(plane, CHOICE_IDLE_COLOR)
 
         if not is_custom_text:
-            _set_pos(text_obj, (x_center - text_w / 2.0, y_choice_text, z))
+            # Choice text now has Middle vertical alignment CENTER/CENTER per user request
+            # For CENTER alignment, position should be at x_center, not x_center - text_w/2
+            # x_center - text_w/2 was for LEFT alignment to center block, now CENTER needs x_center
+            _set_pos(text_obj, (x_center, y_choice_text, z))
             set_font_size(text_obj, em)
+            # Ensure Middle alignment at runtime too
+            try:
+                bo = getattr(text_obj, "blenderObject", None)
+                if bo is not None and hasattr(bo, "data"):
+                    if hasattr(bo.data, "align_x"):
+                        bo.data.align_x = "CENTER"
+                    if hasattr(bo.data, "align_y"):
+                        bo.data.align_y = "CENTER"
+                # Also try direct
+                if hasattr(text_obj, "data"):
+                    if hasattr(text_obj.data, "align_x"):
+                        text_obj.data.align_x = "CENTER"
+                    if hasattr(text_obj.data, "align_y"):
+                        text_obj.data.align_y = "CENTER"
+            except Exception:
+                pass
         # Always set font color for hover feedback
         _set_font_color(text_obj, CHOICE_TEXT_HOVER if is_hover else CHOICE_TEXT_IDLE)
 
@@ -961,6 +991,17 @@ def apply_world_ui(get_obj: Callable[[str], Any], payload: dict, ortho: float | 
         on = bool(ch.get("visible"))
         _set_visible(plane, on)
         _set_visible(text_obj, on)
+        # Disable collision for text objects to avoid outside trigger — only button plane should be hittable
+        # User reported buttons triggered outside visible mesh, text collision was part of it
+        if text_obj is not None:
+            try:
+                # Try to disable collision for text at runtime
+                if hasattr(text_obj, "collisionGroup"):
+                    text_obj.collisionGroup = 0
+                if hasattr(text_obj, "collisionMask"):
+                    text_obj.collisionMask = 0
+            except Exception:
+                pass
         if shadow_obj:
             _disable_obj(shadow_obj)
         if on:
