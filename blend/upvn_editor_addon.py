@@ -1537,7 +1537,21 @@ except Exception:
                 g.use_ghost = True
             try:
                 g.use_collision_bounds = True
-                g.collision_bounds_type = "BOX"
+                # For perspective, BOX can be larger than visual mesh causing outside trigger
+                # Use TRIANGLE_MESH for precise hit, fallback to BOX
+                # User reports perspective still triggers outside, ortho fixed — need precise collision
+                try:
+                    g.collision_bounds_type = "TRIANGLE_MESH"
+                except Exception:
+                    try:
+                        g.collision_bounds_type = "BOX"
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+            try:
+                # Ensure ghost so it doesn't block physics but still hittable by rayCast
+                g.use_ghost = True
             except Exception:
                 pass
         except Exception:

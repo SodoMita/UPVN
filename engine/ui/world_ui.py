@@ -796,21 +796,35 @@ def layout_screen_ui(get_obj: Callable[[str], Any], payload: dict, ortho: float 
         if not ch.get("visible"):
             continue
 
-        # If auto layout OFF, don't stretch/translate — respect custom layout
-        # User said choices still stretch and translate and don't allow custom layout
+        # If auto layout OFF, don't translate, but still ensure scale matches text to avoid outside trigger
+        # User said choices still stretch and translate and don't allow custom layout — now toggle
+        # When OFF, respect custom position, but still fix scale to match text width to avoid huge BOX
+        # This fixes perspective outside trigger where default 1.0 scale (2.0 world) larger than text
         if not auto_layout:
-            # Only handle hover color and visibility, not position/scale
             is_hover = hovered and ch["name"] == hovered
-            if is_hover:
-                if plane and not _is_custom_layout(plane):
-                    _set_object_color(plane, CHOICE_HOVER_COLOR)
-                if text_obj:
-                    _set_font_color(text_obj, CHOICE_TEXT_HOVER)
+            bump = HOVER_SCALE if is_hover else 1.0
+            is_custom_plane = _is_custom_layout(plane) if plane else False
+            if not is_custom_plane and plane is not None:
+                # Still set scale to match text to avoid outside trigger, but not position
+                try:
+                    text = ch.get("text") or ""
+                    lines = [l for l in str(text).split("\n") if l] or [""]
+                    text_w = max(len(l) for l in lines) * char_w
+                    btn_w = text_w + 2 * pad_x
+                    btn_w = max(btn_w, 4.0 * em)
+                    _set_scale(plane, (btn_w / 2.0 * bump, btn_h / 2.0 * bump, 0.01), reinstance=True)
+                except Exception:
+                    pass
+                _set_object_color(plane, CHOICE_HOVER_COLOR if is_hover else CHOICE_IDLE_COLOR)
             else:
-                if plane and not _is_custom_layout(plane):
-                    _set_object_color(plane, CHOICE_IDLE_COLOR)
-                if text_obj:
-                    _set_font_color(text_obj, CHOICE_TEXT_IDLE)
+                if is_hover:
+                    if plane and not _is_custom_layout(plane):
+                        _set_object_color(plane, CHOICE_HOVER_COLOR)
+                else:
+                    if plane and not _is_custom_layout(plane):
+                        _set_object_color(plane, CHOICE_IDLE_COLOR)
+            if text_obj:
+                _set_font_color(text_obj, CHOICE_TEXT_HOVER if is_hover else CHOICE_TEXT_IDLE)
             continue
 
         # Auto layout ON: fixed simple vertical stack
