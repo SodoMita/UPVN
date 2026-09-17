@@ -67,6 +67,15 @@ for i in $(seq 1 $((SECS / 2))); do
     [ -n "$LINE" ] && break
 done
 [ -n "$LINE" ] && { info "dialogue: $LINE"; read -r CX CY <<< "$CLICK"; DISPLAY="$DISPLAY" xdotool mousemove "$CX" "$CY" click 1 || true; sleep 3; }
+# llvmpipe can need >10 s to present the first frame at 1280x720: wait for the
+# player's X window to appear in the tree before shooting, else grim captures
+# an empty (black) output
+for _ in $(seq 1 30); do
+    DISPLAY="$DISPLAY" xwininfo -root -tree 2>/dev/null \
+        | grep -qiE "blender|upvn|template" && break
+    sleep 1
+done
+sleep 3
 mkdir -p "$(dirname "$SHOT")"
 XDG_RUNTIME_DIR="$WL" WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-wayland-1}" grim "$SHOT"
 info "screenshot: $SHOT"
