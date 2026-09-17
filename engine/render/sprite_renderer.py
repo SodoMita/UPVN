@@ -18,7 +18,8 @@ except ImportError:
 
 from ..core.vn_state import VNState
 from .contract import (POSITIONS, SPRITE_MATERIAL, SPRITE_FALLBACK_TAG,
-                       SPRITE_TAG_PREFIX, BG_PLANE, ASSET_SPRITES,
+                       SPRITE_TAG_PREFIX, SPRITE_POOL, POSITION_EMPTY_PREFIX,
+                       BG_PLANE, ASSET_SPRITES,
                        image_mode_from, sprite_color, SPRITE_FALLBACK_COLOR,
                        apply_object_color, plane_material,
                        apply_material_image, reset_material_palette)
@@ -34,6 +35,24 @@ def _dbg(msg: str):
 
 # transition durations (seconds)
 TRANS_DUR = {"dissolve": 0.4, "fade": 0.5, None: 0.0}
+
+def _make_material_single_user(plane, tag: str) -> None:
+    """Give a duplicated pool plane its own MASprite_<tag> material copy.
+
+    Pool duplicates share the template mesh+material; without a single-user
+    copy every tag would texture the same slot (the reason the old template
+    carried one material per position).
+    """
+    try:
+        bo = getattr(plane, "blenderObject", None)
+        slots = getattr(bo, "material_slots", None) if bo is not None else None
+        if slots and slots[0].material is not None:
+            mat = slots[0].material.copy()
+            mat.name = f"{SPRITE_MATERIAL}_{tag}"
+            slots[0].material = mat
+    except Exception:
+        pass
+
 
 class SpriteRenderer:
     def __init__(self, state: VNState):
@@ -79,24 +98,27 @@ class SpriteRenderer:
     def _bge_show(self, tag: str, asset: str, position: str, transition: str | None):
         try:
             scene = bge.logic.getCurrentScene()  # type: ignore
-            # Choose plane object by position; fallback to generic Sprite_%
-            plane_name = f"{SPRITE_TAG_PREFIX}{position}"  # e.g. Sprite_center
-            plane = (scene.objects.get(plane_name)
-                     or scene.objects.get(f"{SPRITE_TAG_PREFIX}{tag}")
-                     or scene.objects.get(SPRITE_FALLBACK_TAG))
-            if not plane:
-                # create on the fly if template missing (LLM can build UI in python)
-                import bge.logic as logic
-                # duplicate a template plane
-                tmpl = scene.objects.get(BG_PLANE)
-                if tmpl:
-                    plane = scene.addObject(tmpl, tmpl)
-                    plane.name = plane_name
-                else:
+            # One plane per tag; stage layout lives on Pos_<pos> empties
+            # (position-empties refactor). Legacy blends still carry
+            # per-position Sprite_<pos> planes — used as duplication source.
+            plane_name = f"{SPRITE_TAG_PREFIX}{tag}"
+            plane = scene.objects.get(plane_name)
+            if plane is None:
+                src = (scene.objects.get(SPRITE_POOL)
+                       or scene.objects.get(f"{SPRITE_TAG_PREFIX}{position}")
+                       or scene.objects.get(SPRITE_FALLBACK_TAG)
+                       or scene.objects.get(BG_PLANE))
+                if src is None:
                     _dbg(f"show {tag}: no plane object in scene — skipped")
                     return
-            # place at correct world position
-            plane.worldPosition = POSITIONS[position]  # type: ignore
+                # duplicate a template plane on the fly
+                plane = scene.addObject(src, src)
+                plane.name = plane_name
+                _make_material_single_user(plane, tag)
+            empty = scene.objects.get(f"{POSITION_EMPTY_PREFIX}{position}")
+            # place at correct world position (the empty owns the layout)
+            plane.worldPosition = (empty.worldPosition if empty is not None
+                                   else POSITIONS[position])  # type: ignore
             plane.visible = True
             plane["upvn_asset"] = asset
             # M26 policy: "color" never touches image files; "auto" tries
@@ -149,7 +171,9 @@ class SpriteRenderer:
                             ob.visible = (ob is bank)
                     plane.visible = False
                     bank.visible = True
-                    bank.worldPosition = POSITIONS[position]  # type: ignore
+                    bank.worldPosition = (empty.worldPosition
+                                          if empty is not None
+                                          else POSITIONS[position])  # type: ignore
                     self.planes[tag] = {"obj": bank, "asset": asset,
                                         "position": position, "t0": time.time(),
                                         "transition": transition, "bank": True}
