@@ -35,6 +35,8 @@ SPRITE_MATERIAL = "MASprite"
 SPRITE_POSITIONS = ("far_left", "left", "center", "right", "far_right")
 SPRITE_FALLBACK_TAG = "Sprite"
 SPRITE_TAG_PREFIX = "Sprite_"
+SPRITE_POOL = "Sprite_pool"
+POSITION_EMPTY_PREFIX = "Pos_"
 
 DIALOGUE_PLANE = "Dialogue_Box"
 SPEAKER_TEXT = "Speaker_Text"
@@ -584,9 +586,13 @@ def required_objects() -> list[dict]:
                       "purpose": purpose, "used_by": used_by})
     for pos in SPRITE_POSITIONS:
         items.append({"kind": "object",
-                      "name": f"Sprite_{pos}",
-                      "purpose": f"sprite plane at '{pos}' (texture swapped on 'show')",
+                      "name": f"{POSITION_EMPTY_PREFIX}{pos}",
+                      "purpose": f"empty anchoring sprite stage position '{pos}'",
                       "used_by": "engine/render/sprite_renderer.py::SpriteRenderer._bge_show"})
+    items.append({"kind": "object",
+                  "name": SPRITE_POOL,
+                  "purpose": "hidden template plane duplicated per sprite tag",
+                  "used_by": "engine/render/sprite_renderer.py::SpriteRenderer._bge_show"})
     for i in range(CHOICE_COUNT):
         items.append({"kind": "object",
                       "name": f"{CHOICE_PREFIX}{i}",
