@@ -47,7 +47,8 @@ def test_contract_required_objects_complete():
     assert contract.CONTROLLER in names
     assert contract.LAUNCHER_TEXT in names
     for pos in contract.SPRITE_POSITIONS:
-        assert f"Sprite_{pos}" in names
+        assert f"{contract.POSITION_EMPTY_PREFIX}{pos}" in names
+    assert contract.SPRITE_POOL in names
     assert contract.BG_MATERIAL in names
     assert contract.SPRITE_MATERIAL in names
     for col in contract.COLLECTIONS:
@@ -65,7 +66,8 @@ def test_contract_check_full_scene_ok():
                  contract.SPEAKER_TEXT, contract.DIALOGUE_TEXT,
                  contract.HISTORY_PLANE, contract.HISTORY_TEXT,
                  contract.REWIND_TEXT}
-    obj_names |= {f"Sprite_{p}" for p in contract.SPRITE_POSITIONS}
+    obj_names |= {f"{contract.POSITION_EMPTY_PREFIX}{p}" for p in contract.SPRITE_POSITIONS}
+    obj_names.add(contract.SPRITE_POOL)
     obj_names |= {f"{contract.CHOICE_PREFIX}{i}" for i in range(contract.CHOICE_COUNT)}
     obj_names |= {f"{contract.CHOICE_PREFIX}{i}_text" for i in range(contract.CHOICE_COUNT)}
     mats = {contract.BG_MATERIAL, contract.SPRITE_MATERIAL}
