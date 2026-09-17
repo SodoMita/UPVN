@@ -7,7 +7,6 @@ Modal: blocking, story pauses until dismissed and returns a value (save/load, ma
 
 LLM can extend UI in python (per user request: "UI is created in 3D scene, no DSL").
 
-Headless: draw_headless() uses Pillow via headless_renderer helpers.
 UPBGE: draw_bge() uses blf + 3D planes (DialogueBox already does planes).
 
 Usage in VNController:
@@ -57,10 +56,6 @@ class Screen:
     def is_visible(self) -> bool:
         return self.visible
 
-    # headless draw: override in subclasses
-    def draw_headless(self, img, draw, state: VNState):
-        pass
-
     # BGE draw
     def draw_bge(self):
         pass
@@ -90,9 +85,6 @@ class HistoryScreen(Screen):
         else:
             return entries
 
-    def draw_headless(self, img, draw, state: VNState):
-        # Drawn by headless_renderer's history overlay; this is logic holder
-        pass
 
 class SaveScreen(Screen):
     """Modal save slots — arbitrary number, pagination, no fixed limit."""
@@ -356,14 +348,3 @@ class ScreenManager:
         if isinstance(hist, HistoryScreen):
             return hist.get_entries(strip=strip)
         return []
-
-    # headless draw helper — called by headless_renderer
-    def draw_headless_overlays(self, img, draw, state: VNState):
-        for scr in self.get_overlays():
-            try:
-                scr.draw_headless(img, draw, state)
-            except: pass
-        if self.active_modal:
-            try:
-                self.active_modal.draw_headless(img, draw, state)
-            except: pass
