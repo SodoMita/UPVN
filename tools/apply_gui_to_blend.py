@@ -50,7 +50,11 @@ def main() -> None:
             n_bg += 1
 
     # 2) textbox tint: Emission+Transparent mixed by sampled alpha
-    col = colors.get("dialogue_box") or "#000000a0"
+    col = colors.get("dialogue_box") or "#000000cc"
+    if col in ("#ffffff", "#ffffffff"):
+        # unsampled stock gui: gui/textbox.png is flat black 80%
+        # (pixel-sampled from the Ren'Py tutorial, M29 loop)
+        col = "#000000cc"
     hx = col.lstrip("#")
     rgba = [int(hx[i:i + 2], 16) / 255.0 for i in (0, 2, 4)]
     alpha = int(hx[6:8], 16) / 255.0 if len(hx) >= 8 else 0.8
@@ -126,9 +130,43 @@ def main() -> None:
         if px and ob is not None and ob.type == "FONT":
             ob.data.size = float(px) * px2wu
 
+    # 4) sprite planes at native full-screen height like Ren'Py's default
+    # display (tutorial beat: head near top edge, feet cropped at bottom).
+    # Width follows the bound texture aspect; z stays owned by Pos_* empties.
+    n_sp = 0
+    for ob in bpy.data.objects:
+        if ob.type != "MESH":
+            continue
+        is_pool = ob.name == "Sprite_pool"
+        if not (is_pool or ob.name.startswith("SPRIMG_")):
+            continue
+        img = None
+        for slot in ob.material_slots:
+            m = slot.material
+            if m is not None and m.use_nodes:
+                for n in m.node_tree.nodes:
+                    if n.type == "TEX_IMAGE" and n.image:
+                        img = n.image
+                        break
+            if img is not None:
+                break
+        if img is not None and img.size[0]:
+            iw, ih = float(img.size[0]), float(img.size[1])
+        elif is_pool:
+            iw, ih = 3.0, 4.0   # starter aspect for the pool template
+        else:
+            continue
+        hgt = world_h * 1.02
+        wid = hgt * iw / ih
+        try:
+            ob.dimensions = (wid, hgt, 0.0)
+            n_sp += 1
+        except Exception as e:
+            print(f"[apply_gui] sprite dims failed for {ob.name}: {e}")
+
     bpy.ops.wm.save_as_mainfile(filepath=bpy.data.filepath)
     print(f"[apply_gui] OK bgs={n_bg} box={col} alpha={alpha:.2f} "
-          f"name_px={sizes.get('name')} text_px={sizes.get('text')}")
+          f"name_px={sizes.get('name')} text_px={sizes.get('text')} sp={n_sp}")
 
 
 main()
