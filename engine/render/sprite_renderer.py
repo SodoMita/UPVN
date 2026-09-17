@@ -33,24 +33,49 @@ SPRITE_PATH_PREFIXES = ("//", "//game/", "//../", "//../game/",
 def _dbg(msg: str):
     print(f"[SpriteRenderer] {msg}")
 
+def _proj_resolution():
+    """Project virtual resolution (gui.init(w, h)) as floats.
+
+    upvn_gui.json stores it as {"width": w, "height": h} (gui_parser);
+    a [w, h] list is tolerated. Falls back to the stock 1280x720 frame.
+    """
+    proj_w, proj_h = 1280.0, 720.0
+    try:
+        from .gui_config import get_gui_config
+        res = (get_gui_config() or {}).get("resolution") or None
+        if isinstance(res, dict):
+            proj_w = float(res.get("width") or proj_w)
+            proj_h = float(res.get("height") or proj_h)
+        elif res and len(res) >= 2 and float(res[1]) > 0:
+            proj_w, proj_h = float(res[0]), float(res[1])
+    except Exception:
+        pass
+    if proj_w <= 0 or proj_h <= 0:
+        proj_w, proj_h = 1280.0, 720.0
+    return proj_w, proj_h
+
+
 def _renpy_place(obj, position):
     """Ren'Py-true stage placement (parity with 00definitions.rpy transforms):
     left  = xpos 0.0 xanchor 0.0 ypos 1.0 yanchor 1.0  (flush left,  bottom)
     right = xpos 1.0 xanchor 1.0 ypos 1.0 yanchor 1.0  (flush right, bottom)
     center= xpos 0.5 xanchor 0.5 ypos 1.0 yanchor 1.0  (centered,    bottom)
-    Sprites keep NATIVE pixel size relative to the project's virtual height
-    (gui resolution), so they fill the frame height exactly like the original
-    at ANY window aspect. far_* positions stay owned by the Pos_* empties
-    (UPVN extension, no Ren'Py equivalent). No-op when data is missing."""
+    Ren'Py keeps the project's virtual frame (gui.init resolution) at ANY
+    window aspect — it scales to fit and letterboxes (config.html:
+    gl_clear_color paints the bars). So sprites are sized/anchored against
+    the DESIGN frame (ortho width x project aspect height), NOT the visible
+    window height; at 4:3 the frame simply gets black bars like the original.
+    far_* positions stay owned by the Pos_* empties (UPVN extension, no
+    Ren'Py equivalent). No-op when data is missing."""
     try:
         if position not in ("left", "center", "right"):
             return
         scene = bge.logic.getCurrentScene()
         cam = getattr(scene, "active_camera", None)
         ortho = float(getattr(cam, "ortho_scale", 15.0) or 15.0)
-        W = float(bge.render.getWindowWidth() or 1280)
-        H = float(bge.render.getWindowHeight() or 720)
-        vw, vh = ortho, ortho * H / W
+        proj_w, proj_h = _proj_resolution()
+        # design (content) frame in world units — Ren'Py letterbox semantics
+        vw, vh = ortho, ortho * proj_h / proj_w
         iw = ih = None
         bo = getattr(obj, "blenderObject", None)
         nt = getattr(plane_material(obj), "node_tree", None)
@@ -59,14 +84,6 @@ def _renpy_place(obj, position):
             img = getattr(tex, "image", None) if tex is not None else None
             if img is not None and img.size[0]:
                 iw, ih = float(img.size[0]), float(img.size[1])
-        proj_h = 720.0
-        try:
-            from .gui_config import get_gui_config
-            res = (get_gui_config() or {}).get("resolution") or None
-            if res and len(res) >= 2 and float(res[1]) > 0:
-                proj_h = float(res[1])
-        except Exception:
-            pass
         if iw and ih:
             h_w = vh * (ih / proj_h)
             w_w = h_w * (iw / ih)
@@ -86,6 +103,7 @@ def _renpy_place(obj, position):
         obj.worldPosition = (cx, obj.worldPosition[1], -vh / 2.0 + h_w / 2.0)
     except Exception as e:  # never break show() for placement parity
         _dbg(f"renpy_place skipped ({position}): {e}")
+
 
 
 # transition durations (seconds)

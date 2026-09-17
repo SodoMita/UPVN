@@ -334,10 +334,11 @@ def gui_to_upvn_config(gui_dict: Dict[str, Any]) -> Dict[str, Any]:
     spacing_world = (choice_spacing / init_h) * total_h if init_h else 0.257
     config["world"]["choice_spacing_em"] = spacing_world / 0.68  # normalize to em like old code
     
-    # Choice ypos: 405px from top → world Z
-    # Ren'Py choice ypos is from top of screen, not textbox
-    # 405/1080 = 0.375 from top, so Z = half_v - 0.375*total_h = half_v*0.25
-    choice_ypos = gui_dict.get("choice_ypos", 405)
+    # Choice ypos: from top of screen → world Z (stock screens.rpy hardcodes
+    # `ypos 270` on the 1280x720 frame = 0.375 from top; 405/1080 is the same
+    # ratio at 1080p — default must be RATIO-based or a 720p project lands
+    # the menu below center). Z = half_v - (ypos/init_h)*total_h = half_v*0.25
+    choice_ypos = gui_dict.get("choice_ypos", 0.375 * init_h)
     if isinstance(choice_ypos, (int, float)):
         choice_z = half_v - (choice_ypos / init_h) * total_h if init_h else half_v * 0.25
     else:

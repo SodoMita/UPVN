@@ -494,6 +494,39 @@ def aspect_wh() -> float:
     return 16.0 / 9.0
 
 
+def design_frame(ortho: float) -> tuple[float, float, float, float]:
+    """Ren'Py letterbox content frame for this ortho width.
+
+    Ren'Py lays every screen out in the project's VIRTUAL resolution
+    (gui.init(w, h), e.g. 1280x720) and scales it to fit the window,
+    painting letterbox/pillarbox bars where the window aspect differs
+    (doc/config.html: config.gl_clear_color). The content therefore never
+    reflows on aspect change — so neither should ours.
+
+    Returns (half, half_v, proj_w, proj_h): horizontal/vertical half
+    extents of the design frame in world units plus the virtual pixel
+    resolution. half_v is the PROJECT aspect height, not the visible
+    window height (the old half/aspect formula made sprites and choices
+    drift/rescale at 4:3 vs the original).
+    """
+    half = max(1.0, float(ortho) / 2.0)
+    proj_w = proj_h = 0.0
+    try:
+        from ..render.gui_config import get_gui_config
+        res = (get_gui_config() or {}).get("resolution") or None
+        if isinstance(res, dict):
+            proj_w = float(res.get("width") or 0.0)
+            proj_h = float(res.get("height") or 0.0)
+        elif res and len(res) >= 2:
+            proj_w, proj_h = float(res[0]), float(res[1])
+    except Exception:
+        proj_w = proj_h = 0.0
+    if proj_w <= 0.0 or proj_h <= 0.0:
+        proj_w, proj_h = 1280.0, 720.0
+    return half, half * proj_h / proj_w, proj_w, proj_h
+
+
+
 _font_scale_cache: dict = {}
 
 
@@ -551,8 +584,8 @@ def layout_screen_ui(get_obj: Callable[[str], Any], payload: dict, ortho: float 
     
     This means UPVN automatically adapts to any Ren'Py project's UI without hardcoding.
     """
-    half = max(1.0, float(ortho) / 2.0)
-    half_v = max(0.5, half / aspect_wh())
+    half, half_v, proj_w, proj_h = design_frame(ortho)
+    px2wu = float(ortho) / proj_w  # world units per virtual pixel (any aspect)
     # UI y-depths: all UI lives WELL in front of scene geometry (scene planes
     # sit at y ~= -0.15, camera at y ~= -3.5). The old values (-0.4..-0.55)
     # let semi-transparent choice boxes lose the draw-order fight against
@@ -569,10 +602,11 @@ def layout_screen_ui(get_obj: Callable[[str], Any], payload: dict, ortho: float 
     sp = get_obj("Speaker_Text")
     dt = get_obj("Dialogue_Text")
 
-    # Background: full-bleed. The template's BG_Plane is a fixed-size plane
-    # (covers a 16:9 frame only) — on other aspect ratios a black band
-    # appeared. Scale it (uniform, cover) to fill the whole ortho frame at
-    # any window size, like Ren'Py full-bleed backgrounds.
+    # Background: covers the DESIGN frame only. The template's BG_Plane is a
+    # fixed-size plane (a 16:9 frame) — Ren'Py full-bleed backgrounds fill the
+    # virtual resolution, which is letterboxed at other window aspects
+    # (config.gl_clear_color paints the bars), so cover half x half_v of the
+    # design frame, never the whole camera view.
     if bg is not None and not _is_custom_layout(bg):
         try:
             dims = bg.dimensions  # world bounding-box size (BGE)
@@ -636,29 +670,63 @@ def layout_screen_ui(get_obj: Callable[[str], Any], payload: dict, ortho: float 
                          first_row_z - hist_em * HISTORY_PITCH_EM))
     set_font_size(rtext, half * 0.030)
 
-    # Choices — text-boundary boxes, centered, never overlapping:
-    # each button is sized to its own text (font em + padding), the text is
-    # centered inside the button, and buttons stack vertically with a gap,
-    # clamped to stay above the dialogue box. (Old behavior: fixed 2x
-    # oversized boxes, left-anchored text, spacing that overlapped them.)
-    em = half * 0.042          # choice font size (world units per em)
+    # Choices — mirrors the stock Ren'Py choice screen (SDK 8.5.3
+    # gui/game/screens.rpy + the_question/game/{screens,gui}.rpy):
+    #   style choice_vbox: xalign 0.5; ypos 270; yanchor 0.5;
+    #                      spacing gui.choice_spacing
+    #   buttons: xsize gui.choice_button_width (None -> text-sized),
+    #            text gui.choice_button_text_size, padding from
+    #            gui.choice_button_borders.
+    # All metrics are virtual pixels of the project resolution converted
+    # with px2wu, so the menu keeps the original's size and placement at
+    # ANY window aspect (design frame above; Ren'Py letterboxes).
+    cfg = {}
+    try:
+        from ..render.gui_config import get_gui_config
+        cfg = get_gui_config() or {}
+    except Exception:
+        cfg = {}
+    chc = cfg.get("choice") or {}
+    # borders = (left, top, right, bottom) padding in px
+    borders = chc.get("borders") or (100, 5, 100, 5)
+    try:
+        pad_x = float(borders[0]) * px2wu
+        pad_y = float(borders[1]) * px2wu
+    except Exception:
+        pad_x, pad_y = 100 * px2wu, 5 * px2wu
+    em = float((cfg.get("sizes") or {}).get("text") or 22) * px2wu  # choice text em
     char_w = em * 0.56         # avg sans-serif char width at this em
-    pad_x = em * 1.4           # horizontal padding inside the button
-    pad_y = em * 0.8           # vertical padding
-    gap = em * 0.6             # gap between buttons
+    try:
+        gap = float(chc.get("spacing") or 22) * px2wu
+    except Exception:
+        gap = 22 * px2wu
+    try:
+        bw_px = chc.get("button_width")
+        btn_w_fixed = float(bw_px) * px2wu if bw_px else None
+    except Exception:
+        btn_w_fixed = None
     # template choice planes are 2x2 meshes -> world size = 2 * scale
     db_z = tuple(DIALOGUE_LOCATION)[2] + tuple(DIALOGUE_SCALE)[1]  # dialogue box top
     visible = [ch for ch in payload.get("choices", []) if ch.get("visible")]
     n_vis = max(1, len(visible))
-    block_h = n_vis * (em + 2 * pad_y) + (n_vis - 1) * gap
-    # center the block in the free band between dialogue box top and 90% height
+    btn_h = em + 2 * pad_y
+    block_h = n_vis * btn_h + (n_vis - 1) * gap
+    # vbox anchor: xalign 0.5, yanchor 0.5 at ypos 270/720 = 0.375 of the
+    # frame height -> world z = half_v - 0.375 * 2 * half_v = half_v * 0.25
+    # (identical to contract CHOICE_BASE_Z 1.054 at ortho 15 / 16:9).
+    world_m = cfg.get("world") or {}
+    try:
+        z_center = float(world_m["choice_base_z"]) if "choice_base_z" in world_m \
+            else half_v * 0.25
+    except Exception:
+        z_center = half_v * 0.25
+    # safety: a long menu must never overlap the dialogue box or leave the
+    # frame — shrink the gap first (Ren'Py would scroll instead; we clamp).
     band_top = half_v * 0.92
     band_bot = db_z + em * 1.2
-    z_center = (band_top + band_bot) / 2.0
     if block_h > (band_top - band_bot):
-        # too many choices: shrink gap rather than overlap the dialogue box
-        gap = max(em * 0.2, (band_top - band_bot - n_vis * (em + 2 * pad_y)) / max(1, n_vis - 1))
-        block_h = n_vis * (em + 2 * pad_y) + (n_vis - 1) * gap
+        gap = max(em * 0.2, (band_top - band_bot - n_vis * btn_h) / max(1, n_vis - 1))
+        block_h = n_vis * btn_h + (n_vis - 1) * gap
         z_center = (band_top + band_bot) / 2.0
     z_top = z_center + block_h / 2.0
 
@@ -670,8 +738,7 @@ def layout_screen_ui(get_obj: Callable[[str], Any], payload: dict, ortho: float 
         text = ch.get("text") or ""
         lines = [l for l in str(text).split("\n") if l] or [""]
         text_w = max(len(l) for l in lines) * char_w
-        btn_w = text_w + 2 * pad_x
-        btn_h = em + 2 * pad_y
+        btn_w = btn_w_fixed if btn_w_fixed is not None else text_w + 2 * pad_x
         z = z_top - i * (btn_h + gap) - btn_h / 2.0
         is_hover = hovered and ch["name"] == hovered
         bump = HOVER_SCALE if is_hover else 1.0
