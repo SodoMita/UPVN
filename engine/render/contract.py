@@ -85,14 +85,19 @@ def _load_adaptive_config():
         choice_idle_hex = colors.get("choice_idle", "#888888")
         choice_hover_hex = colors.get("choice_hover", "#ffffff")
         
-        # For dialogue box: white semi-transparent like Ren'Py textbox.png
-        # Ren'Py textbox.png is 255,255,255,204 (80% alpha)
-        dialogue_box_rgba = (1.0, 1.0, 1.0, 0.8)
-        # If config has dialogue_box color, use it
+        default_text_rgba = hex_to_rgba(text_hex, 1.0)
+        # Dialogue box must contrast with the text color. Ren'Py's default
+        # theme (gui.textbox.png, gui.text_color #ffffff) is white text on a
+        # DARK translucent box — a white box makes white text invisible.
+        # Bright text -> dark translucent box; dark text -> light box.
+        _lum = (default_text_rgba[0] + default_text_rgba[1] + default_text_rgba[2]) / 3.0
+        if _lum > 0.5:
+            dialogue_box_rgba = (0.0, 0.0, 0.0, 0.35)
+        else:
+            dialogue_box_rgba = (1.0, 1.0, 1.0, 0.8)
+        # If config has an explicit dialogue_box color, honor it
         if "dialogue_box" in colors and colors["dialogue_box"] != "#ffffff":
             dialogue_box_rgba = hex_to_rgba(colors["dialogue_box"], 0.8)
-        
-        default_text_rgba = hex_to_rgba(text_hex, 1.0)
         speaker_rgba = hex_to_rgba(accent_hex, 1.0)
         choice_idle_rgba = hex_to_rgba(choice_idle_hex, 0.8)
         choice_hover_rgba = hex_to_rgba(choice_hover_hex, 0.95)
@@ -162,7 +167,7 @@ def _load_adaptive_config():
             "choice_hover_color": (1.0, 0.498, 0.498, 0.95),
             "choice_text_idle": (1.0, 1.0, 1.0, 1.0),
             "choice_text_hover": (1.0, 1.0, 1.0, 1.0),
-            "dialogue_box_color": (1.0, 1.0, 1.0, 0.8),
+            "dialogue_box_color": (0.0, 0.0, 0.0, 0.35),
             "ui_font_regular": "DejaVuSans.ttf",
             "ui_font_bold": "DejaVuSans-Bold.ttf",
             "ui_font_name": "DejaVuSans.ttf",

@@ -70,7 +70,7 @@ except Exception:
     DIALOGUE_SCALE = (7.5, 0.722, 1.0)
     SPEAKER_LOCATION = (-5.625, -0.55, -2.873)
     DIALOGUE_TEXT_LOCATION = (-5.406, -0.55, -3.264)
-    DIALOGUE_BOX_COLOR = (1.0, 1.0, 1.0, 0.8)
+    DIALOGUE_BOX_COLOR = (0.0, 0.0, 0.0, 0.35)  # dark translucent (Ren'Py default: white text on dark box)
     CHOICE_IDLE_COLOR = (0.533, 0.533, 0.533, 0.8)
     CHOICE_HOVER_COLOR = (1.0, 0.498, 0.498, 0.95)
     CHOICE_TEXT_IDLE = (1.0, 1.0, 1.0, 1.0)
