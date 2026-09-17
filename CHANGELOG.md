@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.7.2-dev — sprite position empties (branch refactor/sprite-position-empties)
+
+- Template/addon: five per-position Sprite_<pos> image planes replaced by
+  Pos_<pos> empties (stage layout single source of truth) + one Sprite_pool
+  template plane; renderer duplicates the pool per sprite tag at runtime and
+  gives each duplicate a single-user MASprite_<tag> material copy.
+- tools/refactor_sprite_positions.py: idempotent bpy migration for old blends.
+- Addon: _set_runtime_prop falls back to STRING game props on UPBGE 0.50
+  (ENUM type removed in Blender 5.0) — Setup Scene no longer crashes.
+- tools/update_template_materials.py: single tex-capable MASprite on the pool.
+- Contract inventory + tests updated (Pos_* empties, Sprite_pool).
+
 ## 0.7.1 — M28: Audit Fixes & Reliability Hardening (no silent failures)
 
 Full engine/UI/frontend/addon hardening — previously silent no-ops now log and degrade gracefully, per M28 audit checklist.
