@@ -725,12 +725,12 @@ def draw_dialogue(img: Image.Image, draw: ImageDraw.ImageDraw, speaker, speaker_
         wrapped=wrapped[:3]
         for line in wrapped:
             # HQ: slight shadow for readability
-            draw.text((75,text_y+1), line, fill=(0,0,0,120), font=F_Text)
-            draw.text((74,text_y), line, fill=(235,240,250), font=F_Text)
+            draw.text((75,text_y+1), line, fill=(0,0,0,80), font=F_Text)
+            draw.text((74,text_y), line, fill=(30,35,45), font=F_Text)
             text_y+=30
         draw.polygon([(W-70,H-30),(W-58,H-22),(W-46,H-30)], fill=(0,184,195))
         draw.ellipse([W//2-4,H-10,W//2+4,H-6], fill=(0,184,195,180))
-    draw.text((W-190,H-20), "click / space → HQ", fill=(110,125,155), font=F_Small)
+    draw.text((W-190,H-20), "click / space → HQ", fill=(80,90,110), font=F_Small)
 
 def draw_menu(img: Image.Image, draw: ImageDraw.ImageDraw, caption, choices):
     """M27 HQ menu — better buttons with edge glow, larger click area, polished."""
