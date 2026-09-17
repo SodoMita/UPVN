@@ -1,6 +1,12 @@
 # Current Status — 2026-09-15 (M28: Audit Fixes & Reliability Hardening, v0.7.1)
 
 ## Branch refactor/sprite-position-empties (2026-09-17, in progress)
+- M29: visual-parity loop vs the Ren'Py tutorial on sway: static blend parity
+  pass (tools/apply_gui_to_blend.py), parser char-name kwarg fix, bg fit via
+  bpy scale; tutorial beat now matches tut_scene_renpy.png closely (full-bleed
+  bg, centred sprite, dark textbox, sized name/dialogue). Known residual gaps:
+  textbox is opaque (alpha blends render black on llvmpipe), name tint not
+  applied to the shared MAUI text emission.
 - Sprite stage layout moved from five per-position image planes (Sprite_<pos>)
   to Pos_<pos> empties + ONE Sprite_pool plane, duplicated per tag at runtime
   with single-user MASprite_<tag> material copies. Template blend migrated via
