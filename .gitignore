@@ -10,3 +10,11 @@ saves/save_*.json
 saves/save_auto.json
 /dist/saves/
 tmp/
+# Big images >100Kb must not be tracked (user requirement)
+examples/10_full_sample_game/evidence/
+examples/20_smoke_game/evidence/
+screenshots/consolidation/
+screenshots/m26/
+screenshots/m26g/
+screenshots/m26i/
+screenshots/sway_pixman_evidence/
