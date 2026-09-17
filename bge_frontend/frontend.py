@@ -476,7 +476,10 @@ def _sync_world_ui(ctrl, hovered=None):
         try:
             import bge as _bge
             cam = _bge.logic.getCurrentScene().active_camera
-            ortho = float(getattr(cam, "ortho_scale", ortho) or ortho)
+            ortho_raw = float(getattr(cam, "ortho_scale", ortho) or ortho)
+            # Perspective fix: if ortho is 0 (perspective camera), use 15 for layout so buttons not tiny
+            # User reports perspective triggers outside, ortho OK — tiny buttons in perspective caused mismatch
+            ortho = ortho_raw if ortho_raw > 0.001 else 15.0
         except Exception:
             pass
         status = apply_world_ui(_get_obj, payload, ortho=ortho, hovered=hovered)

@@ -712,7 +712,11 @@ def layout_screen_ui(get_obj: Callable[[str], Any], payload: dict, ortho: float 
     # Fixed font sizes — no adaptive mapping from gui_config pixel sizes
     # (REMOVED: cfg.get("sizes") -> name_size/text_size -> half * factor)
     # Keep simple: use fixed em based on ortho for readability, but not wpp
-    half = max(1.0, float(ortho) / 2.0)
+    # Perspective fix: when camera is perspective, ortho=0, half would be 1 -> tiny buttons
+    # User reports perspective triggers outside, ortho OK — because perspective had tiny visual but large collision or mismatched ray
+    # Use default ortho 15 for perspective to keep button size reasonable and consistent
+    ortho_for_layout = float(ortho) if float(ortho) > 0.001 else 15.0
+    half = max(1.0, ortho_for_layout / 2.0)
     set_font_size(sp, half * 0.065)
     set_font_size(dt, half * 0.055)
 
@@ -751,9 +755,8 @@ def layout_screen_ui(get_obj: Callable[[str], Any], payload: dict, ortho: float 
     # db_z, band_top/band_bot, etc.
     # Now fixed but still respects visible choices and hover
     x_center = 0.0
-    # Fixed button metrics — no longer derived from gui_config or wpp
-    # Keep em based on half for readability
-    em = half * 0.04
+    # Fixed button metrics — use ortho_for_layout for perspective too
+    em = half * 0.04  # half already uses ortho_for_layout
     char_w = em * 0.56
     gap = em * 1.2
     pad_x = em * 2.0
