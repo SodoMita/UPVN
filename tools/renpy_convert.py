@@ -107,6 +107,7 @@ def convert(src: Path, out: Path, blender: Path | None = None) -> dict:
             save_upvn_gui_config(gui_config, out / "assets" / "gui_config.json")
             (out / "assets" / "gui").mkdir(parents=True, exist_ok=True)
             save_upvn_gui_config(gui_config, out / "assets" / "gui" / "upvn_gui.json")
+            _apply_textbox_sample(out, gui_config)
             print(f"[convert] saved adaptive config: game/upvn_gui.json + assets/gui_config.json")
         except Exception as e:
             print(f"[convert] GUI parsing failed: {e}, using generic defaults")
@@ -259,6 +260,36 @@ def convert(src: Path, out: Path, blender: Path | None = None) -> dict:
     else:
         print(f"[convert] adaptive: NO — using generic defaults")
     return report
+
+
+def _apply_textbox_sample(out: Path, gui_config: dict) -> None:
+    """M29: Ren'Py's stock textbox.png is a dark translucent band, but the
+    generic '#ffffff' default made UPVN draw a white slab over the scene
+    (SDK tutorial parity). Sample the copied gui image's mean RGBA and store
+    it as colors.dialogue_box — only when the project did not define an
+    explicit box color in gui.rpy."""
+    colors = (gui_config or {}).get("colors") or {}
+    if colors.get("dialogue_box") not in (None, "#ffffff"):
+        return
+    png = out / "assets" / "gui" / "textbox.png"
+    if not png.is_file():
+        return
+    try:
+        from PIL import Image
+        im = Image.open(png).convert("RGBA")
+        px = list(im.getdata())
+        n = max(1, len(px))
+        mean = tuple(sum(p[i] for p in px) // n for i in range(4))
+        hexes = "#%02x%02x%02x%02x" % mean
+        for jpath in (out / "game" / "upvn_gui.json",
+                      out / "assets" / "gui" / "upvn_gui.json"):
+            if jpath.is_file():
+                data = json.loads(jpath.read_text(encoding="utf-8"))
+                data.setdefault("colors", {})["dialogue_box"] = hexes
+                jpath.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        print(f"[convert] textbox sampled → dialogue_box {hexes}")
+    except Exception as e:
+        print(f"[convert] textbox sample failed ({e})")
 
 
 def wire_blend(blend: Path, blender: Path, assets: Path | None = None) -> dict:
