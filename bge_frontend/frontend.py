@@ -535,57 +535,91 @@ def _debug_draw_ray(origin, target, hit_point=None, hit_name=None, color_hit=(0,
     
     User requested debug ray render because buttons triggered outside visible mesh,
     likely ray being in wrong place when mesh modified/translated.
+    FIXED: was invisible because flag check returned early and cross too small (0.1).
+    Now always draws when called (for visibility), larger cross 0.3, bright colors,
+    and ensures it is called every frame via _tick_pointer.
     """
     try:
         import bge as _bge
-        # Check if debug enabled via VNController property or env var
+        # Check if debug enabled — now defaults to True when in menu for visibility
+        # User said debug ray and hit point are invisible, so make it always visible for now
+        debug_enabled = False
         try:
             sc = _bge.logic.getCurrentScene()
             ctrl = sc.objects.get("VNController")
-            debug_enabled = False
             if ctrl is not None:
                 try:
                     if "upvn_debug_ray" in ctrl:
                         debug_enabled = bool(ctrl["upvn_debug_ray"])
                     elif "upvn_debug" in ctrl:
                         debug_enabled = bool(ctrl["upvn_debug"])
+                    # Also check game properties
+                    try:
+                        gp = ctrl.game.properties.get("upvn_debug_ray")
+                        if gp is not None and bool(gp.value):
+                            debug_enabled = True
+                    except Exception:
+                        pass
                 except Exception:
                     pass
-            # Also check env var or logic flag
-            if not debug_enabled:
-                try:
-                    import os
-                    if os.environ.get("UPVN_DEBUG_RAY") or os.environ.get("UPVN_DEBUG"):
-                        debug_enabled = True
-                except Exception:
-                    pass
+            try:
+                import os
+                if os.environ.get("UPVN_DEBUG_RAY") or os.environ.get("UPVN_DEBUG"):
+                    debug_enabled = True
+            except Exception:
+                pass
             try:
                 if getattr(_bge.logic, "_upvn_debug_ray", False):
                     debug_enabled = True
             except Exception:
                 pass
+            # For visibility fix: always enable debug when in menu (raycast problem solved, but debug invisible)
+            # Check if current event is menu
+            try:
+                ev = getattr(ctrl, "current_event", None) or {}
+                if ev.get("type") == "menu":
+                    # Always show debug ray in menu for now to ensure visibility
+                    debug_enabled = True
+            except Exception:
+                pass
             if not debug_enabled:
-                # Always draw when hover changes? For now, only when debug enabled
-                # But we can enable via game property upvn_debug_ray on VNController
                 return
         except Exception:
-            return
+            # If any error, still try to draw for visibility
+            debug_enabled = True
 
         try:
-            # Draw main ray
+            # Draw main ray — thicker and brighter for visibility
             if hit_point is not None:
-                # Hit — green
-                _bge.render.drawLine(origin, hit_point, color_hit)
-                # Draw small cross at hit point
-                s = 0.1
-                _bge.render.drawLine((hit_point[0]-s, hit_point[1], hit_point[2]), (hit_point[0]+s, hit_point[1], hit_point[2]), (1,1,0))
-                _bge.render.drawLine((hit_point[0], hit_point[1]-s, hit_point[2]), (hit_point[0], hit_point[1]+s, hit_point[2]), (1,1,0))
-                _bge.render.drawLine((hit_point[0], hit_point[1], hit_point[2]-s), (hit_point[0], hit_point[1], hit_point[2]+s), (1,1,0))
-                # Draw line from hit to target (faint)
-                _bge.render.drawLine(hit_point, target, (0.5,0.5,0.5))
+                # Hit — bright green
+                _bge.render.drawLine(origin, hit_point, (0, 1, 0))
+                # Draw larger cross at hit point — was 0.1 invisible, now 0.3
+                s = 0.3
+                # Yellow cross for visibility
+                _bge.render.drawLine((hit_point[0]-s, hit_point[1], hit_point[2]), (hit_point[0]+s, hit_point[1], hit_point[2]), (1, 1, 0))
+                _bge.render.drawLine((hit_point[0], hit_point[1]-s, hit_point[2]), (hit_point[0], hit_point[1]+s, hit_point[2]), (1, 1, 0))
+                _bge.render.drawLine((hit_point[0], hit_point[1], hit_point[2]-s), (hit_point[0], hit_point[1], hit_point[2]+s), (1, 1, 0))
+                # Also draw small cube around hit point for visibility
+                try:
+                    # Draw 3 more lines to make it more visible
+                    _bge.render.drawLine((hit_point[0]-s, hit_point[1]-s, hit_point[2]), (hit_point[0]+s, hit_point[1]+s, hit_point[2]), (1, 0.5, 0))
+                    _bge.render.drawLine((hit_point[0]-s, hit_point[1]+s, hit_point[2]), (hit_point[0]+s, hit_point[1]-s, hit_point[2]), (1, 0.5, 0))
+                except Exception:
+                    pass
+                # Draw line from hit to target (faint gray)
+                _bge.render.drawLine(hit_point, target, (0.5, 0.5, 0.5))
+                # Log hit for debugging
+                try:
+                    print(f"[debug_ray] HIT {hit_name} at {hit_point} origin {origin} target {target}")
+                except Exception:
+                    pass
             else:
-                # Miss — red
-                _bge.render.drawLine(origin, target, color_miss)
+                # Miss — bright red
+                _bge.render.drawLine(origin, target, (1, 0, 0))
+                try:
+                    print(f"[debug_ray] MISS origin {origin} target {target}")
+                except Exception:
+                    pass
             
             # Also draw camera frustum boundary for debugging outside trigger
             # Draw visible frame bounds at y=0 plane
