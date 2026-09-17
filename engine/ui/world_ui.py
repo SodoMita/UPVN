@@ -565,13 +565,22 @@ def layout_screen_ui(get_obj: Callable[[str], Any], payload: dict, ortho: float 
     except NameError:
         base_z = half_v * 0.25
 
+    # Compute spacing that keeps choices above the dialogue box at any aspect ratio
+    # Available vertical space: from base_z down to dialogue box top edge
+    _db_z = DIALOGUE_LOCATION[2] + DIALOGUE_SCALE[1] / 2  # top of dialogue box
+    _avail = max(0.5, base_z - _db_z - 0.1)  # leave a small gap
+    _n_choices = max(1, len([ch for ch in payload.get("choices", []) if ch.get("visible")]))
+    _fitted_spacing = _avail / max(1, _n_choices - 1) if _n_choices > 1 else _avail
+    # Use the smaller of the original formula and the fitted spacing
+    _raw_spacing = half_v * CHOICE_SPACING_EM * 0.16 + half_v * 0.06
+    _spacing = min(_raw_spacing, _fitted_spacing)
+
     for i, ch in enumerate(payload.get("choices", [])):
         plane = get_obj(ch["name"])
         text_obj = get_obj(ch["name"] + "_text")
         if not ch.get("visible"):
             continue
-        # Adaptive spacing from contract
-        z = base_z - i * (half_v * CHOICE_SPACING_EM * 0.16 + half_v * 0.06)
+        z = base_z - i * _spacing
         _set_pos(plane, (0.0, y_ui + 0.02, z))
         is_hover = hovered and ch["name"] == hovered
         bump = HOVER_SCALE if is_hover else 1.0
