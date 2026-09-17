@@ -37,19 +37,31 @@ def _dbg(msg: str):
     (UPVN_DEBUG_TEE) or a console captures them."""
     print(f"[SceneManager] {msg}")
 
-BACKGROUND_LAYER = 0
+# The backdrop lives 10 units behind the stage: the player camera sits at
+# y=-10, sprites/stage around y=-1..0 and the UI at y=-2..-9, so y=+6 keeps
+# the background clear of everything that has to move in front of it (3D
+# characters, camera pushes). Ortho projection: distance costs nothing.
+BACKGROUND_LAYER = 0.0
 TRANSITIONS = {"fade": 0.6, "dissolve": 0.45, None: 0.0}
 
 def _fit_bg_to_view(plane) -> None:
-    """Scale/center BG_Plane so it exactly covers the ortho viewport.
+    """Scale/center a backdrop plane so it **covers** the ortho viewport.
 
-    Ren'Py fills the screen with a screen-sized background; the template's
-    default plane size left letterbox bands around converted backgrounds
-    (M29 parity fix, SDK tutorial comparison).
+    Ren'Py fills the screen with a screen-sized background; a plane smaller than
+    the frame leaves letterbox bands (field report: black bars left/right and a
+    black strip below the dialogue box).
+
+    Geometry: the bank planes are rotated 90 degrees on X, so their LOCAL
+    bounding box maps local X -> world X (width) and local Y -> world Z
+    (height).  The old maths targeted `ortho` on the width and `ortho*h/w` on
+    the height — i.e. it produced a 15 x 8.44 backdrop inside the 26.7 x 15
+    frame, which is why the picture never filled the screen.
+
+    `cover` keeps the image's own aspect ratio: scale both axes by
+    max(view_w / w, view_h / h) instead of stretching each axis independently.
     """
     try:
         import bge
-        from mathutils import Vector
         scene = bge.logic.getCurrentScene()
         cam = (getattr(scene, "active_camera", None)
                or getattr(scene, "camera", None))
@@ -61,27 +73,36 @@ def _fit_bg_to_view(plane) -> None:
         w = float(bge.render.getWindowWidth() or 1280)
         h = float(bge.render.getWindowHeight() or 720)
         # KX_GameObject has no .dimensions — ask the bpy datablock.
-        # dimensions are LOCAL (rotation not applied): a plane rotated 90deg
-        # on X maps local X->world X and local Y->world Z, so use x/y.
         bo = getattr(plane, "blenderObject", None)
         dims = getattr(bo, "dimensions", None) if bo is not None else None
-        if dims is None or dims.x <= 0.0 or dims.y <= 0.0:
+        if bo is None or dims is None or dims.x <= 0.0 or dims.y <= 0.0:
             return
-        if bo is None:
+        view_w = ortho * (w / h)      # frame width in world units
+        view_h = ortho                # frame height in world units
+        k = max(view_w / dims.x, view_h / dims.y) * 1.02   # cover + 2% margin
+        if abs(k - 1.0) < 0.02:
             return
-        old_scale = tuple(bo.scale)
-        bo.scale = (old_scale[0] * ortho / dims.x,
-                    old_scale[1] * (ortho * h / w) / dims.y,
-                    old_scale[2])
-        _dbg(f"bg fit: ortho={ortho} win={w}x{h} dims="
-             f"({dims.x:.2f},{dims.y:.2f}) scale {tuple(round(s, 2) for s in old_scale)}"
-             f" -> {tuple(round(s, 2) for s in bo.scale)}")
+        try:
+            ws = tuple(plane.worldScale)
+            plane.worldScale = (ws[0] * k, ws[1] * k, ws[2])
+        except Exception:
+            try:
+                s = tuple(bo.scale)
+                bo.scale = (s[0] * k, s[1] * k, s[2])
+            except Exception:
+                return
+        _dbg(f"bg fit: ortho={ortho} win={w}x{h} dims=({dims.x:.2f},{dims.y:.2f}) "
+             f"-> cover x{k:.3f}")
         # recenter on the camera view axis at the plane's depth
-        fwd = cam.worldOrientation @ Vector((0.0, 0.0, -1.0))
-        if abs(fwd.y) > 1e-6:
-            t = (plane.worldPosition.y - cam.worldPosition.y) / fwd.y
-            center = cam.worldPosition + fwd * t
-            plane.worldPosition = (center.x, plane.worldPosition.y, center.z)
+        try:
+            from mathutils import Vector
+            fwd = cam.worldOrientation @ Vector((0.0, 0.0, -1.0))
+            if abs(fwd.y) > 1e-6:
+                t = (plane.worldPosition.y - cam.worldPosition.y) / fwd.y
+                center = cam.worldPosition + fwd * t
+                plane.worldPosition = (center.x, plane.worldPosition.y, center.z)
+        except Exception:
+            pass
     except Exception as e:  # pragma: no cover - render-only courtesy
         _dbg(f"bg fit skipped ({e})")
 
@@ -205,6 +226,13 @@ class SceneManager:
                         # keep the palette plane behind the bank
                     plane.visible = False
                     bank.visible = True
+                    try:
+                        # older converted blends baked bank planes at y=0
+                        bank.worldPosition = (bank.worldPosition.x,
+                                              float(BACKGROUND_LAYER),
+                                              bank.worldPosition.z)
+                    except Exception:
+                        pass
                     _fit_bg_to_view(bank)
                     _hide_template_stage(scene)
                     _dbg(f"stage '{asset}' → bank plane {bank.name}")

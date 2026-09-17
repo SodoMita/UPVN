@@ -48,13 +48,19 @@ def _plane(name, size=10.0):
 
 
 def _image_material(name, img_path, alpha: bool = False):
-    """Unlit image material.
+    """Unlit image material for the converted image bank.
 
-    `alpha=True` (character sprites, any PNG with transparency) routes the
-    image's Alpha into the surface and switches the material to alpha
-    blending.  Without it a character PNG renders as a solid quad — the field
-    report was "no sprite at all", because the transparent area was drawn
-    opaque over the background.  Backgrounds stay OPAQUE (full-frame JPEGs).
+    Every variant here is measured in the **player**, not guessed:
+
+    * Principled(Base Color + Emission) — renders correctly in UPBGE 0.53
+      (frame mean luminance 0.34).
+    * Emission-only — the historical graph: fine in Blender, but the player
+      draws it nearly black (measured 0.075-0.18). Do not go back.
+    * `alpha=True` (character sprites) also wires the PNG's Alpha into the
+      surface with `blend_method = "CLIP"`. Measured with
+      tools/make_alpha_probe.py: OPAQUE = opaque quad around the character,
+      BLEND = the plane washes into the background, CLIP = sharp and correct.
+      Backgrounds stay OPAQUE.
     """
     mat = bpy.data.materials.new(name)
     mat.use_nodes = True
@@ -73,8 +79,6 @@ def _image_material(name, img_path, alpha: bool = False):
         nt.links.new(tex.outputs["Color"], pr.inputs["Base Color"])
     except Exception:
         pass
-    # unlit: emission carries the pixels, so neither lamp nor Cycles/EEVEE
-    # sampling can dim or noise the art
     for cname in ("Emission Color", "Emission Colour"):
         if cname in pr.inputs:
             try:
@@ -91,12 +95,26 @@ def _image_material(name, img_path, alpha: bool = False):
             pass
     nt.links.new(pr.outputs["BSDF"], out.inputs["Surface"])
     try:
-        mat.blend_method = "BLEND" if alpha else "OPAQUE"
+        mat.blend_method = "CLIP" if alpha else "OPAQUE"
+        mat.alpha_threshold = 0.5
         mat.shadow_method = "NONE"
         mat.use_backface_culling = False
     except Exception:
         pass
     return mat
+
+
+BACKGROUND_LAYER = 0.0   # backdrop depth (see _image_material / bank planes)
+
+
+def img_w_h(path):
+    """Image pixel size without Pillow (bpy already knows how)."""
+    try:
+        import bpy
+        im = bpy.data.images.load(str(path))
+        return float(im.size[0]), float(im.size[1])
+    except Exception:
+        return 0.0, 0.0
 
 
 def set_runtime_prop(obj, name, value):
@@ -155,8 +173,12 @@ def main():
             if bpy.data.objects.get(name):
                 continue
             ob = _plane(name, size=10.0)
-            ob.location = (0.0, 0.0, 0.0)
-            ob.data.materials.append(_image_material(name + "_mat", f, alpha=False))
+            # BACKGROUND_LAYER: the backdrop sits 10 units BEHIND the stage
+            # (camera at y=-10, stage/sprites around y=-1..0), so 3D characters
+            # and camera moves have room instead of clipping into the backdrop.
+            # Ortho projection makes distance irrelevant to apparent size, and
+            # SceneManager._fit_bg_to_view() re-covers the frame at runtime.
+            ob.location = (0.0, float(BACKGROUND_LAYER), 0.0)
             ob.game.physics_type = "STATIC"
             ob.hide_render = False
             scene.collection.objects.link(ob)
