@@ -97,10 +97,15 @@ def resolve_script_path(logic, owner=None, extra_candidates=None):
                 # path in the standalone player (bpy.data.filepath handling
                 # differs from the editor), which made every converted game
                 # fall through to the "script not found" screen. Anchor '//'
-                # to the .blend directory ourselves.
-                import bpy as _bpy
-                bp = getattr(getattr(_bpy, "data", None), "filepath", "") or ""
-                base = os.path.dirname(os.path.abspath(bp)) if bp else ""
+                # to the .blend directory ourselves; where bpy is unavailable
+                # (unit tests) or filepath empty, keep expandPath behaviour.
+                base = ""
+                try:
+                    import bpy as _bpy
+                    bp = getattr(getattr(_bpy, "data", None), "filepath", "") or ""
+                    base = os.path.dirname(os.path.abspath(bp)) if bp else ""
+                except Exception:
+                    base = ""
                 p = (os.path.normpath(os.path.join(base, c[2:])) if base
                      else logic.expandPath(c))
             else:
@@ -108,8 +113,12 @@ def resolve_script_path(logic, owner=None, extra_candidates=None):
         except Exception:
             p = c
         if not getattr(logic, "_upvn_resolve_logged", False):
-            print(f"[UPVN] resolve try {c!r} -> {p!r} "
-                  f"(blend={getattr(getattr(__import__('bpy'), 'data', None), 'filepath', '')!r})")
+            try:
+                import bpy as _bpy_dbg
+                _bp = getattr(getattr(_bpy_dbg, "data", None), "filepath", "")
+            except Exception:
+                _bp = "<no bpy>"
+            print(f"[UPVN] resolve try {c!r} -> {p!r} (blend={_bp!r})")
         tried.append(p)
         try:
             # M26: directories are valid script sources — VNController.load()
