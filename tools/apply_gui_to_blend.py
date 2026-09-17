@@ -36,6 +36,14 @@ def main() -> None:
 
     # 1) bank backgrounds cover the viewport: 15 x 15*h/w world units
     scene = bpy.context.scene
+    # Ren'Py outputs raw sRGB; Blender's default AgX view transform desaturates
+    # and dims emission (white text -> 197, green name -> gray-green).
+    # Standard view transform restores 1:1 color parity.
+    try:
+        scene.view_settings.view_transform = "Standard"
+        scene.view_settings.look = "None"
+    except Exception as e:
+        print(f"[apply_gui] view transform failed: {e}")
     w = float(scene.render.resolution_x or 1280)
     h = float(scene.render.resolution_y or 720)
     # vertical overscan + drop: the player's view centre for these banks sits
