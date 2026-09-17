@@ -88,7 +88,8 @@ def test_contract_check_partial():
     res = contract.check_contract(object_names=[contract.BG_PLANE])
     missing_names = {it["name"] for it in res["missing"]}
     assert contract.BG_PLANE not in missing_names
-    assert "Sprite_center" in missing_names
+    assert f"{contract.POSITION_EMPTY_PREFIX}center" in missing_names
+    assert contract.SPRITE_POOL in missing_names
     assert contract.BG_MATERIAL in missing_names
 
 

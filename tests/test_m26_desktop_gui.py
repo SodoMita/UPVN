@@ -223,7 +223,7 @@ def test_template_carries_texture_graph_and_uvs():
         "m = bpy.data.materials.get('MABackground');"
         "k = sorted(n.type for n in m.node_tree.nodes);"
         "print('BG_NODES', 'TEX_IMAGE' in k and 'MIX' in k);"
-        "sp = bpy.data.objects.get('Sprite_center');"
+        "sp = bpy.data.objects.get('Sprite_pool');"
         "print('SPRITE_MAT', [x.name for x in sp.data.materials]);"
         "print('SPRITE_UV', len(sp.data.uv_layers) > 0);"
         "bg = bpy.data.objects.get('BG_Plane');"
@@ -241,7 +241,7 @@ def test_template_carries_texture_graph_and_uvs():
         return None
     assert val("WHITE_PACKED") == "True"
     assert val("BG_NODES") == "True"
-    assert val("SPRITE_MAT") == "['MASprite_center']"
+    assert val("SPRITE_MAT") == "['MASprite']"
     assert val("SPRITE_UV") == "True"
     parts = val("BG_UV").split()
     bg_uv, bg_w = parts[0], parts[-1]
