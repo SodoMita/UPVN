@@ -1196,6 +1196,18 @@ import bge, sys, os
 _cont = bge.logic.getCurrentController()
 _owner = _cont.owner
 
+_bfp = ''
+try:
+    import bpy as _bpy_lp
+    _bfp = getattr(getattr(_bpy_lp, 'data', None), 'filepath', '') or ''
+except Exception:
+    _bfp = ''
+if _bfp:
+    _bdir = os.path.dirname(os.path.abspath(_bfp))
+    _proj = os.path.dirname(_bdir)
+    for _r in (_proj, _bdir):
+        if _r and _r not in sys.path:
+            sys.path.insert(0, _r)
 if '_upvn_booted' not in bge.logic.__dict__:
     _roots = []
     if 'upvn_root' in _owner:
