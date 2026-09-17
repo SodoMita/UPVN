@@ -241,6 +241,12 @@ def _apply_gui_par():
                 cfg = {}
         colors = cfg.get("colors") or {}
         col = colors.get("dialogue_box")
+        if col in (None, "#ffffff", "#ffffffff"):
+            # unsampled stock gui: gui/textbox.png is flat black 80%
+            # (pixel-sampled in the parity loop); without this fallback the
+            # white default would be re-tinted into MAUI's emission at
+            # runtime, overwriting the baked dark box
+            col = "#000000cc"
         print(f"[UPVN] gui_par: json={jp} dialogue_box={col!r}")
         _box = sc.objects.get("Dialogue_Box")
         print("[UPVN] gui_par: box color now",
