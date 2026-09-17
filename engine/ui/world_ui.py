@@ -624,8 +624,43 @@ def set_font_size(obj: Any, em: float) -> None:
         pass
 
 
+def _is_auto_layout_enabled(get_obj: Callable[[str], Any]) -> bool:
+    """Check if auto layout is enabled — respects VNController upvn_auto_layout property and per-object upvn_custom.
+    
+    User requested radio button to toggle remaining auto layout. When OFF, choices keep custom layout.
+    """
+    try:
+        ctrl = get_obj("VNController")
+        if ctrl is not None:
+            # Check custom property
+            try:
+                if "upvn_auto_layout" in ctrl:
+                    return bool(ctrl["upvn_auto_layout"])
+            except Exception:
+                pass
+            try:
+                # Check game property
+                gp = getattr(ctrl, "game", None)
+                if gp is not None:
+                    prop = gp.properties.get("upvn_auto_layout")
+                    if prop is not None:
+                        return bool(prop.value)
+            except Exception:
+                pass
+            # Also check direct attribute
+            try:
+                if hasattr(ctrl, "upvn_auto_layout"):
+                    return bool(getattr(ctrl, "upvn_auto_layout"))
+            except Exception:
+                pass
+    except Exception:
+        pass
+    # Default: auto layout ON for backward compat
+    return True
+
+
 def layout_screen_ui(get_obj: Callable[[str], Any], payload: dict, ortho: float = 15.0,
-                     hovered: str | None = None) -> None:
+                     hovered: str | None = None, auto_layout: bool | None = None) -> None:
     """
     FIXED layout — no responsive, no aspect adaptation, no gui_config scaling.
     Positions are constant world coordinates, works for any mesh anywhere for buttons.
@@ -638,6 +673,14 @@ def layout_screen_ui(get_obj: Callable[[str], Any], payload: dict, ortho: float 
     - band_top/band_bot clamping for long menus
     All replaced by fixed simple stack.
     """
+    # Auto layout toggle — user requested radio button to toggle remaining auto layout
+    # When OFF, choices don't stretch/translate, allowing custom layout
+    # Check param first, then VNController property, default ON
+    if auto_layout is None:
+        auto_layout = _is_auto_layout_enabled(get_obj)
+    # If auto layout is OFF, skip all auto positioning/scaling for choices
+    # (but still handle hover color and generic buttons)
+
     # Fixed depths: 1 m apart (user directive, avoids draw-order fights)
     y_box = -2.0
     y_speaker = -3.0
@@ -728,6 +771,30 @@ def layout_screen_ui(get_obj: Callable[[str], Any], payload: dict, ortho: float 
         text_obj = get_obj(ch["name"] + "_text")
         if not ch.get("visible"):
             continue
+
+        # If auto layout OFF, don't stretch/translate — respect custom layout
+        # User said choices still stretch and translate and don't allow custom layout
+        if not auto_layout:
+            # Only handle hover color and visibility, not position/scale
+            is_hover = hovered and ch["name"] == hovered
+            if is_hover:
+                if plane and not _is_custom_layout(plane):
+                    _set_object_color(plane, CHOICE_HOVER_COLOR)
+                if text_obj:
+                    _set_font_color(text_obj, CHOICE_TEXT_HOVER)
+            else:
+                if plane and not _is_custom_layout(plane):
+                    _set_object_color(plane, CHOICE_IDLE_COLOR)
+                if text_obj:
+                    _set_font_color(text_obj, CHOICE_TEXT_IDLE)
+            continue
+
+        # Auto layout ON: fixed simple vertical stack
+        # Check per-object custom layout — if upvn_custom set, skip stretch/translate for that object
+        # This allows custom layout per-object even when auto layout is ON
+        is_custom_plane = _is_custom_layout(plane) if plane else False
+        is_custom_text = _is_custom_layout(text_obj) if text_obj else False
+
         text = ch.get("text") or ""
         lines = [l for l in str(text).split("\n") if l] or [""]
         text_w = max(len(l) for l in lines) * char_w
@@ -736,10 +803,23 @@ def layout_screen_ui(get_obj: Callable[[str], Any], payload: dict, ortho: float 
         z = z_top - i * (btn_h + gap) - btn_h / 2.0
         is_hover = hovered and ch["name"] == hovered
         bump = HOVER_SCALE if is_hover else 1.0
-        _set_scale(plane, (btn_w / 2.0 * bump, btn_h / 2.0 * bump, 0.01), reinstance=not is_hover)
-        _set_pos(plane, (x_center, y_choice, z))
-        _set_pos(text_obj, (x_center - text_w / 2.0, y_choice_text, z))
-        set_font_size(text_obj, em)
+
+        # Only stretch/translate if not custom
+        if not is_custom_plane:
+            _set_scale(plane, (btn_w / 2.0 * bump, btn_h / 2.0 * bump, 0.01), reinstance=not is_hover)
+            _set_pos(plane, (x_center, y_choice, z))
+            _set_object_color(plane, CHOICE_IDLE_COLOR if not is_hover else CHOICE_HOVER_COLOR)
+        else:
+            # Custom layout: only handle hover color, not scale/pos
+            if is_hover:
+                _set_object_color(plane, CHOICE_HOVER_COLOR)
+            else:
+                _set_object_color(plane, CHOICE_IDLE_COLOR)
+
+        if not is_custom_text:
+            _set_pos(text_obj, (x_center - text_w / 2.0, y_choice_text, z))
+            set_font_size(text_obj, em)
+        # Always set font color for hover feedback
         _set_font_color(text_obj, CHOICE_TEXT_HOVER if is_hover else CHOICE_TEXT_IDLE)
 
     # Generic button support: button can be any mesh anywhere in the world
@@ -778,7 +858,7 @@ def layout_screen_ui(get_obj: Callable[[str], Any], payload: dict, ortho: float 
 
 
 def apply_world_ui(get_obj: Callable[[str], Any], payload: dict, ortho: float | None = None,
-                   hovered: str | None = None) -> dict:
+                   hovered: str | None = None, auto_layout: bool | None = None) -> dict:
     status = {"applied": 0, "failed": 0, "errors": []}
 
     if payload.get("errors"):
@@ -859,7 +939,7 @@ def apply_world_ui(get_obj: Callable[[str], Any], payload: dict, ortho: float | 
 
     if ortho is not None:
         try:
-            layout_screen_ui(get_obj, payload, ortho=ortho, hovered=hovered)
+            layout_screen_ui(get_obj, payload, ortho=ortho, hovered=hovered, auto_layout=auto_layout)
         except Exception as e:
             print(f"[world_ui] layout_screen_ui failed: {e}")
             status["errors"].append(f"layout failed: {e}")

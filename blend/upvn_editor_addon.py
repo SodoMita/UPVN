@@ -1141,6 +1141,37 @@ if HAS_BPY:
 
     class UPVN_SceneProps(bpy.types.PropertyGroup):
         project_path: bpy.props.StringProperty(name="Script Path", default="//game/script.rpy", subtype='FILE_PATH')
+        def _update_auto_layout(self, context):
+            try:
+                # Update VNController property immediately when toggled in UI
+                import bpy
+                ctrl = None
+                try:
+                    ctrl = bpy.context.scene.objects.get("VNController")
+                except Exception:
+                    pass
+                if ctrl is not None:
+                    auto = (self.auto_layout_mode == "ON") if hasattr(self, "auto_layout_mode") else bool(self.auto_layout)
+                    try:
+                        ctrl["upvn_auto_layout"] = auto
+                        # Also set game property if available
+                        try:
+                            gp = ctrl.game.properties.get("upvn_auto_layout")
+                            if gp is not None:
+                                gp.value = auto
+                            else:
+                                # create if not exists
+                                ctrl.game.properties["upvn_auto_layout"] = auto
+                        except Exception:
+                            pass
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+        auto_layout: bpy.props.BoolProperty(name="Auto Layout", default=True, description="Toggle auto layout for choices/dialogue — when OFF, choices keep custom position/scale (no stretch/translate)", update=_update_auto_layout)
+        # Radio button for UI (ON/OFF) — user requested radio button to toggle remaining auto layout
+        auto_layout_mode: bpy.props.EnumProperty(name="Auto Layout Mode", items=[("ON", "Auto ON", "Auto layout enabled — choices stretch/translate automatically"), ("OFF", "Auto OFF", "Auto layout disabled — custom layout preserved")], default="ON", update=_update_auto_layout)
         char_id: bpy.props.StringProperty(name="ID", default="e")
         char_name: bpy.props.StringProperty(name="Name", default="Eileen")
         char_color: bpy.props.FloatVectorProperty(name="Color", subtype='COLOR', size=4, default=(0.78, 1.0, 0.78, 1.0), min=0, max=1)
@@ -1429,8 +1460,15 @@ except Exception:
         curve.body = body
         curve.size = size
         try:
-            curve.align_x = "LEFT"
-            curve.align_y = "TOP"
+            # Default alignment LEFT/TOP, but choice text should be Middle vertical
+            # per user request: choices text in default scene created by Setup Scene have Middle vertical alignment
+            if "choice_" in name and "_text" in name:
+                curve.align_x = "CENTER"
+                curve.align_y = "CENTER"
+                # Middle vertical alignment for choice text
+            else:
+                curve.align_x = "LEFT"
+                curve.align_y = "TOP"
         except Exception:
             pass
         obj = bpy.data.objects.new(name, curve)
@@ -1807,6 +1845,16 @@ except Exception:
                     ob.data.materials.append(mat_font)
             except Exception:
                 pass
+            # Ensure Middle vertical alignment for choice text (user request)
+            try:
+                if "choice_" in name and "_text" in name:
+                    if hasattr(ob.data, "align_y"):
+                        ob.data.align_y = "CENTER"
+                    if hasattr(ob.data, "align_x"):
+                        # Keep CENTER for choice text to be middle aligned
+                        ob.data.align_x = "CENTER"
+            except Exception:
+                pass
             try:
                 from engine.render.contract import style_font_curve
                 style_font_curve(ob.data, bold=bold, shear=shear, font_name=getattr(ob, 'upvn_font_name', None) or (_UI_FONT_NAME_FALLBACK if 'Speaker' in name or 'speaker' in name.lower() else None))
@@ -2095,6 +2143,27 @@ except Exception:
         except Exception:
             blend_dir = None
         _set_runtime_prop(_b, ctrl, "upvn_root", _engine_root_relative(blend_dir))
+        # Auto layout toggle — respects custom layout when OFF
+        try:
+            auto = True
+            try:
+                # Try to read from scene props if available
+                import bpy as _bpy_auto
+                sc = _bpy_auto.context.scene
+                if hasattr(sc, "upvn_props"):
+                    pp = sc.upvn_props
+                    # Prefer auto_layout_mode enum, fallback to bool
+                    if hasattr(pp, "auto_layout_mode"):
+                        auto = (pp.auto_layout_mode == "ON")
+                    elif hasattr(pp, "auto_layout"):
+                        auto = bool(pp.auto_layout)
+            except Exception:
+                pass
+            _set_runtime_prop(_b, ctrl, "upvn_auto_layout", auto)
+            # Also set as custom property for world_ui to read
+            ctrl["upvn_auto_layout"] = auto
+        except Exception as e:
+            print(f"[UPVN] auto_layout prop set failed: {e}")
 
         _set_runtime_prop(_b, ctrl, "upvn_bricks", "no")
         if has_game and install_launcher:
@@ -2579,8 +2648,24 @@ except Exception:
             layout.operator("upvn.reload_addon", icon='FILE_REFRESH')
             layout.separator()
 
-            # REMOVED: Project box with Create Project / Quick Wizard / Script Outline / Export Package
-            # What was here: project_path prop, create_project, quick_wizard, wizard_title/theme, script_outline, export_package
+            # Project path (kept minimal)
+            box = layout.box()
+            box.label(text="Project", icon='FILE_FOLDER')
+            box.prop(props, "project_path")
+
+            # Auto Layout toggle — user requested radio button to toggle remaining auto layout
+            # When OFF, choices don't stretch/translate, allowing custom layout
+            box = layout.box()
+            box.label(text="Layout Control — Auto Layout Toggle", icon='OBJECT_DATA')
+            # Radio buttons (ON/OFF)
+            row = box.row()
+            row.prop(props, "auto_layout_mode", expand=True)
+            # Also show checkbox for clarity
+            box.prop(props, "auto_layout")
+            box.label(text="ON = auto stretch/translate (default)", icon='INFO')
+            box.label(text="OFF = custom layout preserved", icon='INFO')
+            box.label(text="Set per-object upvn_custom to keep", icon='INFO')
+            box.label(text="individual objects custom", icon='INFO')
 
             if _has_game_support():
                 box = layout.box()
