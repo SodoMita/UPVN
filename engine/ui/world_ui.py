@@ -70,10 +70,10 @@ except Exception:
     DIALOGUE_SCALE = (7.5, 0.722, 1.0)
     SPEAKER_LOCATION = (-5.625, -0.55, -2.873)
     DIALOGUE_TEXT_LOCATION = (-5.406, -0.55, -3.264)
-    DIALOGUE_BOX_COLOR = (0.0, 0.0, 0.0, 0.35)  # dark translucent (Ren'Py default: white text on dark box)
-    CHOICE_IDLE_COLOR = (0.533, 0.533, 0.533, 0.8)
-    CHOICE_HOVER_COLOR = (1.0, 0.498, 0.498, 0.95)
-    CHOICE_TEXT_IDLE = (1.0, 1.0, 1.0, 1.0)
+    DIALOGUE_BOX_COLOR = (0.07, 0.08, 0.10, 1.0)  # dark box (opaque: BGE drops alpha)
+    CHOICE_IDLE_COLOR = (1.0, 1.0, 1.0, 1.0)
+    CHOICE_HOVER_COLOR = (0.0, 0.094, 0.616, 1.0)
+    CHOICE_TEXT_IDLE = (0.12, 0.13, 0.15, 1.0)
     CHOICE_TEXT_HOVER = (1.0, 1.0, 1.0, 1.0)
     DEFAULT_TEXT_COLOR = (1.0, 1.0, 1.0, 1.0)
     SPEAKER_DEFAULT_COLOR = (1.0, 0.498, 0.498, 1.0)
@@ -533,20 +533,48 @@ def layout_screen_ui(get_obj: Callable[[str], Any], payload: dict, ortho: float 
     """
     half = max(1.0, float(ortho) / 2.0)
     half_v = max(0.5, half / aspect_wh())
-    y_ui = -0.55
+    # UI y-depths: all UI lives WELL in front of scene geometry (scene planes
+    # sit at y ~= -0.15, camera at y ~= -3.5). The old values (-0.4..-0.55)
+    # let semi-transparent choice boxes lose the draw-order fight against
+    # opaque desks/characters, so choices rendered BEHIND the scene.
+    y_box = -1.00      # dialogue box
+    y_text = -1.08     # speaker / dialogue text (in front of the box)
+    y_choice = -1.05   # choice button planes
+    y_choice_text = -1.13  # choice text (in front of its button)
+    y_hist = -1.20     # history box
+    y_hist_text = -1.26
 
+    bg = get_obj("BG_Plane")
     box = get_obj("Dialogue_Box")
     sp = get_obj("Speaker_Text")
     dt = get_obj("Dialogue_Text")
 
+    # Background: full-bleed. The template's BG_Plane is a fixed-size plane
+    # (covers a 16:9 frame only) — on other aspect ratios a black band
+    # appeared. Scale it (uniform, cover) to fill the whole ortho frame at
+    # any window size, like Ren'Py full-bleed backgrounds.
+    if bg is not None and not _is_custom_layout(bg):
+        try:
+            dims = bg.dimensions  # world bounding-box size (BGE)
+            if dims and dims[0] > 0.01 and dims[2] > 0.01:
+                cover = max(half / (dims[0] / 2.0), half_v / (dims[2] / 2.0))
+                if cover > 1.001:
+                    sc = bg.worldScale
+                    _set_scale(bg, (sc[0] * cover, sc[1] * cover, sc[2] * cover))
+        except Exception:
+            pass
+
     # Dialogue box: adaptive position/scale from contract (which comes from gui_config)
-    _set_pos(box, DIALOGUE_LOCATION)
+    loc = tuple(DIALOGUE_LOCATION)
+    _set_pos(box, (loc[0], y_box, loc[2]))
     _set_scale(box, DIALOGUE_SCALE)
     _set_object_color(box, DIALOGUE_BOX_COLOR)
 
     # Speaker and dialogue at adaptive positions
-    _set_pos(sp, SPEAKER_LOCATION)
-    _set_pos(dt, DIALOGUE_TEXT_LOCATION)
+    spl = tuple(SPEAKER_LOCATION)
+    dtl = tuple(DIALOGUE_TEXT_LOCATION)
+    _set_pos(sp, (spl[0], y_text, spl[2]))
+    _set_pos(dt, (dtl[0], y_text, dtl[2]))
     # Font sizes from config: name 40px, dialogue 33px mapped to world scale
     # Use adaptive sizes if available from gui_config
     try:
@@ -577,47 +605,62 @@ def layout_screen_ui(get_obj: Callable[[str], Any], payload: dict, ortho: float 
     block_h = max(1, n_rows) * hist_em * HISTORY_PITCH_EM
     backlog_z = first_row_z - block_h
     if hbox:
-        _set_pos(hbox, (0.0, y_ui + UI_DEPTH, 0.0))
+        _set_pos(hbox, (0.0, y_hist, 0.0))
         _set_scale(hbox, (half * 0.94, panel_h, 1.0))
         _set_object_color(hbox, (0.05, 0.05, 0.08, 0.9))
     if htext:
-        _set_pos(htext, (-half * 0.86, y_ui + UI_DEPTH - TEXT_FRONT, backlog_z))
+        _set_pos(htext, (-half * 0.86, y_hist_text, backlog_z))
     set_font_size(htext, hist_em)
     if rtext:
-        _set_pos(rtext, (-half * 0.86, y_ui + UI_DEPTH - TEXT_FRONT,
+        _set_pos(rtext, (-half * 0.86, y_hist_text,
                          first_row_z - hist_em * HISTORY_PITCH_EM))
     set_font_size(rtext, half * 0.030)
 
-    # Choices — adaptive: uses CHOICE_WIDTH_FACTOR, etc. from contract (from gui_config)
-    # base_z from config if available (ypos 405 etc.)
-    try:
-        base_z = _choice_base_z
-    except NameError:
-        base_z = half_v * 0.25
-
-    # Compute spacing that keeps choices above the dialogue box at any aspect ratio
-    # Available vertical space: from base_z down to dialogue box top edge
-    _db_z = DIALOGUE_LOCATION[2] + DIALOGUE_SCALE[1] / 2  # top of dialogue box
-    _avail = max(0.5, base_z - _db_z - 0.1)  # leave a small gap
-    _n_choices = max(1, len([ch for ch in payload.get("choices", []) if ch.get("visible")]))
-    _fitted_spacing = _avail / max(1, _n_choices - 1) if _n_choices > 1 else _avail
-    # Use the smaller of the original formula and the fitted spacing
-    _raw_spacing = half_v * CHOICE_SPACING_EM * 0.16 + half_v * 0.06
-    _spacing = min(_raw_spacing, _fitted_spacing)
+    # Choices — text-boundary boxes, centered, never overlapping:
+    # each button is sized to its own text (font em + padding), the text is
+    # centered inside the button, and buttons stack vertically with a gap,
+    # clamped to stay above the dialogue box. (Old behavior: fixed 2x
+    # oversized boxes, left-anchored text, spacing that overlapped them.)
+    em = half * 0.042          # choice font size (world units per em)
+    char_w = em * 0.56         # avg sans-serif char width at this em
+    pad_x = em * 1.4           # horizontal padding inside the button
+    pad_y = em * 0.8           # vertical padding
+    gap = em * 0.6             # gap between buttons
+    # template choice planes are 2x2 meshes -> world size = 2 * scale
+    db_z = tuple(DIALOGUE_LOCATION)[2] + tuple(DIALOGUE_SCALE)[1]  # dialogue box top
+    visible = [ch for ch in payload.get("choices", []) if ch.get("visible")]
+    n_vis = max(1, len(visible))
+    block_h = n_vis * (em + 2 * pad_y) + (n_vis - 1) * gap
+    # center the block in the free band between dialogue box top and 90% height
+    band_top = half_v * 0.92
+    band_bot = db_z + em * 1.2
+    z_center = (band_top + band_bot) / 2.0
+    if block_h > (band_top - band_bot):
+        # too many choices: shrink gap rather than overlap the dialogue box
+        gap = max(em * 0.2, (band_top - band_bot - n_vis * (em + 2 * pad_y)) / max(1, n_vis - 1))
+        block_h = n_vis * (em + 2 * pad_y) + (n_vis - 1) * gap
+        z_center = (band_top + band_bot) / 2.0
+    z_top = z_center + block_h / 2.0
 
     for i, ch in enumerate(payload.get("choices", [])):
         plane = get_obj(ch["name"])
         text_obj = get_obj(ch["name"] + "_text")
         if not ch.get("visible"):
             continue
-        z = base_z - i * _spacing
-        _set_pos(plane, (0.0, y_ui + 0.02, z))
+        text = ch.get("text") or ""
+        lines = [l for l in str(text).split("\n") if l] or [""]
+        text_w = max(len(l) for l in lines) * char_w
+        btn_w = text_w + 2 * pad_x
+        btn_h = em + 2 * pad_y
+        z = z_top - i * (btn_h + gap) - btn_h / 2.0
         is_hover = hovered and ch["name"] == hovered
         bump = HOVER_SCALE if is_hover else 1.0
-        _set_scale(plane, (half * CHOICE_WIDTH_FACTOR * bump, half * CHOICE_HEIGHT_FACTOR * bump, 1.0))
-        _set_object_color(plane, CHOICE_HOVER_COLOR if is_hover else CHOICE_IDLE_COLOR)
-        _set_pos(text_obj, (-half * 0.28, y_ui, z + half_v * 0.008))
-        set_font_size(text_obj, half * 0.042)
+        # world size = 2 * scale on the 2x2 plane; keep y-scale (plane depth) minimal
+        _set_scale(plane, (btn_w / 2.0 * bump, btn_h / 2.0 * bump, 0.01))
+        _set_pos(plane, (0.0, y_choice, z))
+        # text left-anchored font -> place its start so the block is centered
+        _set_pos(text_obj, (-text_w / 2.0, y_choice_text, z))
+        set_font_size(text_obj, em)
         _set_font_color(text_obj, CHOICE_TEXT_HOVER if is_hover else CHOICE_TEXT_IDLE)
 
     # Shadows disabled for Ren'Py parity

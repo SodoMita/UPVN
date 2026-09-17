@@ -90,18 +90,22 @@ def _load_adaptive_config():
         # theme (gui.textbox.png, gui.text_color #ffffff) is white text on a
         # DARK translucent box — a white box makes white text invisible.
         # Bright text -> dark translucent box; dark text -> light box.
+        # NOTE: BGE ignores material alpha for these unlit materials, so the
+        # box uses fully opaque approximations of Ren'Py's translucent PNGs.
         _lum = (default_text_rgba[0] + default_text_rgba[1] + default_text_rgba[2]) / 3.0
         if _lum > 0.5:
-            dialogue_box_rgba = (0.0, 0.0, 0.0, 0.35)
+            dialogue_box_rgba = (0.07, 0.08, 0.10, 1.0)   # dark charcoal box
         else:
-            dialogue_box_rgba = (1.0, 1.0, 1.0, 0.8)
-        # If config has an explicit dialogue_box color, honor it
+            dialogue_box_rgba = (1.0, 1.0, 1.0, 1.0)      # light box for dark text
+        # If config has an explicit dialogue_box color, honor it (force opaque)
         if "dialogue_box" in colors and colors["dialogue_box"] != "#ffffff":
-            dialogue_box_rgba = hex_to_rgba(colors["dialogue_box"], 0.8)
+            dialogue_box_rgba = hex_to_rgba(colors["dialogue_box"], 1.0)
         speaker_rgba = hex_to_rgba(accent_hex, 1.0)
-        choice_idle_rgba = hex_to_rgba(choice_idle_hex, 0.8)
-        choice_hover_rgba = hex_to_rgba(choice_hover_hex, 0.95)
-        choice_text_idle_rgba = hex_to_rgba(text_hex, 1.0)
+        # Choices: white idle bar with dark text; hover = Ren'Py's #00189d
+        # with white text. Opaque — BGE drops material alpha.
+        choice_idle_rgba = hex_to_rgba(choice_idle_hex, 1.0)
+        choice_hover_rgba = (0.0, 0.094, 0.616, 1.0)   # #00189d
+        choice_text_idle_rgba = (0.12, 0.13, 0.15, 1.0)
         choice_text_hover_rgba = (1.0, 1.0, 1.0, 1.0)
         
         # Fonts — extract filename from path like "fonts/lato/Lato-Regular.ttf"
@@ -163,11 +167,11 @@ def _load_adaptive_config():
             "choice_base_z": 1.054,
             "default_text_color": (1.0, 1.0, 1.0, 1.0),
             "speaker_default_color": (1.0, 0.498, 0.498, 1.0),
-            "choice_idle_color": (0.533, 0.533, 0.533, 0.8),
-            "choice_hover_color": (1.0, 0.498, 0.498, 0.95),
-            "choice_text_idle": (1.0, 1.0, 1.0, 1.0),
+            "choice_idle_color": (1.0, 1.0, 1.0, 1.0),
+            "choice_hover_color": (0.0, 0.094, 0.616, 1.0),
+            "choice_text_idle": (0.12, 0.13, 0.15, 1.0),
             "choice_text_hover": (1.0, 1.0, 1.0, 1.0),
-            "dialogue_box_color": (0.0, 0.0, 0.0, 0.35),
+            "dialogue_box_color": (0.07, 0.08, 0.10, 1.0),
             "ui_font_regular": "DejaVuSans.ttf",
             "ui_font_bold": "DejaVuSans-Bold.ttf",
             "ui_font_name": "DejaVuSans.ttf",
