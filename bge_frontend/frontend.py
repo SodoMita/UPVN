@@ -528,58 +528,147 @@ def _pointer_probe(sc, cam):
 
 
 def _object_under_cursor():
+    """Return the name of the object under the mouse cursor.
+
+    Generic implementation that works for any mesh anywhere in the world,
+    both orthographic (Camera_UI) and perspective (Camera_3D) cameras.
+
+    Fixes:
+    - Old code cast only 5 units in front of the camera (py+5), so buttons
+      placed beyond that (e.g. BG at y=0, or any mesh at y> -5) were missed.
+      New code casts 100 units forward.
+    - Old code returned the first hit even if it was invisible or a shadow
+      (Speaker_Shadow, choice_N_shadow) — those are STATIC+BOX but invisible,
+      so hover would trigger outside or fail to trigger on the button.
+      New code loops and skips invisible / _shadow objects.
+    - Ortho handling now correctly offsets the ray origin by the mouse's
+      frustum position (px, pz) and uses the camera's forward axis
+      (getAxisVect((0,0,-1))) instead of assuming +Y.
+    - For perspective, uses getScreenVect but also loops to skip ignored hits.
+    - Button can be any mesh anywhere: we no longer assume XZ planes at
+      fixed Y layers; we raycast generically.
+    """
     if not HAS_BGE:
         return None
     try:
         import bge as _bge
         sc = _bge.logic.getCurrentScene()
         cam = sc.active_camera
-        x, y = _bge.logic.mouse.position
-        hit = None
+        mx, my = _bge.logic.mouse.position
+
+        def _ignore(obj):
+            if obj is None:
+                return True
+            try:
+                if not getattr(obj, "visible", True):
+                    return True
+            except Exception:
+                pass
+            name = str(getattr(obj, "name", ""))
+            if not name:
+                return False
+            # shadows are deleted at runtime but keep guard for old blends
+            if name.endswith("_shadow"):
+                return True
+            # also ignore the template Cube/Light if they somehow remain
+            if name in ("Cube", "Light"):
+                return True
+            return False
+
         try:
-            hit = cam.getScreenRay(x, y, 80.0)
+            ortho = float(getattr(cam, "ortho_scale", 0.0) or 0.0)
         except Exception:
-            hit = None
-        if hit is None:
-            # M26: getScreenRay is unreliable on orthographic cameras in
-            # UPBGE 0.50 (measured in-field: always None on Camera_UI), so
-            # shoot an explicit ray straight along the camera's view axis
-            # through the frustum point the mouse selects. UPBGE 0.50's
-            # mouse.position y is measured from the TOP of the window.
+            ortho = 0.0
+        is_ortho = ortho > 0.001
+
+        try:
+            fwd = cam.getAxisVect((0.0, 0.0, -1.0))
+            import math as _math
+            l = _math.sqrt(fwd[0]*fwd[0]+fwd[1]*fwd[1]+fwd[2]*fwd[2])
+            if l > 1e-6:
+                fwd = (fwd[0]/l, fwd[1]/l, fwd[2]/l)
+            else:
+                fwd = (0.0, 1.0, 0.0)
+        except Exception:
+            fwd = (0.0, 1.0, 0.0)
+
+        # ortho: compute mouse world X,Z on camera plane
+        if is_ortho:
             try:
-                w = float(_bge.render.getWindowWidth()) or 1280.0
-                h = float(_bge.render.getWindowHeight()) or 800.0
+                w = float(_bge.render.getWindowWidth() or 1280.0)
+                h = float(_bge.render.getWindowHeight() or 720.0)
             except Exception:
-                w, h = 1280.0, 800.0
-            try:
-                ortho = float(getattr(cam, "ortho_scale", 0.0) or 0.0)
-            except Exception:
-                ortho = 0.0
-            if ortho <= 0.0:
-                ortho = 15.0  # contract CAMERA_UI_ORTHO_SCALE
-            nx = float(x) - 0.5
-            ny = 0.5 - float(y)                       # top-origin → up-positive
+                w, h = 1280.0, 720.0
+            nx = float(mx) - 0.5
+            ny = 0.5 - float(my)
             px = cam.worldPosition.x + nx * ortho
             pz = cam.worldPosition.z + ny * ortho * (h / w)
             py = cam.worldPosition.y
-            try:
-                # KX_Scene has no rayCast in UPBGE 0.50 — cast from the
-                # camera object (KX_GameObject.rayCast, ignores self).
-                hit, _p, _n = cam.rayCast((px, py + 5.0, pz),
-                                          (px, py - 5.0, pz), 20.0)
-            except Exception:
-                hit = None
-        if hit is None:
-            try:
-                vect = cam.getScreenVect(x, y)
-                origin = cam.worldPosition
-                target = origin + vect * 80.0
-                hit, _p, _n = cam.rayCast(target, origin, 80.0)
-            except Exception:
-                hit = None
-        if hit is None:
+            origin = (px, py, pz)
+            # far target 100 units forward
+            target = (origin[0] + fwd[0]*100.0,
+                      origin[1] + fwd[1]*100.0,
+                      origin[2] + fwd[2]*100.0)
+            cur_from = origin
+            cur_to = target
+            # loop to skip ignored (invisible/shadow)
+            for _ in range(12):
+                try:
+                    hit, pt, _n = cam.rayCast(cur_to, cur_from, 100.0)
+                except Exception:
+                    hit = None
+                    pt = None
+                if hit is None:
+                    return None
+                if _ignore(hit):
+                    if pt is not None:
+                        cur_from = (pt[0] + fwd[0]*0.05,
+                                    pt[1] + fwd[1]*0.05,
+                                    pt[2] + fwd[2]*0.05)
+                    else:
+                        cur_from = (cur_from[0] + fwd[0]*0.1,
+                                    cur_from[1] + fwd[1]*0.1,
+                                    cur_from[2] + fwd[2]*0.1)
+                    continue
+                return getattr(hit, "name", None)
             return None
-        return getattr(hit, "name", None)
+        else:
+            # perspective (or unknown) — use screen vect
+            try:
+                vect = cam.getScreenVect(mx, my)
+                # normalize vect
+                import math as _math
+                l = _math.sqrt(vect[0]*vect[0]+vect[1]*vect[1]+vect[2]*vect[2])
+                if l > 1e-6:
+                    vect = (vect[0]/l, vect[1]/l, vect[2]/l)
+            except Exception:
+                vect = fwd
+            origin = cam.worldPosition
+            target = (origin[0]+vect[0]*100.0,
+                      origin[1]+vect[1]*100.0,
+                      origin[2]+vect[2]*100.0)
+            cur_from = origin
+            cur_to = target
+            for _ in range(12):
+                try:
+                    hit, pt, _n = cam.rayCast(cur_to, cur_from, 100.0)
+                except Exception:
+                    hit = None
+                    pt = None
+                if hit is None:
+                    return None
+                if _ignore(hit):
+                    if pt is not None:
+                        cur_from = (pt[0]+vect[0]*0.05,
+                                    pt[1]+vect[1]*0.05,
+                                    pt[2]+vect[2]*0.05)
+                    else:
+                        cur_from = (cur_from[0]+vect[0]*0.1,
+                                    cur_from[1]+vect[1]*0.1,
+                                    cur_from[2]+vect[2]*0.1)
+                    continue
+                return getattr(hit, "name", None)
+            return None
     except Exception:
         return None
 
@@ -613,9 +702,50 @@ def _tick_pointer(ctrl):
             logic._upvn_ptr = PointerTracker(HotspotMap.from_choices(choices))
             logic._upvn_ptr_key = key
         tr = logic._upvn_ptr
+        # generic button support: any mesh anywhere can be a choice button if
+        # it carries a choice_index property. Extend the hotspot map with such
+        # objects each time the menu changes (or every tick for simplicity).
+        try:
+            sc = _bge.logic.getCurrentScene()
+            from engine.ui.pointer import Hotspot
+            for ob in sc.objects:
+                try:
+                    idx = None
+                    # explicit property mapping
+                    if "choice_index" in ob:
+                        idx = int(ob["choice_index"])
+                    elif "upvn_choice" in ob:
+                        idx = int(ob["upvn_choice"])
+                    elif "choice" in ob:
+                        # allow generic 'choice' property
+                        try:
+                            idx = int(ob["choice"])
+                        except Exception:
+                            idx = None
+                    if idx is not None and 0 <= idx < len(choices):
+                        # add/override hotspot for this mesh name
+                        tr.hotspots.add(Hotspot(name=ob.name, action="choice", choice_index=idx))
+                except Exception:
+                    continue
+        except Exception:
+            pass
+
         name = normalize_hit_name(_object_under_cursor())
-        logic._upvn_hover = name if name and str(name).startswith("choice_") \
-            else None
+        # generic hover: any hotspot (including any mesh anywhere) is hoverable,
+        # not just choice_ prefix. This supports the user directive that button
+        # can be any mesh anywhere in the world.
+        hover_candidate = None
+        if name:
+            try:
+                # if it's a known hotspot, it's hoverable
+                if tr.hotspots.resolve(name) is not None:
+                    hover_candidate = name
+                elif str(name).startswith("choice_"):
+                    hover_candidate = name
+            except Exception:
+                if str(name).startswith("choice_"):
+                    hover_candidate = name
+        logic._upvn_hover = hover_candidate
         clicked = _bge_just("mouse", _bge.events.LEFTMOUSE)
         # M26 field diagnostics (visible via UPVN_DEBUG_TEE): log whenever the
         # ray's hover target or the click flag changes — a dropped synthetic

@@ -83,6 +83,10 @@ def test_apply_world_ui_writes_fonts_and_visibility():
 def test_normalize_hit_name():
     assert normalize_hit_name("choice_2_text") == "choice_2"
     assert normalize_hit_name("choice_2") == "choice_2"
+    assert normalize_hit_name("choice_2_shadow") == "choice_2"
+    assert normalize_hit_name("choice_2_text_shadow") == "choice_2"
+    assert normalize_hit_name("MyButton_text") == "MyButton"
+    assert normalize_hit_name("MyButton_shadow") == "MyButton"
     assert normalize_hit_name(None) is None
 
 
@@ -121,7 +125,10 @@ def test_frontend_and_addon_are_3d_unlit():
     ad = (ROOT / "blend" / "upvn_editor_addon.py").read_text(encoding="utf-8")
     assert "import blf" not in fe
     assert "def draw_overlay" not in fe
-    assert "_tick_pointer" in fe and "getScreenRay" in fe
+    # pointer now uses generic rayCast that works for any mesh anywhere
+    # (ortho + perspective, skipping invisible/_shadow)
+    assert "_tick_pointer" in fe and "rayCast" in fe
+    assert "getScreenVect" in fe or "getAxisVect" in fe
     assert "showMouse" in fe
     assert "_rewrite_unlit" in ad
     assert "ShaderNodeEmission" in ad
