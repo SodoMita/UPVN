@@ -2,12 +2,6 @@ import tempfile, pathlib
 from engine.core.vn_state import VNState
 from engine.save.save_manager import SaveManager
 from engine.ui.screen_manager import ScreenManager
-# Pillow backs the headless renderer; without it these tests skip rather
-# than aborting collection (which would take the rest of the suite down).
-import pytest
-pytest.importorskip("PIL", reason="Pillow is required by the headless renderer")
-from engine.render.headless_renderer import render_state
-
 def test_arbitrary_slots_not_limited_to_6():
     tmp = pathlib.Path(tempfile.mkdtemp())
     state = VNState()
@@ -52,35 +46,6 @@ def test_arbitrary_slots_not_limited_to_6():
     sm.load(999)
     assert state.instruction_index == 999
 
-def test_save_overlay_arbitrary_render(tmp_path):
-    tmp = pathlib.Path(tempfile.mkdtemp())
-    state = VNState()
-    state.history = [{"who":None,"who_name":None,"text":"hi","stripped":"hi"}]
-    sm = SaveManager(state, save_dir=tmp)
-    for slot in [1,7,42,500]:
-        state.variables["x"]=slot
-        sm.save(slot)
-    from engine.ui.screen_manager import ScreenManager
-    mgr = ScreenManager(state, save_manager=sm)
-    mgr.show("save")
-    # page 0 should show 1-6
-    mgr.screens["save"].page = 0
-    out0 = tmp_path / "save_p0.png"
-    render_state(state, {"type":"say","who":None,"text":"test"}, out0, screen_mgr=mgr)
-    assert out0.exists()
-    # page 83 should show 500 (500//6=83)
-    mgr.screens["save"].page = 83
-    out83 = tmp_path / "save_p83.png"
-    render_state(state, {"type":"say","who":None,"text":"test"}, out83, screen_mgr=mgr)
-    assert out83.exists()
-    # load screen pagination: only existing saves
-    mgr.hide("save")
-    mgr.show("load")
-    # load page 0 should contain 1,7,42,500 (4 saves)
-    mgr.screens["load"].page = 0
-    out_load = tmp_path / "load_p0.png"
-    render_state(state, {"type":"say","who":None,"text":"test"}, out_load, screen_mgr=mgr)
-    assert out_load.exists()
 
 def test_blender_builder_minimal_coding():
     from blend.upvn_editor_addon import UPVN_GameBuilder
@@ -103,9 +68,6 @@ def test_blender_builder_minimal_coding():
     assert 'scene bg classroom' in text
     assert 'e "Hello' in text
     assert 'affection' in text
-    # preview screenshot should work headless
-    out = b.preview_screenshot(str(tmp.parent / "preview.png"))
-    assert out and out.exists()
 
 def test_blender_builder_declarative_hq():
     from blend.upvn_editor_addon import UPVN_GameBuilder
@@ -123,5 +85,3 @@ def test_blender_builder_declarative_hq():
     assert 'choice' in text
     assert 'if' in text
     assert 'good_ending' in text or 'neutral_ending' in text
-    out = b.preview_screenshot(str(tmp.parent / "preview_wizard.png"))
-    assert out and out.exists()

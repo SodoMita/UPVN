@@ -1,13 +1,13 @@
 # UPVN — headless test + lint
-# No runtime deps for headless (UPBGE provides bpy/bge/aud/blf at runtime)
+# No runtime deps for headless (UPBGE provides bpy/bge/aud/blf at runtime).
+# The engine renders via UPBGE (bge/blf) — there is NO Pillow renderer in the engine.
 
 # testing
 pytest>=7
 fake-bge-module>=2023.0; python_version < "3.13"
-# engine/render/headless_renderer.py draws the golden-trace PNGs with Pillow.
-# Not optional for the render tests — but its absence must skip, not abort
-# collection (a collection error takes the whole suite down with it).
-pillow>=10
 
 # dev / lint (not required to run game)
 black
+# Pillow: only for standalone dev tools (tools/generate_screenshots*.py,
+# tools/make_placeholder_art.py). NOT used by the engine or the test suite.
+pillow>=10
