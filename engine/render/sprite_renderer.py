@@ -56,15 +56,18 @@ def _proj_resolution():
 
 
 def _renpy_place(obj, position):
-    """Ren'Py-true stage placement (parity with 00definitions.rpy transforms):
-    left  = xpos 0.0 xanchor 0.0 ypos 1.0 yanchor 1.0  (flush left,  bottom)
-    right = xpos 1.0 xanchor 1.0 ypos 1.0 yanchor 1.0  (flush right, bottom)
-    center= xpos 0.5 xanchor 0.5 ypos 1.0 yanchor 1.0  (centered,    bottom)
-    Ren'Py keeps the project's virtual frame (gui.init resolution) at ANY
-    window aspect — it scales to fit and letterboxes (config.html:
-    gl_clear_color paints the bars). So sprites are sized/anchored against
-    the DESIGN frame (ortho width x project aspect height), NOT the visible
-    window height; at 4:3 the frame simply gets black bars like the original.
+    """Ren'Py-true stage placement, mirrored from grim A/B evidence
+    (parity/orig_{169,43} vs stock the_question, SDK 8.5.3):
+
+    00definitions.rpy transforms:
+      left  = xpos 0.0 xanchor 0.0 ypos 1.0 yanchor 1.0  (flush left,  bottom)
+      right = xpos 1.0 xanchor 1.0 ypos 1.0 yanchor 1.0  (flush right, bottom)
+      center= xpos 0.5 xanchor 0.5 ypos 1.0 yanchor 1.0  (centered,    bottom)
+    in the VIRTUAL frame (gui.init resolution). Window scaling is locked to
+    the window HEIGHT (proj_h virtual px span the full window) and the
+    virtual frame is LEFT-ANCHORED (virtual x=0 at the window left; wider
+    columns crop — at 4:3 the `right` sprite is nearly off-screen):
+      wpp = (ortho * H / W) / proj_h ; x = -ortho/2 + px*wpp ; z = -vh/2 + ...
     far_* positions stay owned by the Pos_* empties (UPVN extension, no
     Ren'Py equivalent). No-op when data is missing."""
     try:
@@ -73,9 +76,12 @@ def _renpy_place(obj, position):
         scene = bge.logic.getCurrentScene()
         cam = getattr(scene, "active_camera", None)
         ortho = float(getattr(cam, "ortho_scale", 15.0) or 15.0)
+        W = float(bge.render.getWindowWidth() or 1280)
+        H = float(bge.render.getWindowHeight() or 720)
+        vw = ortho                       # visible world width
+        vh = ortho * H / W               # visible world height (height-locked)
         proj_w, proj_h = _proj_resolution()
-        # design (content) frame in world units — Ren'Py letterbox semantics
-        vw, vh = ortho, ortho * proj_h / proj_w
+        wpp = vh / proj_h                # uniform world units per virtual px
         iw = ih = None
         bo = getattr(obj, "blenderObject", None)
         nt = getattr(plane_material(obj), "node_tree", None)
@@ -85,8 +91,8 @@ def _renpy_place(obj, position):
             if img is not None and img.size[0]:
                 iw, ih = float(img.size[0]), float(img.size[1])
         if iw and ih:
-            h_w = vh * (ih / proj_h)
-            w_w = h_w * (iw / ih)
+            h_w = ih * wpp
+            w_w = iw * wpp
             dims = getattr(bo, "dimensions", None) if bo is not None else None
             if dims is not None and dims.x > 0 and dims.y > 0:
                 old = tuple(bo.scale)
@@ -94,12 +100,13 @@ def _renpy_place(obj, position):
         else:
             d = getattr(obj, "dimensions", (0, 0, 0))
             w_w, h_w = float(d[0]), float(d[2] or d[1])
+        # xpos/xanchor of the stock transforms, left-anchored virtual frame
         if position == "left":
-            cx = -vw / 2.0 + w_w / 2.0
+            cx = -vw / 2.0 + w_w / 2.0          # xpos 0.0   xanchor 0.0
         elif position == "right":
-            cx = vw / 2.0 - w_w / 2.0
+            cx = -vw / 2.0 + proj_w * wpp - w_w / 2.0  # xpos 1.0 xanchor 1.0
         else:
-            cx = 0.0
+            cx = -vw / 2.0 + (proj_w / 2.0) * wpp      # xpos .5  xanchor .5
         obj.worldPosition = (cx, obj.worldPosition[1], -vh / 2.0 + h_w / 2.0)
     except Exception as e:  # never break show() for placement parity
         _dbg(f"renpy_place skipped ({position}): {e}")

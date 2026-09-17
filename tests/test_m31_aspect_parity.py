@@ -1,12 +1,19 @@
-"""M31 — window-aspect parity with original Ren'Py (letterbox semantics).
+"""M31 — window-aspect parity with original Ren'Py 8.5 (SDK A/B evidence).
 
-Ren'Py keeps the project's virtual frame (gui.init resolution) at ANY window
-aspect: it scales to fit and paints letterbox/pillarbox bars (doc/config.html,
-config.gl_clear_color). Sprites (00definitions.rpy transforms: left/center/
-right are edge-anchored to the frame) and the choice menu (stock screens.rpy:
-choice_vbox xalign 0.5, ypos 270, yanchor 0.5, spacing gui.choice_spacing)
-therefore never reflow when the window aspect changes — UPVN's world layout
-must not either.
+Grim shots of the stock the_question at 1280x720 and 960x720
+(parity/orig_169, parity/orig_43) show the real Ren'Py 8.5 window model:
+
+* vertical scale is locked to the window HEIGHT (proj_h virtual pixels span
+  the full window at any aspect; sprites keep their pixel size);
+* horizontal is LEFT-ANCHORED (virtual x=0 at the window left; the 4:3
+  window shows virtual columns [0..960], so the `right` sprite is nearly
+  off-screen and the 790px choice bars clip at the right edge);
+
+so wpp = (ortho*H/W)/proj_h with x = -half + px*wpp, z = half_v - py*wpp.
+Sprites (00definitions.rpy transforms: left/center/right edge anchors) and
+the choice menu (stock screens.rpy: choice_vbox xalign .5, ypos 270 on the
+720 frame, yanchor .5, spacing gui.choice_spacing, xsize
+gui.choice_button_width) must follow the same model.
 """
 import sys
 import types
@@ -91,58 +98,62 @@ def _layout_at(win_w, win_h, choices=2):
             sys.modules["bge"] = old
 
 
-def test_design_frame_is_project_aspect_not_window_aspect(stock_cfg):
-    """half_v must come from gui.init(1280, 720) -> 15 * 720/1280 / 2."""
-    half, half_v, proj_w, proj_h = world_ui.design_frame(15.0)
+def test_view_metrics_height_locked(stock_cfg):
+    half, half_v, wpp, proj_w, proj_h = world_ui.view_metrics(15.0)
     assert (proj_w, proj_h) == (1280.0, 720.0)
-    assert half == pytest.approx(7.5)
-    assert half_v == pytest.approx(15.0 * 720.0 / 1280.0 / 2.0)
+    # 16:9: visible height = ortho*9/16, wpp = ortho/proj_w
+    assert half_v == pytest.approx(15.0 * 9.0 / 16.0 / 2.0)
+    assert wpp == pytest.approx(15.0 / 1280.0)
 
 
-def test_ui_layout_identical_at_16_9_and_4_3(stock_cfg):
-    """Ren'Py letterboxes: every UI transform is aspect-invariant.
-
-    (Regression: the old layout used half_v = half / window_aspect, which
-    moved choices/history and rescaled BG cover at 4:3 vs the original.)
-    """
-    a = _layout_at(1280, 720)
-    b = _layout_at(800, 600)
-    for name in ("Dialogue_Box", "Speaker_Text", "Dialogue_Text",
-                 "choice_0", "choice_1", "choice_0_text", "choice_1_text"):
-        assert a[name].worldPosition == pytest.approx(b[name].worldPosition), name
-        assert a[name].worldScale == pytest.approx(b[name].worldScale), name
-
-
-def test_choice_block_center_at_stock_ypos(stock_cfg):
-    """choice_vbox yanchor center: ypos 270/720 -> z = half_v * 0.25."""
-    store = _layout_at(1280, 720, choices=1)
-    _, half_v, _, _ = world_ui.design_frame(15.0)
-    box = store["choice_0"]
-    # single button: its center IS the block center
-    assert box.worldPosition[2] == pytest.approx(half_v * 0.25)
-
-
-def test_choice_button_width_and_height_from_gui_metrics(stock_cfg):
-    """xsize gui.choice_button_width=790px, height = text 22px + 2*5px pad."""
-    store = _layout_at(1280, 720, choices=1)
-    box = store["choice_0"]
-    px2wu = 15.0 / 1280.0
-    assert 2 * box.worldScale[0] == pytest.approx(790 * px2wu)
-    assert 2 * box.worldScale[1] == pytest.approx((22 + 2 * 5) * px2wu)
-
-
-def test_choice_buttons_centered_and_spaced(stock_cfg):
+def test_choice_metrics_match_original_16_9(stock_cfg):
+    """orig_169/menu.png: 790px bars centered, block center row 270."""
     store = _layout_at(1280, 720, choices=3)
-    z0 = store["choice_0"].worldPosition[2]
-    z1 = store["choice_1"].worldPosition[2]
-    z2 = store["choice_2"].worldPosition[2]
-    h0 = 2 * store["choice_0"].worldScale[1]
-    pitch = z0 - z1
-    assert pitch == pytest.approx(z1 - z2)
-    assert pitch > h0  # spacing gap between buttons, never overlapping
-    # vbox xalign 0.5 -> horizontally centered
-    for i in range(3):
-        assert store[f"choice_{i}"].worldPosition[0] == pytest.approx(0.0)
+    wpp = 15.0 / 1280.0
+    half_v = 15.0 * 9.0 / 16.0 / 2.0
+    b = store["choice_0"]
+    assert 2 * b.worldScale[0] == pytest.approx(790 * wpp)
+    assert 2 * b.worldScale[1] == pytest.approx((22 + 2 * 5) * wpp)
+    assert b.worldPosition[0] == pytest.approx(0.0)  # 640px column = frame center
+    # block center at row 270 (single middle of 3? no: 3 buttons, center row 270)
+    mid = store["choice_1"].worldPosition[2]
+    assert mid == pytest.approx(half_v - 270 * wpp)
+
+
+def test_choice_metrics_match_original_4_3(stock_cfg):
+    """orig_43/menu.png: same SCREEN pixels (row 270), 790px width in a
+    960px window -> left-anchored virtual frame pushes the block right and
+    the camera crops it."""
+    store = _layout_at(960, 720, choices=3)
+    half = 7.5
+    half_v = 7.5 * 720.0 / 960.0  # visible vertical half-extent (= half/aspect)
+    wpp = 2 * half_v / 720.0
+    b0 = store["choice_0"]
+    b1 = store["choice_1"]
+    # 790px bars in a 960-wide window
+    assert 2 * b0.worldScale[0] == pytest.approx(790 * wpp)
+    # virtual column 640 -> world x = -7.5 + 640*wpp (= +2.5, right of center)
+    assert b0.worldPosition[0] == pytest.approx(-half + 640 * wpp)
+    # block center still screen row 270: z = half_v - 270*wpp
+    assert b1.worldPosition[2] == pytest.approx(half_v - 270 * wpp)
+    # ...and that IS the same screen fraction: (half_v - z)/2/half_v = 270/720
+    frac = (half_v - b1.worldPosition[2]) / wpp / 720.0
+    assert frac == pytest.approx(270.0 / 720.0)
+
+
+def test_aspect_screen_pixel_consistency(stock_cfg):
+    """Every choice transform maps to the same SCREEN pixels at both aspects
+    (the parity definition of matching the original)."""
+    a = _layout_at(1280, 720, choices=2)
+    b = _layout_at(960, 720, choices=2)
+    wpp_a = 15.0 / 1280.0
+    wpp_b = (2 * (7.5 * 720.0 / 960.0)) / 720.0
+    for name in ("choice_0", "choice_1", "choice_0_text", "choice_1_text"):
+        wa = 2 * a[name].worldScale[0] / wpp_a   # width back in virtual px
+        wb = 2 * b[name].worldScale[0] / wpp_b
+        # rel 1e-3: set_font_size rounds world scale to 5 decimals
+        # (sub-pixel at any window; the buttons themselves are exact)
+        assert wa == pytest.approx(wb, rel=1e-3), name
 
 
 def test_sprite_proj_resolution_reads_dict(monkeypatch):
