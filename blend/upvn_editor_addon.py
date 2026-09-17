@@ -1160,8 +1160,27 @@ if HAS_BPY:
                             if gp is not None:
                                 gp.value = auto
                             else:
-                                # create if not exists
                                 ctrl.game.properties["upvn_auto_layout"] = auto
+                        except Exception:
+                            pass
+                    except Exception:
+                        pass
+                    # Debug ray toggle
+                    try:
+                        debug = (self.debug_ray_mode == "ON") if hasattr(self, "debug_ray_mode") else bool(getattr(self, "debug_ray", False))
+                        ctrl["upvn_debug_ray"] = debug
+                        try:
+                            gp = ctrl.game.properties.get("upvn_debug_ray")
+                            if gp is not None:
+                                gp.value = debug
+                            else:
+                                ctrl.game.properties["upvn_debug_ray"] = debug
+                        except Exception:
+                            pass
+                        # Also set logic flag for frontend
+                        try:
+                            import bge
+                            bge.logic._upvn_debug_ray = debug
                         except Exception:
                             pass
                     except Exception:
@@ -1172,6 +1191,9 @@ if HAS_BPY:
         auto_layout: bpy.props.BoolProperty(name="Auto Layout", default=True, description="Toggle auto layout for choices/dialogue — when OFF, choices keep custom position/scale (no stretch/translate)", update=_update_auto_layout)
         # Radio button for UI (ON/OFF) — user requested radio button to toggle remaining auto layout
         auto_layout_mode: bpy.props.EnumProperty(name="Auto Layout Mode", items=[("ON", "Auto ON", "Auto layout enabled — choices stretch/translate automatically"), ("OFF", "Auto OFF", "Auto layout disabled — custom layout preserved")], default="ON", update=_update_auto_layout)
+        # Debug ray toggle — user requested debug ray render for outside trigger bug
+        debug_ray: bpy.props.BoolProperty(name="Debug Ray", default=False, description="Show debug ray from camera to mouse hit — helps diagnose buttons triggered outside visible mesh")
+        debug_ray_mode: bpy.props.EnumProperty(name="Debug Ray Mode", items=[("OFF", "Debug OFF", "No debug ray"), ("ON", "Debug ON", "Show debug ray")], default="OFF")
         char_id: bpy.props.StringProperty(name="ID", default="e")
         char_name: bpy.props.StringProperty(name="Name", default="Eileen")
         char_color: bpy.props.FloatVectorProperty(name="Color", subtype='COLOR', size=4, default=(0.78, 1.0, 0.78, 1.0), min=0, max=1)
@@ -2146,24 +2168,28 @@ except Exception:
         # Auto layout toggle — respects custom layout when OFF
         try:
             auto = True
+            debug = False
             try:
-                # Try to read from scene props if available
                 import bpy as _bpy_auto
                 sc = _bpy_auto.context.scene
                 if hasattr(sc, "upvn_props"):
                     pp = sc.upvn_props
-                    # Prefer auto_layout_mode enum, fallback to bool
                     if hasattr(pp, "auto_layout_mode"):
                         auto = (pp.auto_layout_mode == "ON")
                     elif hasattr(pp, "auto_layout"):
                         auto = bool(pp.auto_layout)
+                    if hasattr(pp, "debug_ray_mode"):
+                        debug = (pp.debug_ray_mode == "ON")
+                    elif hasattr(pp, "debug_ray"):
+                        debug = bool(pp.debug_ray)
             except Exception:
                 pass
             _set_runtime_prop(_b, ctrl, "upvn_auto_layout", auto)
-            # Also set as custom property for world_ui to read
             ctrl["upvn_auto_layout"] = auto
+            _set_runtime_prop(_b, ctrl, "upvn_debug_ray", debug)
+            ctrl["upvn_debug_ray"] = debug
         except Exception as e:
-            print(f"[UPVN] auto_layout prop set failed: {e}")
+            print(f"[UPVN] auto_layout/debug prop set failed: {e}")
 
         _set_runtime_prop(_b, ctrl, "upvn_bricks", "no")
         if has_game and install_launcher:
@@ -2666,6 +2692,15 @@ except Exception:
             box.label(text="OFF = custom layout preserved", icon='INFO')
             box.label(text="Set per-object upvn_custom to keep", icon='INFO')
             box.label(text="individual objects custom", icon='INFO')
+
+            # Debug ray toggle — user requested debug ray render for outside trigger bug
+            box = layout.box()
+            box.label(text="Debug — Ray Outside Trigger", icon='HIDE_OFF')
+            row = box.row()
+            row.prop(props, "debug_ray_mode", expand=True)
+            box.prop(props, "debug_ray")
+            box.label(text="Shows ray from camera to hit", icon='INFO')
+            box.label(text="Helps diagnose outside mesh trigger", icon='INFO')
 
             if _has_game_support():
                 box = layout.box()

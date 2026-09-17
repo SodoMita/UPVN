@@ -766,6 +766,30 @@ def layout_screen_ui(get_obj: Callable[[str], Any], payload: dict, ortho: float 
     block_h = n_vis * btn_h + (n_vis - 1) * gap
     z_top = z_center + block_h / 2.0
 
+    # Boundary fix: ensure choices stay within visible frame (half_v)
+    # User reported: when buttons not within some boundary, choice not render and dialogue box disappear, but rewinding reappears
+    # This was because fixed layout with z_center=1.0 could place block outside half_v when many choices or large em
+    # Now clamp to stay inside visible frame, never hide dialogue box
+    # half_v is visible vertical half-extent (from view_metrics)
+    try:
+        # Ensure block stays within [-half_v*0.9, half_v*0.9] to leave margin for dialogue box
+        max_top = half_v * 0.85
+        min_bottom = -half_v * 0.5  # leave bottom for dialogue box at -3.496
+        # If block too tall, shrink gap first
+        if block_h > (max_top - min_bottom):
+            # Shrink gap to fit
+            gap = max(em * 0.2, (max_top - min_bottom - n_vis * btn_h) / max(1, n_vis - 1))
+            block_h = n_vis * btn_h + (n_vis - 1) * gap
+            z_top = (max_top + min_bottom) / 2.0 + block_h / 2.0
+        # Clamp top
+        if z_top > max_top:
+            z_top = max_top
+        # Clamp bottom
+        if z_top - block_h < min_bottom:
+            z_top = min_bottom + block_h
+    except Exception:
+        pass
+
     for i, ch in enumerate(payload.get("choices", [])):
         plane = get_obj(ch["name"])
         text_obj = get_obj(ch["name"] + "_text")
@@ -891,7 +915,19 @@ def apply_world_ui(get_obj: Callable[[str], Any], payload: dict, ortho: float | 
     _set_visible(speaker_obj, vis)
     _set_visible(dialogue_obj, vis)
     has_visible_choices = any(c.get("visible") for c in payload.get("choices", []))
+    # Boundary fix: dialogue box should always be visible when dialogue or choices visible
+    # Previously, when buttons outside boundary, box disappeared — ensure it stays
     _set_visible(box, vis or has_visible_choices)
+    # Also ensure box is not hidden by custom layout check — force visible if needed
+    if (vis or has_visible_choices) and box is not None:
+        try:
+            # If box was hidden due to custom layout, force visible
+            if not getattr(box, "visible", True):
+                # Only force if not explicitly custom hidden
+                if not _is_custom_layout(box):
+                    box.visible = True
+        except Exception:
+            pass
     if box:
         _set_object_color(box, DIALOGUE_BOX_COLOR)
 

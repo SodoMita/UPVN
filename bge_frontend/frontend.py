@@ -527,6 +527,108 @@ def _pointer_probe(sc, cam):
         print(f"[probe] failed: {e}")
 
 
+def _debug_draw_ray(origin, target, hit_point=None, hit_name=None, color_hit=(0,1,0), color_miss=(1,0,0)):
+    """Debug ray render — draws ray from origin to target/hit_point for one frame.
+    
+    User requested debug ray render because buttons triggered outside visible mesh,
+    likely ray being in wrong place when mesh modified/translated.
+    """
+    try:
+        import bge as _bge
+        # Check if debug enabled via VNController property or env var
+        try:
+            sc = _bge.logic.getCurrentScene()
+            ctrl = sc.objects.get("VNController")
+            debug_enabled = False
+            if ctrl is not None:
+                try:
+                    if "upvn_debug_ray" in ctrl:
+                        debug_enabled = bool(ctrl["upvn_debug_ray"])
+                    elif "upvn_debug" in ctrl:
+                        debug_enabled = bool(ctrl["upvn_debug"])
+                except Exception:
+                    pass
+            # Also check env var or logic flag
+            if not debug_enabled:
+                try:
+                    import os
+                    if os.environ.get("UPVN_DEBUG_RAY") or os.environ.get("UPVN_DEBUG"):
+                        debug_enabled = True
+                except Exception:
+                    pass
+            try:
+                if getattr(_bge.logic, "_upvn_debug_ray", False):
+                    debug_enabled = True
+            except Exception:
+                pass
+            if not debug_enabled:
+                # Always draw when hover changes? For now, only when debug enabled
+                # But we can enable via game property upvn_debug_ray on VNController
+                return
+        except Exception:
+            return
+
+        try:
+            # Draw main ray
+            if hit_point is not None:
+                # Hit — green
+                _bge.render.drawLine(origin, hit_point, color_hit)
+                # Draw small cross at hit point
+                s = 0.1
+                _bge.render.drawLine((hit_point[0]-s, hit_point[1], hit_point[2]), (hit_point[0]+s, hit_point[1], hit_point[2]), (1,1,0))
+                _bge.render.drawLine((hit_point[0], hit_point[1]-s, hit_point[2]), (hit_point[0], hit_point[1]+s, hit_point[2]), (1,1,0))
+                _bge.render.drawLine((hit_point[0], hit_point[1], hit_point[2]-s), (hit_point[0], hit_point[1], hit_point[2]+s), (1,1,0))
+                # Draw line from hit to target (faint)
+                _bge.render.drawLine(hit_point, target, (0.5,0.5,0.5))
+            else:
+                # Miss — red
+                _bge.render.drawLine(origin, target, color_miss)
+            
+            # Also draw camera frustum boundary for debugging outside trigger
+            # Draw visible frame bounds at y=0 plane
+            try:
+                cam = sc.active_camera
+                ortho = float(getattr(cam, "ortho_scale", 15.0) or 15.0)
+                if ortho > 0.001:
+                    w = float(_bge.render.getWindowWidth() or 1280.0)
+                    h = float(_bge.render.getWindowHeight() or 720.0)
+                    half = ortho / 2.0
+                    half_v = half * h / w if w > 0 else half * 9.0/16.0
+                    # Draw boundary box at y=0
+                    cx, cy, cz = cam.worldPosition
+                    # Boundary in XZ plane at y=0
+                    # Use camera axes for generic
+                    try:
+                        x_axis = cam.getAxisVect((1,0,0))
+                        y_axis = cam.getAxisVect((0,1,0))
+                    except Exception:
+                        x_axis = (1,0,0)
+                        y_axis = (0,0,1)
+                    # For Camera_UI at (0,-10,0) rot 90X, x_axis=(1,0,0), y_axis=(0,0,1)
+                    # Boundary corners at y=0 plane
+                    # We approximate with world X/Z
+                    bx_min = -half
+                    bx_max = half
+                    bz_min = -half_v
+                    bz_max = half_v
+                    # Draw rectangle at y=0
+                    p1 = (bx_min, 0.0, bz_min)
+                    p2 = (bx_max, 0.0, bz_min)
+                    p3 = (bx_max, 0.0, bz_max)
+                    p4 = (bx_min, 0.0, bz_max)
+                    _bge.render.drawLine(p1, p2, (0,0,1))
+                    _bge.render.drawLine(p2, p3, (0,0,1))
+                    _bge.render.drawLine(p3, p4, (0,0,1))
+                    _bge.render.drawLine(p4, p1, (0,0,1))
+            except Exception:
+                pass
+        except Exception as e:
+            # Don't break main logic for debug failure
+            print(f"[debug_ray] draw failed: {e}")
+    except Exception:
+        pass
+
+
 def _object_under_cursor():
     """Return the name of the object under the mouse cursor.
 
@@ -544,9 +646,13 @@ def _object_under_cursor():
     - Ortho handling now correctly offsets the ray origin by the mouse's
       frustum position (px, pz) and uses the camera's forward axis
       (getAxisVect((0,0,-1))) instead of assuming +Y.
+      FIXED: Now uses camera's X and Y axis vectors (getAxisVect((1,0,0)) and (0,1,0))
+      for generic calculation, not just world X/Z — handles any camera rotation.
+      This fixes ray being in wrong place when mesh modified/translated.
     - For perspective, uses getScreenVect but also loops to skip ignored hits.
     - Button can be any mesh anywhere: we no longer assume XZ planes at
       fixed Y layers; we raycast generically.
+    - Added debug ray render per user request — draws ray when upvn_debug_ray enabled.
     """
     if not HAS_BGE:
         return None
@@ -592,7 +698,9 @@ def _object_under_cursor():
         except Exception:
             fwd = (0.0, 1.0, 0.0)
 
-        # ortho: compute mouse world X,Z on camera plane
+        # ortho: compute mouse world X,Z on camera plane — FIXED to use camera axis vectors
+        # Previously used world X/Z directly, which failed when camera rotated or mesh translated
+        # Now uses getAxisVect for X and Y to be generic for any camera rotation
         if is_ortho:
             try:
                 w = float(_bge.render.getWindowWidth() or 1280.0)
@@ -601,10 +709,39 @@ def _object_under_cursor():
                 w, h = 1280.0, 720.0
             nx = float(mx) - 0.5
             ny = 0.5 - float(my)
-            px = cam.worldPosition.x + nx * ortho
-            pz = cam.worldPosition.z + ny * ortho * (h / w)
-            py = cam.worldPosition.y
-            origin = (px, py, pz)
+            # Generic: use camera's local X and Y axes for ray origin offset
+            try:
+                x_axis = cam.getAxisVect((1.0, 0.0, 0.0))
+                y_axis = cam.getAxisVect((0.0, 1.0, 0.0))
+                # Normalize axes (should already be unit, but ensure)
+                import math as _math
+                lx = _math.sqrt(x_axis[0]*x_axis[0]+x_axis[1]*x_axis[1]+x_axis[2]*x_axis[2])
+                ly = _math.sqrt(y_axis[0]*y_axis[0]+y_axis[1]*y_axis[1]+y_axis[2]*y_axis[2])
+                if lx > 1e-6:
+                    x_axis = (x_axis[0]/lx, x_axis[1]/lx, x_axis[2]/lx)
+                if ly > 1e-6:
+                    y_axis = (y_axis[0]/ly, y_axis[1]/ly, y_axis[2]/ly)
+            except Exception:
+                # Fallback to world X/Z for Camera_UI at (0,-10,0) rot 90X
+                x_axis = (1.0, 0.0, 0.0)
+                y_axis = (0.0, 0.0, 1.0)
+            # Ortho scale is width, height = width * h/w
+            # Origin = cam.pos + x_axis * (nx*ortho) + y_axis * (ny*ortho*h/w)
+            try:
+                cam_pos = cam.worldPosition
+                # cam.worldPosition is Vector, need to handle
+                cx, cy, cz = float(cam_pos.x), float(cam_pos.y), float(cam_pos.z)
+            except Exception:
+                try:
+                    cx, cy, cz = cam.worldPosition
+                except Exception:
+                    cx, cy, cz = (0.0, -10.0, 0.0)
+            # Calculate offset using axis vectors
+            off_x = nx * ortho
+            off_y = ny * ortho * (h / w)
+            origin = (cx + x_axis[0]*off_x + y_axis[0]*off_y,
+                      cy + x_axis[1]*off_x + y_axis[1]*off_y,
+                      cz + x_axis[2]*off_x + y_axis[2]*off_y)
             # far target 100 units forward
             target = (origin[0] + fwd[0]*100.0,
                       origin[1] + fwd[1]*100.0,
@@ -619,6 +756,8 @@ def _object_under_cursor():
                     hit = None
                     pt = None
                 if hit is None:
+                    # Debug ray for miss
+                    _debug_draw_ray(cur_from, cur_to, hit_point=None, hit_name=None)
                     return None
                 if _ignore(hit):
                     if pt is not None:
@@ -630,7 +769,10 @@ def _object_under_cursor():
                                     cur_from[1] + fwd[1]*0.1,
                                     cur_from[2] + fwd[2]*0.1)
                     continue
+                # Debug ray for hit
+                _debug_draw_ray(origin, cur_to, hit_point=pt, hit_name=getattr(hit, "name", None))
                 return getattr(hit, "name", None)
+            _debug_draw_ray(origin, cur_to, hit_point=None, hit_name=None)
             return None
         else:
             # perspective (or unknown) — use screen vect
@@ -643,7 +785,14 @@ def _object_under_cursor():
                     vect = (vect[0]/l, vect[1]/l, vect[2]/l)
             except Exception:
                 vect = fwd
-            origin = cam.worldPosition
+            try:
+                cam_pos = cam.worldPosition
+                origin = (float(cam_pos.x), float(cam_pos.y), float(cam_pos.z))
+            except Exception:
+                try:
+                    origin = cam.worldPosition
+                except Exception:
+                    origin = (0.0, -10.0, 0.0)
             target = (origin[0]+vect[0]*100.0,
                       origin[1]+vect[1]*100.0,
                       origin[2]+vect[2]*100.0)
@@ -656,6 +805,7 @@ def _object_under_cursor():
                     hit = None
                     pt = None
                 if hit is None:
+                    _debug_draw_ray(cur_from, cur_to, hit_point=None, hit_name=None)
                     return None
                 if _ignore(hit):
                     if pt is not None:
@@ -667,7 +817,9 @@ def _object_under_cursor():
                                     cur_from[1]+vect[1]*0.1,
                                     cur_from[2]+vect[2]*0.1)
                     continue
+                _debug_draw_ray(origin, cur_to, hit_point=pt, hit_name=getattr(hit, "name", None))
                 return getattr(hit, "name", None)
+            _debug_draw_ray(origin, cur_to, hit_point=None, hit_name=None)
             return None
     except Exception:
         return None
