@@ -60,8 +60,10 @@ def _fit_bg_to_view(plane) -> None:
             return
         w = float(bge.render.getWindowWidth() or 1280)
         h = float(bge.render.getWindowHeight() or 720)
-        dims = plane.dimensions
-        if dims.x <= 0.0 or dims.z <= 0.0:
+        # KX_GameObject has no .dimensions — ask the bpy datablock
+        bo = getattr(plane, "blenderObject", None)
+        dims = getattr(bo, "dimensions", None) if bo is not None else None
+        if dims is None or dims.x <= 0.0 or dims.z <= 0.0:
             return
         plane.scale = (plane.scale[0] * ortho / dims.x,
                        plane.scale[1],

@@ -36,6 +36,51 @@ def _dbg(msg: str):
 # transition durations (seconds)
 TRANS_DUR = {"dissolve": 0.4, "fade": 0.5, None: 0.0}
 
+def _ensure_sprite_alpha(mat) -> None:
+    """Wire TexImage.Alpha into the surface so sprite PNGs keep transparency.
+
+    Converted bank materials link only Color→Emission; with no alpha the
+    transparent PNG background renders as a black rectangle around the
+    character (M29 parity, SDK tutorial comparison). Rebuild as
+    Principled(Emission Color=Color, Emission Strength=1, Alpha=Alpha)
+    with blended surface rendering.
+    """
+    if mat is None or getattr(mat, "upvn_alpha_fixed", False):
+        return
+    try:
+        nt = getattr(mat, "node_tree", None)
+        if nt is None:
+            return
+        tex = next((n for n in nt.nodes if n.type == "TEX_IMAGE"), None)
+        out = next((n for n in nt.nodes if n.type == "OUTPUT_MATERIAL"), None)
+        if tex is None or out is None:
+            return
+        principled = nt.nodes.new("ShaderNodeBsdfPrincipled")
+        nt.links.new(tex.outputs["Color"], principled.inputs["Base Color"])
+        if "Alpha" in tex.outputs and "Alpha" in principled.inputs:
+            nt.links.new(tex.outputs["Alpha"], principled.inputs["Alpha"])
+        for cname in ("Emission Color", "Emission Colour"):
+            if cname in principled.inputs:
+                nt.links.new(tex.outputs["Color"], principled.inputs[cname])
+                break
+        if "Emission Strength" in principled.inputs:
+            principled.inputs["Emission Strength"].default_value = 1.0
+        nt.links.new(principled.outputs["BSDF"], out.inputs["Surface"])
+        for attr, val in (("blend_method", "BLEND"),
+                          ("show_transparent_back", False)):
+            try:
+                setattr(mat, attr, val)
+            except Exception:
+                pass
+        try:
+            mat.surface_render_method = "BLENDED"
+        except Exception:
+            pass
+        mat.upvn_alpha_fixed = True
+    except Exception as e:  # pragma: no cover
+        _dbg(f"sprite alpha fix skipped ({e})")
+
+
 def _make_material_single_user(plane, tag: str) -> None:
     """Give a duplicated pool plane its own MASprite_<tag> material copy.
 
@@ -132,27 +177,18 @@ class SpriteRenderer:
                     # M29 parity: sprite PNGs carry alpha; without blended
                     # transparency the plane shows a black rectangle around
                     # the character (SDK tutorial comparison).
-                    try:
-                        m = plane_material(bank)
-                        if m is not None:
-                            for attr, val in (("blend_method", "BLEND"),
-                                              ("show_transparent_back", False)):
-                                try:
-                                    setattr(m, attr, val)
-                                except Exception:
-                                    pass
-                            try:
-                                m.surface_render_method = "BLENDED"
-                            except Exception:
-                                pass
-                    except Exception:
-                        pass
+                    _ensure_sprite_alpha(plane_material(bank))
                     self.planes[tag] = {"obj": bank, "asset": asset,
                                         "position": position,
                                         "t0": time.time(),
                                         "transition": transition,
                                         "bank": True}
                     _dbg(f"show {tag} '{asset}' → bank plane {bank.name}")
+                    if not getattr(bge.logic, "_upvn_vis_logged", False):
+                        bge.logic._upvn_vis_logged = True
+                        print("[UPVN] visible:",
+                              [o.name for o in scene.objects
+                               if getattr(o, "visible", False)][:40])
                     if transition in ("dissolve", "fade"):
                         bank.color = (1, 1, 1, 0.0)
                         self.planes[tag].update({"t0": time.time()})
