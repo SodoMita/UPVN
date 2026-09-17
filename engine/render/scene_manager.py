@@ -51,7 +51,8 @@ def _fit_bg_to_view(plane) -> None:
         import bge
         from mathutils import Vector
         scene = bge.logic.getCurrentScene()
-        cam = scene.camera
+        cam = (getattr(scene, "active_camera", None)
+               or getattr(scene, "camera", None))
         if cam is None:
             return
         ortho = float(getattr(cam, "ortho_scale", 0.0) or 0.0)

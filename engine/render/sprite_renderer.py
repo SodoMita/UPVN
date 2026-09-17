@@ -129,6 +129,24 @@ class SpriteRenderer:
                         old.visible = False
                     bank.visible = True
                     bank.worldPosition = pos_world  # type: ignore
+                    # M29 parity: sprite PNGs carry alpha; without blended
+                    # transparency the plane shows a black rectangle around
+                    # the character (SDK tutorial comparison).
+                    try:
+                        m = plane_material(bank)
+                        if m is not None:
+                            for attr, val in (("blend_method", "BLEND"),
+                                              ("show_transparent_back", False)):
+                                try:
+                                    setattr(m, attr, val)
+                                except Exception:
+                                    pass
+                            try:
+                                m.surface_render_method = "BLENDED"
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
                     self.planes[tag] = {"obj": bank, "asset": asset,
                                         "position": position,
                                         "t0": time.time(),
