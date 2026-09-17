@@ -1388,19 +1388,50 @@ def main(cont=None):
             # here, otherwise the field report is "no sprite, no error".
             try:
                 _scs = logic.getCurrentScene()
+                _cam = _scs.active_camera
                 _stage = []
                 for _o in _scs.objects:
                     _n2 = str(getattr(_o, "name", ""))
                     if not (_n2.startswith("Sprite_") or _n2.startswith("BGIMG_")
                             or _n2.startswith("BG_Plane")):
                         continue
+                    # Is it inside what the camera actually renders?  A plane
+                    # that is "visible" but outside the frustum is the one
+                    # failure mode that leaves no trace anywhere else.
+                    _in = None
+                    try:
+                        _in = bool(_cam.pointInsideFrustum(_o.worldPosition))
+                    except Exception:
+                        pass
+                    _mats = []
+                    try:
+                        for _m in (_o.meshes or ()):
+                            pass
+                    except Exception:
+                        pass
+                    try:
+                        _mats = [str(_mm) for _mm in getattr(_o, "materials", ()) or ()]
+                    except Exception:
+                        _mats = []
                     _stage.append({
                         "name": _n2,
                         "vis": bool(getattr(_o, "visible", False)),
+                        "frustum": _in,
                         "pos": [round(float(v), 2) for v in getattr(_o, "worldPosition", (0, 0, 0))],
                         "scale": [round(float(v), 2) for v in getattr(_o, "worldScale", (1, 1, 1))],
+                        "color": [round(float(c), 2) for c in getattr(_o, "color", (1, 1, 1, 1))],
+                        "mats": _mats[:3],
                     })
                 _hb_data["stage"] = _stage
+                try:
+                    _hb_data["cam"] = {
+                        "name": str(getattr(_cam, "name", "")),
+                        "pos": [round(float(v), 2) for v in _cam.worldPosition],
+                        "ortho": (round(float(_cam.ortho_scale), 3)
+                                  if getattr(_cam, "ortho_scale", None) else None),
+                    }
+                except Exception:
+                    pass
             except Exception:
                 pass
             with open(_hb, "w") as _f:
