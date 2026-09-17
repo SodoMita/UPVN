@@ -100,7 +100,7 @@ except Exception:
     _gui_config = {}
 
 # Ren'Py identical UI metrics — now adaptive via contract
-HOVER_SCALE = 1.02  # tiny, Ren'Py hover is color not scale
+HOVER_SCALE = 1.02  # tiny, Ren'Py hover is color not scale; physics stays base to avoid outside trigger
 # These are now loaded from contract which loads from gui_config
 # But keep for backward compat, will be overridden by contract values
 CHOICE_SPACING_EM = CHOICE_SPACING_EM
@@ -403,29 +403,92 @@ def _set_pos(obj: Any, loc) -> bool:
         return True  # user positioned this object — don't override
     try:
         obj.worldPosition = loc
+        # keep physics in sync for accurate ray picking
+        try:
+            if hasattr(obj, "reinstancePhysicsMesh"):
+                obj.reinstancePhysicsMesh()
+        except Exception:
+            pass
         return True
     except Exception:
         try:
             obj.location = loc
+            try:
+                if hasattr(obj, "reinstancePhysicsMesh"):
+                    obj.reinstancePhysicsMesh()
+            except Exception:
+                pass
             return True
         except Exception:
             return False
 
 
-def _set_scale(obj: Any, scl) -> bool:
+def _set_scale(obj: Any, scl, reinstance: bool = True) -> bool:
     if obj is None:
         return False
     if _is_custom_layout(obj):
         return True  # user scaled this object — don't override
     try:
         obj.worldScale = scl
+        # critical: update BOX collision bounds after scale change so
+        # hover/click hitbox matches the visual size (fixes outside/inside mismatch)
+        # but for hover bump we keep physics at base size to avoid outside trigger
+        if reinstance:
+            try:
+                if hasattr(obj, "reinstancePhysicsMesh"):
+                    obj.reinstancePhysicsMesh()
+            except Exception:
+                pass
         return True
     except Exception:
         try:
             obj.localScale = scl
+            if reinstance:
+                try:
+                    if hasattr(obj, "reinstancePhysicsMesh"):
+                        obj.reinstancePhysicsMesh()
+                except Exception:
+                    pass
             return True
         except Exception:
             return False
+
+
+def _disable_obj(obj: Any) -> bool:
+    """Make an object non-interactive and invisible — used to delete shadows."""
+    if obj is None:
+        return False
+    # try to end the object (BGE)
+    try:
+        if hasattr(obj, "endObject"):
+            obj.endObject()
+            return True
+    except Exception:
+        pass
+    # fallback: hide and disable collision
+    try:
+        obj.visible = False
+    except Exception:
+        pass
+    try:
+        # disable physics picking
+        if hasattr(obj, "suspendDynamics"):
+            obj.suspendDynamics()
+    except Exception:
+        pass
+    try:
+        # zero collision mask so rayCast skips it
+        obj.collisionGroup = 0
+        obj.collisionMask = 0
+    except Exception:
+        pass
+    try:
+        obj.worldScale = (0.0, 0.0, 0.0)
+        if hasattr(obj, "reinstancePhysicsMesh"):
+            obj.reinstancePhysicsMesh()
+    except Exception:
+        pass
+    return True
 
 
 def _set_font_color(obj: Any, rgba) -> None:
@@ -568,6 +631,11 @@ def set_font_size(obj: Any, em: float) -> None:
         try:
             setattr(obj, attr, s)
             applied = True
+            try:
+                if hasattr(obj, "reinstancePhysicsMesh"):
+                    obj.reinstancePhysicsMesh()
+            except Exception:
+                pass
             break
         except Exception:
             continue
@@ -581,6 +649,11 @@ def set_font_size(obj: Any, em: float) -> None:
             bo.scale = s
         except Exception:
             pass
+    try:
+        if hasattr(obj, "reinstancePhysicsMesh"):
+            obj.reinstancePhysicsMesh()
+    except Exception:
+        pass
 
 
 def layout_screen_ui(get_obj: Callable[[str], Any], payload: dict, ortho: float = 15.0,
@@ -754,27 +827,53 @@ def layout_screen_ui(get_obj: Callable[[str], Any], payload: dict, ortho: float 
         is_hover = hovered and ch["name"] == hovered
         bump = HOVER_SCALE if is_hover else 1.0
         # world size = 2 * scale on the 2x2 plane; keep y-scale (plane depth) minimal
-        _set_scale(plane, (btn_w / 2.0 * bump, btn_h / 2.0 * bump, 0.01))
+        # keep physics at base size when hovered to avoid hover triggering outside
+        _set_scale(plane, (btn_w / 2.0 * bump, btn_h / 2.0 * bump, 0.01), reinstance=not is_hover)
         _set_pos(plane, (x_center, y_choice, z))
         # text left-anchored font -> place its start so the block is centered
         _set_pos(text_obj, (x_center - text_w / 2.0, y_choice_text, z))
         set_font_size(text_obj, em)
         _set_font_color(text_obj, CHOICE_TEXT_HOVER if is_hover else CHOICE_TEXT_IDLE)
 
-    # Shadows disabled for Ren'Py parity
+    # Generic button support: button can be any mesh anywhere in the world
+    # (user directive). If hovered object is not a choice_ plane but is a
+    # known hotspot (any mesh), tint it with hover color for feedback.
+    # This is in addition to the choice_ handling above.
+    if hovered and not hovered.startswith(CHOICE_PREFIX):
+        try:
+            gen = get_obj(hovered)
+            if gen is not None:
+                try:
+                    vis = getattr(gen, "visible", True)
+                except Exception:
+                    vis = True
+                if vis:
+                    # tint the generic mesh with hover color if it's not custom
+                    # (custom layout objects keep their own color)
+                    if not _is_custom_layout(gen):
+                        _set_object_color(gen, CHOICE_HOVER_COLOR)
+        except Exception:
+            pass
+
+    # Shadows deleted — they have no visual meaning and were ray-blocking
+    # (invisible but STATIC+BOX, so _object_under_cursor could hit them,
+    # causing hover to miss or click to fail). User directive: delete them.
     try:
         ssp = get_obj(SPEAKER_SHADOW)
         sdt = get_obj(DIALOGUE_SHADOW)
         if ssp:
-            _set_visible(ssp, False)
+            _disable_obj(ssp)
         if sdt:
-            _set_visible(sdt, False)
+            _disable_obj(sdt)
         for ch in payload.get("choices", []):
-            if not ch.get("visible"):
-                continue
             stext = get_obj(ch["name"] + CHOICE_SHADOW_SUFFIX)
             if stext:
-                _set_visible(stext, False)
+                _disable_obj(stext)
+        # also clean up any leftover shadow objects even if choice not visible
+        for i in range(CHOICE_COUNT):
+            sh = get_obj(f"{CHOICE_PREFIX}{i}{CHOICE_SHADOW_SUFFIX}")
+            if sh:
+                _disable_obj(sh)
     except Exception:
         pass
 
@@ -821,9 +920,9 @@ def apply_world_ui(get_obj: Callable[[str], Any], payload: dict, ortho: float | 
         ssp = get_obj(SPEAKER_SHADOW)
         sdt = get_obj(DIALOGUE_SHADOW)
         if ssp:
-            _set_visible(ssp, False)
+            _disable_obj(ssp)
         if sdt:
-            _set_visible(sdt, False)
+            _disable_obj(sdt)
     except Exception:
         pass
 
@@ -848,7 +947,7 @@ def apply_world_ui(get_obj: Callable[[str], Any], payload: dict, ortho: float | 
         _set_visible(plane, on)
         _set_visible(text_obj, on)
         if shadow_obj:
-            _set_visible(shadow_obj, False)
+            _disable_obj(shadow_obj)
         if on:
             set_font_text(text_obj, ch.get("text") or "")
 
@@ -873,6 +972,18 @@ def apply_world_ui(get_obj: Callable[[str], Any], payload: dict, ortho: float | 
 def normalize_hit_name(name: Optional[str]) -> Optional[str]:
     if not name:
         return name
-    if name.endswith("_text"):
-        return name[: -len("_text")]
+    # strip known UI suffixes iteratively: _text and _shadow (and combos)
+    # e.g. choice_0_text -> choice_0, choice_0_shadow -> choice_0,
+    #      choice_0_text_shadow -> choice_0
+    # This fixes ray hits on text or (now-deleted) shadow objects still
+    # returning a name that doesn't match the hotspot map.
+    # Also supports generic buttons: any mesh ending with those suffixes
+    # is normalized to its base name.
+    changed = True
+    while changed:
+        changed = False
+        for suf in ("_text", "_shadow"):
+            if name.endswith(suf):
+                name = name[: -len(suf)]
+                changed = True
     return name

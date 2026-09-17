@@ -1788,6 +1788,8 @@ except Exception:
 
         def _ensure_font(name, loc, size=0.32, bold=False, shear=None,
                          shadow=None, renpy_color=None, font_file=None):
+            # shadow param is now ignored/deleted per user directive
+            # (shadow objects made no sense and blocked ray picking)
             try:
                 from engine.render.contract import UI_FONT_NAME as _UI_FONT_NAME_FALLBACK
             except Exception:
@@ -1829,32 +1831,20 @@ except Exception:
                 except Exception:
                     pass
             _static_ghost(ob)
+            # delete any existing shadow object (old blends / previous runs)
             if shadow is not None:
-                # Shadows disabled for Ren'Py parity — keep object but transparent/hidden
-                sh = scene.objects.get(shadow)
-                if sh is None:
-                    sh = _data_text(shadow, body="", size=size, loc=loc,
-                                    rot=PLANE_ROTATION)
-                    scene.collection.objects.link(sh)
-                    collections["VN_UI"].objects.link(sh)
                 try:
-                    if not sh.data.materials:
-                        sh.data.materials.append(mat_font)
+                    sh = scene.objects.get(shadow)
+                    if sh is not None:
+                        _b.data.objects.remove(sh, do_unlink=True)
                 except Exception:
-                    pass
-                try:
-                    from engine.render.contract import style_font_curve
-                    style_font_curve(sh.data, bold=False, shear=None)
-                except Exception:
-                    pass
-                _tint(sh, (0.0, 0.0, 0.0, 0.0))
-                try:
-                    sh.hide_viewport = True
-                    sh.hide_render = True
-                    sh.visible = False
-                except Exception:
-                    pass
-                _static_ghost(sh)
+                    try:
+                        sh = scene.objects.get(shadow)
+                        if sh is not None:
+                            sh.hide_viewport = True
+                            sh.hide_render = True
+                    except Exception:
+                        pass
             return ob
 
         # M28 Adaptive: speaker/dialogue colors & fonts from contract (which loads upvn_gui.json) or fallback
