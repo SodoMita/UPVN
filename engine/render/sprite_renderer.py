@@ -34,81 +34,39 @@ def _dbg(msg: str):
     print(f"[SpriteRenderer] {msg}")
 
 def _proj_resolution():
-    """Project virtual resolution (gui.init(w, h)) as floats.
-
-    upvn_gui.json stores it as {"width": w, "height": h} (gui_parser);
-    a [w, h] list is tolerated. Falls back to the stock 1280x720 frame.
-    """
-    proj_w, proj_h = 1280.0, 720.0
-    try:
-        from .gui_config import get_gui_config
-        res = (get_gui_config() or {}).get("resolution") or None
-        if isinstance(res, dict):
-            proj_w = float(res.get("width") or proj_w)
-            proj_h = float(res.get("height") or proj_h)
-        elif res and len(res) >= 2 and float(res[1]) > 0:
-            proj_w, proj_h = float(res[0]), float(res[1])
-    except Exception:
-        pass
-    if proj_w <= 0 or proj_h <= 0:
-        proj_w, proj_h = 1280.0, 720.0
-    return proj_w, proj_h
+    # REMOVED: responsive layout — was reading gui_config resolution dict/list
+    # and returning proj_w/proj_h for wpp calculations. Never worked reliably.
+    # Now fixed 1280x720.
+    return 1280.0, 720.0
 
 
 def _renpy_place(obj, position):
-    """Ren'Py-true stage placement, mirrored from grim A/B evidence
-    (parity/orig_{169,43} vs stock the_question, SDK 8.5.3):
-
-    00definitions.rpy transforms:
-      left  = xpos 0.0 xanchor 0.0 ypos 1.0 yanchor 1.0  (flush left,  bottom)
-      right = xpos 1.0 xanchor 1.0 ypos 1.0 yanchor 1.0  (flush right, bottom)
-      center= xpos 0.5 xanchor 0.5 ypos 1.0 yanchor 1.0  (centered,    bottom)
-    in the VIRTUAL frame (gui.init resolution). Window scaling is locked to
-    the window HEIGHT (proj_h virtual px span the full window) and the
-    virtual frame is LEFT-ANCHORED (virtual x=0 at the window left; wider
-    columns crop — at 4:3 the `right` sprite is nearly off-screen):
-      wpp = (ortho * H / W) / proj_h ; x = -ortho/2 + px*wpp ; z = -vh/2 + ...
-    far_* positions stay owned by the Pos_* empties (UPVN extension, no
-    Ren'Py equivalent). No-op when data is missing."""
+    # REMOVED: responsive layout — was Ren'Py-true stage placement with
+    # wpp = vh/proj_h, left-anchored virtual frame, xpos/xanchor logic,
+    # image-size scaling, etc. Never worked reliably.
+    # What was here: tried to read ortho, window W/H, proj_w/proj_h, compute
+    # wpp, read image size from material, scale object, compute cx for left/
+    # center/right using -vw/2 + ... formulas. Distracted other agents.
+    # Now fixed simple positions.
     try:
-        if position not in ("left", "center", "right"):
+        if position not in ("left", "center", "right", "far_left", "far_right"):
             return
-        scene = bge.logic.getCurrentScene()
-        cam = getattr(scene, "active_camera", None)
-        ortho = float(getattr(cam, "ortho_scale", 15.0) or 15.0)
-        W = float(bge.render.getWindowWidth() or 1280)
-        H = float(bge.render.getWindowHeight() or 720)
-        vw = ortho                       # visible world width
-        vh = ortho * H / W               # visible world height (height-locked)
-        proj_w, proj_h = _proj_resolution()
-        wpp = vh / proj_h                # uniform world units per virtual px
-        iw = ih = None
-        bo = getattr(obj, "blenderObject", None)
-        nt = getattr(plane_material(obj), "node_tree", None)
-        if nt is not None:
-            tex = next((n for n in nt.nodes if n.type == "TEX_IMAGE"), None)
-            img = getattr(tex, "image", None) if tex is not None else None
-            if img is not None and img.size[0]:
-                iw, ih = float(img.size[0]), float(img.size[1])
-        if iw and ih:
-            h_w = ih * wpp
-            w_w = iw * wpp
-            dims = getattr(bo, "dimensions", None) if bo is not None else None
-            if dims is not None and dims.x > 0 and dims.y > 0:
-                old = tuple(bo.scale)
-                bo.scale = (old[0] * w_w / dims.x, old[1] * h_w / dims.y, old[2])
-        else:
-            d = getattr(obj, "dimensions", (0, 0, 0))
-            w_w, h_w = float(d[0]), float(d[2] or d[1])
-        # xpos/xanchor of the stock transforms, left-anchored virtual frame
-        if position == "left":
-            cx = -vw / 2.0 + w_w / 2.0          # xpos 0.0   xanchor 0.0
-        elif position == "right":
-            cx = -vw / 2.0 + proj_w * wpp - w_w / 2.0  # xpos 1.0 xanchor 1.0
-        else:
-            cx = -vw / 2.0 + (proj_w / 2.0) * wpp      # xpos .5  xanchor .5
-        obj.worldPosition = (cx, obj.worldPosition[1], -vh / 2.0 + h_w / 2.0)
-    except Exception as e:  # never break show() for placement parity
+        # Fixed world positions — simple, no aspect adaptation
+        fixed = {
+            "far_left": -6.0,
+            "left": -3.0,
+            "center": 0.0,
+            "right": 3.0,
+            "far_right": 6.0,
+        }
+        cx = fixed.get(position, 0.0)
+        # Keep Y, set X, Z at ground level (0)
+        try:
+            y = obj.worldPosition[1]
+        except Exception:
+            y = -0.15
+        obj.worldPosition = (cx, y, 0.0)
+    except Exception as e:
         _dbg(f"renpy_place skipped ({position}): {e}")
 
 

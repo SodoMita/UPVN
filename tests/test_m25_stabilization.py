@@ -82,22 +82,24 @@ def test_dialogue_box_stays_inside_ortho_frame():
 
 
 def test_layout_respects_window_aspect_when_bge_present():
-    """With a 4:3 window the vertical half-extent is 7.5*(3/4)=5.625.
-    M28 Ren'Py identical: dialogue box at fixed DIALOGUE_LOCATION (-3.134) full-width, not aspect-dependent."""
+    """REMOVED responsive layout — aspect_wh() now fixed 16/9, not dynamic.
+    What was here: tested that with 4:3 window, aspect_wh() returned 4/3 and
+    dialogue box at fixed DIALOGUE_LOCATION stayed inside frame. Responsive
+    deleted per user request — now fixed layout, always 16/9.
+    """
     fake = types.ModuleType("bge")
     render = types.SimpleNamespace(getWindowWidth=lambda: 800, getWindowHeight=lambda: 600)
     fake.render = render
     old = sys.modules.get("bge")
     sys.modules["bge"] = fake
     try:
-        assert world_ui.aspect_wh() == pytest.approx(4.0 / 3.0)
+        # Fixed layout: aspect_wh() always 16/9, not 4/3
+        assert world_ui.aspect_wh() == pytest.approx(16.0 / 9.0)
         store = _store()
         world_ui.layout_screen_ui(store.get, _payload(), ortho=15.0)
-        # M28: fixed Ren'Py position, not aspect formula
         from engine.render.contract import DIALOGUE_LOCATION
         assert store["Dialogue_Box"].worldPosition[2] == pytest.approx(DIALOGUE_LOCATION[2])
-        # still inside frame
-        half_v = 7.5 / (4.0 / 3.0)
+        half_v = 7.5 / (16.0 / 9.0)
         assert abs(store["Dialogue_Box"].worldPosition[2]) < half_v
     finally:
         if old is None:

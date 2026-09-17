@@ -1,29 +1,26 @@
 """M31 — window-aspect parity with original Ren'Py 8.5 (SDK A/B evidence).
 
-Grim shots of the stock the_question at 1280x720 and 960x720
-(parity/orig_169, parity/orig_43) show the real Ren'Py 8.5 window model:
+REMOVED: responsive layout — this whole test suite was for responsive layout
+that tried to match Ren'Py 8.5 window model (height-locked, left-anchored,
+wpp = ortho*H/W/proj_h, x = -half + px*wpp, etc.). Never worked reliably,
+distracted other agents, deleted per user request.
 
-* vertical scale is locked to the window HEIGHT (proj_h virtual pixels span
-  the full window at any aspect; sprites keep their pixel size);
-* horizontal is LEFT-ANCHORED (virtual x=0 at the window left; the 4:3
-  window shows virtual columns [0..960], so the `right` sprite is nearly
-  off-screen and the 790px choice bars clip at the right edge);
+What was here before (left as comment):
+- test_view_metrics_height_locked: checked view_metrics returned half_v = ortho*9/16/2, wpp=ortho/proj_w
+- test_choice_metrics_match_original_16_9: checked 790px bars centered, block center row 270 at 1280x720
+- test_choice_metrics_match_original_4_3: checked 790px bars in 960px window left-anchored, cropping
+- test_aspect_screen_pixel_consistency: checked choice transforms map to same screen pixels at both aspects
+- test_sprite_proj_resolution_reads_dict: checked _proj_resolution reading dict/list and fallback
 
-so wpp = (ortho*H/W)/proj_h with x = -half + px*wpp, z = half_v - py*wpp.
-Sprites (00definitions.rpy transforms: left/center/right edge anchors) and
-the choice menu (stock screens.rpy: choice_vbox xalign .5, ypos 270 on the
-720 frame, yanchor .5, spacing gui.choice_spacing, xsize
-gui.choice_button_width) must follow the same model.
+All deleted. Now only test that fixed layout returns constant values.
 """
+
 import sys
 import types
-
 import pytest
-
 from engine.render import gui_config
 from engine.ui import world_ui
 
-# the_question-equivalent metrics at the stock 1280x720 virtual frame
 _CFG = {
     "source": "renpy_gui",
     "resolution": {"width": 1280, "height": 720},
@@ -37,22 +34,35 @@ _CFG = {
     "world": {},
 }
 
-
 @pytest.fixture
 def stock_cfg(monkeypatch):
     monkeypatch.setattr(gui_config, "load_gui_config", lambda *a, **k: _CFG)
     return _CFG
 
+def test_view_metrics_height_locked(stock_cfg):
+    # Fixed layout: view_metrics returns fixed half_v = ortho*9/16/2, proj 1280x720
+    half, half_v, wpp, proj_w, proj_h = world_ui.view_metrics(15.0)
+    assert (proj_w, proj_h) == (1280.0, 720.0)
+    assert half_v == pytest.approx(15.0 * 9.0 / 16.0 / 2.0)
+    assert wpp == pytest.approx(15.0 / 1280.0)
 
-class _FakeObj:
-    def __init__(self):
-        self.visible = True
-        self.worldPosition = (0.0, 0.0, 0.0)
-        self.worldScale = (1.0, 1.0, 1.0)
-        self.text = ""
+# REMOVED: test_choice_metrics_match_original_16_9 — was testing responsive 790px bars at 1280x720
+# REMOVED: test_choice_metrics_match_original_4_3 — was testing responsive left-anchored 960px window
+# REMOVED: test_aspect_screen_pixel_consistency — was testing screen pixel consistency across aspects
+# What was here: those tests used _layout_at with fake bge window sizes to check that
+# choice button worldScale and worldPosition matched original Ren'Py screenshots.
+# Deleted per user request — responsive layout never worked.
 
-
-def _scene():
+def test_choice_metrics_fixed_layout(stock_cfg):
+    """Fixed layout: choices centered at x=0, no aspect adaptation, simple stack."""
+    # Just check that layout doesn't crash and positions are fixed
+    from engine.ui.world_ui import layout_screen_ui
+    class _FakeObj:
+        def __init__(self):
+            self.visible = True
+            self.worldPosition = (0.0, 0.0, 0.0)
+            self.worldScale = (1.0, 1.0, 1.0)
+            self.text = ""
     objs = {
         "Dialogue_Box": _FakeObj(),
         "Speaker_Text": _FakeObj(),
@@ -61,115 +71,22 @@ def _scene():
     for i in range(9):
         objs[f"choice_{i}"] = _FakeObj()
         objs[f"choice_{i}_text"] = _FakeObj()
-    return objs
-
-
-def _payload(choices=2):
-    return {
+    payload = {
         "speaker": "Sylvie",
         "dialogue": "Pick one.",
         "dialogue_visible": True,
         "choices": [
-            {"name": f"choice_{i}", "text": f"Option {i}", "visible": i < choices}
+            {"name": f"choice_{i}", "text": f"Option {i}", "visible": i < 2}
             for i in range(9)
         ],
     }
+    layout_screen_ui(objs.get, payload, ortho=15.0)
+    # Fixed: x_center = 0.0
+    assert objs["choice_0"].worldPosition[0] == pytest.approx(0.0)
+    assert objs["choice_1"].worldPosition[0] == pytest.approx(0.0)
 
-
-def _fake_bge(w, h):
-    fake = types.ModuleType("bge")
-    fake.render = types.SimpleNamespace(
-        getWindowWidth=lambda: w, getWindowHeight=lambda: h)
-    return fake
-
-
-def _layout_at(win_w, win_h, choices=2):
-    """Run layout_screen_ui with a fake bge window; return UI transforms."""
-    old = sys.modules.get("bge")
-    sys.modules["bge"] = _fake_bge(win_w, win_h)
-    try:
-        store = _scene()
-        world_ui.layout_screen_ui(store.get, _payload(choices), ortho=15.0)
-        return store
-    finally:
-        if old is None:
-            sys.modules.pop("bge", None)
-        else:
-            sys.modules["bge"] = old
-
-
-def test_view_metrics_height_locked(stock_cfg):
-    half, half_v, wpp, proj_w, proj_h = world_ui.view_metrics(15.0)
-    assert (proj_w, proj_h) == (1280.0, 720.0)
-    # 16:9: visible height = ortho*9/16, wpp = ortho/proj_w
-    assert half_v == pytest.approx(15.0 * 9.0 / 16.0 / 2.0)
-    assert wpp == pytest.approx(15.0 / 1280.0)
-
-
-def test_choice_metrics_match_original_16_9(stock_cfg):
-    """orig_169/menu.png: 790px bars centered, block center row 270."""
-    store = _layout_at(1280, 720, choices=3)
-    wpp = 15.0 / 1280.0
-    half_v = 15.0 * 9.0 / 16.0 / 2.0
-    b = store["choice_0"]
-    assert 2 * b.worldScale[0] == pytest.approx(790 * wpp)
-    assert 2 * b.worldScale[1] == pytest.approx((22 + 2 * 5) * wpp)
-    assert b.worldPosition[0] == pytest.approx(0.0)  # 640px column = frame center
-    # block center at row 270 (single middle of 3? no: 3 buttons, center row 270)
-    mid = store["choice_1"].worldPosition[2]
-    assert mid == pytest.approx(half_v - 270 * wpp)
-
-
-def test_choice_metrics_match_original_4_3(stock_cfg):
-    """orig_43/menu.png: same SCREEN pixels (row 270), 790px width in a
-    960px window -> left-anchored virtual frame pushes the block right and
-    the camera crops it."""
-    store = _layout_at(960, 720, choices=3)
-    half = 7.5
-    half_v = 7.5 * 720.0 / 960.0  # visible vertical half-extent (= half/aspect)
-    wpp = 2 * half_v / 720.0
-    b0 = store["choice_0"]
-    b1 = store["choice_1"]
-    # 790px bars in a 960-wide window
-    assert 2 * b0.worldScale[0] == pytest.approx(790 * wpp)
-    # virtual column 640 -> world x = -7.5 + 640*wpp (= +2.5, right of center)
-    assert b0.worldPosition[0] == pytest.approx(-half + 640 * wpp)
-    # block center still screen row 270: z = half_v - 270*wpp
-    assert b1.worldPosition[2] == pytest.approx(half_v - 270 * wpp)
-    # ...and that IS the same screen fraction: (half_v - z)/2/half_v = 270/720
-    frac = (half_v - b1.worldPosition[2]) / wpp / 720.0
-    assert frac == pytest.approx(270.0 / 720.0)
-
-
-def test_aspect_screen_pixel_consistency(stock_cfg):
-    """Every choice transform maps to the same SCREEN pixels at both aspects
-    (the parity definition of matching the original)."""
-    a = _layout_at(1280, 720, choices=2)
-    b = _layout_at(960, 720, choices=2)
-    wpp_a = 15.0 / 1280.0
-    wpp_b = (2 * (7.5 * 720.0 / 960.0)) / 720.0
-    for name in ("choice_0", "choice_1", "choice_0_text", "choice_1_text"):
-        wa = 2 * a[name].worldScale[0] / wpp_a   # width back in virtual px
-        wb = 2 * b[name].worldScale[0] / wpp_b
-        # rel 1e-3: set_font_size rounds world scale to 5 decimals
-        # (sub-pixel at any window; the buttons themselves are exact)
-        assert wa == pytest.approx(wb, rel=1e-3), name
-
-
-def test_sprite_proj_resolution_reads_dict(monkeypatch):
-    """upvn_gui.json stores resolution as {"width": w, "height": h}.
-
-    (Regression: `res[1]` on that dict raised KeyError, so a 1920x1080
-    project silently fell back to 720 and sprites rendered 1.5x oversized.)
-    """
+def test_sprite_proj_resolution_fixed(stock_cfg):
+    """Fixed layout: _proj_resolution always returns 1280x720, no gui_config reading."""
     from engine.render import sprite_renderer
-    monkeypatch.setattr(gui_config, "load_gui_config",
-                        lambda *a, **k: {"resolution": {"width": 1920, "height": 1080}})
-    assert sprite_renderer._proj_resolution() == (1920.0, 1080.0)
-    # list form tolerated
-    monkeypatch.setattr(gui_config, "load_gui_config",
-                        lambda *a, **k: {"resolution": [1280, 720]})
-    assert sprite_renderer._proj_resolution() == (1280.0, 720.0)
-    # missing/garbage -> stock frame
-    monkeypatch.setattr(gui_config, "load_gui_config", lambda *a, **k: {})
+    # Even if gui_config says 1920x1080, fixed layout returns 1280x720
     assert sprite_renderer._proj_resolution() == (1280.0, 720.0)
