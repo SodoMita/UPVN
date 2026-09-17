@@ -1,131 +1,86 @@
 #!/usr/bin/env python3
+"""upvn_game_creator.py — standalone one-click game creation (no bpy needed).
+
+Usage:
+    python tools/upvn_game_creator.py --title "My Story" --theme fantasy --out game/script.rpy
+    python tools/upvn_game_creator.py --title "My Story" --theme school --out game/script.rpy --preview
+
+Themes: school, fantasy, scifi, mystery
+Each theme generates a unique branching story with characters, state, and scenes.
 """
-UPVN Game Creator — minimal-coding CLI (works inside or outside Blender)
-
-Create a complete visual novel with Python API, no manual .rpy typing:
-
-    from tools.upvn_game_creator import quick_game
-
-    quick_game(
-        project="game",
-        title="My VN",
-        characters=[("e","Eileen","#c8ffc8"), ("s","Sylvie","#c8c8ff")],
-        scenes=["bg classroom", "bg lecturehall"],
-        dialogues=[("e","Hello!"), (None,"Narration..."), ("s","Hi there!")],
-        menu=("What next?", [("Ask","ask_label"), ("Wait","wait_label")])
-    )
-
-Also exposes UPVN_GameBuilder for programmatic use (same as Blender addon).
-For Blender UI, see blend/upvn_editor_addon.py (View3D > Sidebar > UPVN).
-
-Arbitrary save slots: SaveManager supports 1..∞, pagination in screen_manager.
-"""
-from pathlib import Path
+import argparse
 import sys
+import os
 
-# ensure project root in path
-ROOT = Path(__file__).parent.parent
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_REPO = os.path.dirname(_HERE)
+sys.path.insert(0, _REPO)
 
 from blend.upvn_editor_addon import UPVN_GameBuilder
 
-def quick_game(project: str = "game", title: str = "UPVN Quick Game", characters=None, scenes=None, dialogues=None, menu=None, preview: bool = True, use_wizard: bool = False):
-    """
-    One-call game creator — minimal coding, declarative, HQ.
-    Example:
-        quick_game(project="my_game", characters=[("e","Eileen","#c8ffc8")], dialogues=[("e","Hi")])
-        quick_game(project="my_game", use_wizard=True)  # full branching game, no coding
-    """
-    script_path = Path(project) / "script.rpy"
-    builder = UPVN_GameBuilder(str(script_path), use_declarative=True)
-    if use_wizard:
-        builder.create_quick_wizard(title=title, theme="school")
-    else:
-        # characters
-        for cid, name, color in (characters or [("e","Eileen","#c8ffc8")]):
-            builder.add_character(cid, name, color)
-        # state vars (no-code logic)
-        builder.add_state_var("affection", "int", "0")
-        builder.ensure_label("start")
-        # scenes
-        for bg in (scenes or ["bg classroom"]):
-            builder.add_scene(bg, "fade")
-            break
-        # dialogues
-        for who, text in (dialogues or [(None, "This game was created with minimal coding — no .rpy typing!"), ("e","Hello from UPVN!")]):
-            builder.add_say(who, text)
-        builder.add_set("affection", "+=", "1")
-        # menu
-        if menu:
-            caption, choices = menu
-            builder.add_menu(caption, choices)
-        else:
-            builder.add_menu("What will you do?", [("Continue","continue_label"), ("End","end_label")])
-            builder.ensure_label("continue_label")
-            builder.add_say("e", "You continued! Affection is now [affection].")
-            builder.add_jump("end_label")
-            builder.ensure_label("end_label")
-            builder.add_say(None, "The end. Created with UPVN_GameBuilder (minimal coding, declarative, HQ).")
-            builder.add_return()
-            builder.ensure_label("start")
-    ok, msg = builder.validate()
-    print(f"[creator] validate: {msg}")
-    path = builder.write()
-    print(f"[creator] wrote {path} ({path.stat().st_size} bytes) — declarative HQ")
-    if preview:
-        out = builder.preview_screenshot()
-        if out:
-            print(f"[creator] preview: {out}")
-        # also preview all paths if wizard
-        if use_wizard:
-            outs = builder.preview_all_paths()
-            if outs:
-                print(f"[creator] preview all paths: {len(outs)} images")
-    return path
 
-def demo_arbitrary_saves():
-    """Demo that save slots are arbitrary (1..∞), not 6."""
-    from engine.core.vn_state import VNState
-    from engine.save.save_manager import SaveManager
-    import tempfile
-    tmp = Path(tempfile.mkdtemp())
-    state = VNState()
-    sm = SaveManager(state, save_dir=tmp)
-    # save to arbitrary slots: 1, 7, 42, 100, 1000
-    for slot in [1, 7, 42, 100, 1000]:
-        state.variables["slot"] = slot
-        state.current_label = "start"
-        state.instruction_index = slot
-        sm.save(slot)
-        print(f"  saved slot {slot}")
-    ids = sm.list_slot_ids()
-    print(f"[arbitrary] slots: {ids} (not limited to 6)")
-    # pagination demo via ScreenManager
-    from engine.ui.screen_manager import ScreenManager
-    mgr = ScreenManager(state, save_manager=sm)
-    save_screen = mgr.screens["save"]
-    print(f"[arbitrary] SaveScreen page_size {save_screen.page_size}, total slots property {save_screen.slots}")
-    for pg in range(2):
-        save_screen.page = pg
-        lst = save_screen.list_page_slots()
-        print(f"  page {pg}: {lst}")
-    # also load
-    for slot in [42, 1000]:
-        sm.load(slot)
-        print(f"  loaded slot {slot} -> idx {state.instruction_index}")
-    print("[arbitrary] arbitrary slots work — any int 1..∞")
+def main():
+    ap = argparse.ArgumentParser(description="UPVN one-click game creator")
+    ap.add_argument("--title", default="My Visual Novel", help="Game title")
+    ap.add_argument("--theme", default="school", choices=["school", "fantasy", "scifi", "mystery"])
+    ap.add_argument("--out", default="game/script.rpy", help="Output .rpy path")
+    ap.add_argument("--preview", action="store_true", help="Generate headless preview screenshots")
+    args = ap.parse_args()
+
+    builder = UPVN_GameBuilder(args.out, use_declarative=True)
+    builder.create_quick_wizard(title=args.title, theme=args.theme)
+
+    # Ensure asset directories
+    out = os.path.abspath(args.out)
+    root = os.path.dirname(os.path.dirname(out)) if os.path.basename(os.path.dirname(out)) == "game" else os.path.dirname(out)
+    for sub in ["backgrounds", "sprites", "audio", "stages"]:
+        os.makedirs(os.path.join(root, "assets", sub), exist_ok=True)
+    os.makedirs(os.path.join(root, "screenshots"), exist_ok=True)
+
+    path = builder.write()
+
+    # Validate
+    ok, msg = builder.validate()
+    print(f"Created: {path}")
+    print(f"Theme: {args.theme}")
+    print(f"Validation: {'PASS' if ok else 'WARN'} -- {msg}")
+    print(f"\nCharacters: {list(builder.characters.keys())}")
+    print(f"State vars: {list(builder.state_vars.keys())}")
+    print(f"Labels: {list(builder.labels.keys())}")
+
+    # Preview screenshots
+    if args.preview:
+        from engine.script.parser import parse_string
+        from engine.core.vn_state import VNState
+        from engine.core.vn_interpreter import VNInterpreter
+        from engine.render.headless_renderer import render_state
+        from pathlib import Path as _P
+        preview_dir = os.path.join(root, "screenshots", f"preview_{args.theme}")
+        os.makedirs(preview_dir, exist_ok=True)
+        rpy = builder.build_rpy()
+        script = parse_string(rpy)
+        state = VNState()
+        interp = VNInterpreter(script, state)
+        gen = interp.run()
+        step = 0
+        try:
+            ev = next(gen)
+            while step < 6:
+                if ev.get("wait"):
+                    render_state(state, ev, _P(os.path.join(preview_dir, f"step{step}.png")))
+                    step += 1
+                    if ev.get("type") == "menu":
+                        ev = gen.send(0)
+                    else:
+                        ev = gen.send(None)
+                else:
+                    ev = next(gen)
+        except StopIteration:
+            pass
+        print(f"\nPreview: {step} screenshots saved to {preview_dir}/")
+
+    return 0 if ok else 1
+
 
 if __name__ == "__main__":
-    print("=== UPVN Game Creator — minimal coding demo ===")
-    # clean demo
-    demo_arbitrary_saves()
-    print()
-    print("=== quick_game demo ===")
-    quick_game(project="examples/99_creator_demo", title="Creator Demo",
-               characters=[("e","Eileen","#c8ffc8"), ("s","Sylvie","#c8c8ff")],
-               scenes=["bg classroom"],
-               dialogues=[("e","This game was built with 3 lines of Python, no .rpy typing!"), (None,"UPVN Blender tools let you click to create.")],
-               menu=("Try arbitrary saves?", [("Yes, save to slot 99","save_demo"), ("No, end","end_label")])
-    )
-    print("Done. Open in Blender: Text Editor → UPVN → Validate/Preview, or 3D View → Sidebar → UPVN")
+    sys.exit(main())
