@@ -64,9 +64,15 @@ def main() -> None:
         mat.use_nodes = True
         nt = mat.node_tree
         # Mode knob (UPVN_BOX_MODE): blend | dither | opaque.
-        # M29 found alpha paths black-framed on llvmpipe; EEVEE-Next wants
-        # surface_render_method set, so retry properly before falling back.
-        mode = os.environ.get("UPVN_BOX_MODE", "blend")
+        # llvmpipe/EEVEE-Next renders the Transparent BSDF white here, so the
+        # default premultiplies the sampled tint over a dark scene estimate
+        # (stock tutorial textbox = flat #000000cc; over water it reads
+        # near-black) — visually matches the original without alpha blending.
+        mode = os.environ.get("UPVN_BOX_MODE", "opaque")
+        if mode == "opaque":
+            bg_est = (0.02, 0.04, 0.07)
+            rgba = [c * alpha + b * (1.0 - alpha)
+                    for c, b in zip(rgba[:3], bg_est)]
         if nt is not None:
             nt.nodes.clear()
             out = nt.nodes.new("ShaderNodeOutputMaterial")
@@ -96,30 +102,32 @@ def main() -> None:
             except Exception:
                 pass
 
-    # 3b) name tint: Speaker_Text gets its own emission material so the
-    # who-color stops sharing MAUI's white text emission (M29 residual gap)
-    name_col = colors.get("name") or colors.get("speaker") or "#ffffff"
-    hx = name_col.lstrip("#")
-    nrgba = [int(hx[i:i + 2], 16) / 255.0 for i in (0, 2, 4)]
-    spk = bpy.data.objects.get("Speaker_Text")
-    if spk is not None:
-        smat = bpy.data.materials.get("MASpeakerName")
-        if smat is None:
-            smat = bpy.data.materials.new("MASpeakerName")
-        smat.use_nodes = True
-        snt = smat.node_tree
-        if snt is not None:
-            snt.nodes.clear()
-            sout = snt.nodes.new("ShaderNodeOutputMaterial")
-            sem = snt.nodes.new("ShaderNodeEmission")
-            sem.inputs["Color"].default_value = (*nrgba[:3], 1.0)
-            sem.inputs["Strength"].default_value = 1.0
-            snt.links.new(sem.outputs[0], sout.inputs["Surface"])
-        try:
-            spk.data.materials.clear()
-            spk.data.materials.append(smat)
-        except Exception:
-            pass
+    # 3b) text objects: single-user emission materials multiplied by the
+    # object color so runtime _set_font_color tints show (EEVEE-Next ignores
+    # obj.color on plain emission — M29 residual name-tint gap).
+    for tname in ("Speaker_Text", "Dialogue_Text"):
+        ob = bpy.data.objects.get(tname)
+        if ob is None or ob.type != "FONT" or not ob.data.materials:
+            continue
+        m = ob.data.materials[0].copy()
+        m.name = f"MAFont_{tname}"
+        m.use_nodes = True
+        nt = m.node_tree
+        if nt is not None:
+            nt.nodes.clear()
+            out = nt.nodes.new("ShaderNodeOutputMaterial")
+            em = nt.nodes.new("ShaderNodeEmission")
+            em.inputs["Strength"].default_value = 1.0
+            oi = nt.nodes.new("ShaderNodeObjectInfo")
+            mx = nt.nodes.new("ShaderNodeMixRGB")
+            mx.blend_type = "MULTIPLY"
+            mx.inputs["Fac"].default_value = 1.0
+            mx.inputs["Color1"].default_value = (1.0, 1.0, 1.0, 1.0)
+            nt.links.new(oi.outputs["Color"], mx.inputs["Color2"])
+            nt.links.new(mx.outputs["Color"], em.inputs["Color"])
+            nt.links.new(em.outputs[0], out.inputs["Surface"])
+        ob.data.materials.clear()
+        ob.data.materials.append(m)
 
     # 3) text sizes px -> world units
     world_h = ORTHO * h / w
@@ -150,6 +158,13 @@ def main() -> None:
                         break
             if img is not None:
                 break
+        if img is None and ob.name.startswith("SPRIMG_"):
+            stem = ob.name[len("SPRIMG_"):]
+            for im in bpy.data.images:
+                fp = (im.filepath or "").replace("\\", "/")
+                if im.name.startswith(stem) or (stem and stem in fp):
+                    img = im
+                    break
         if img is not None and img.size[0]:
             iw, ih = float(img.size[0]), float(img.size[1])
         elif is_pool:
