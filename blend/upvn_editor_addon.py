@@ -2035,11 +2035,11 @@ except Exception:
         except Exception as e:
             print(f"[UPVN] Adaptive choice override failed: {e}")
         for i in range(CHOICE_COUNT):
-            # Adaptive: ypos 405 centered, then each choice below — use _choice_base_z and _choice_spacing
+            # Fixed layout — no adaptive, small default to avoid outside trigger
+            # Previously used _choice_width_factor*7.5 ~4.63 which was huge (9.26 world width) causing outside trigger when auto_layout OFF
+            # Now small default 1.0 width (2.0 world) — will be resized by auto layout if ON, or kept custom if OFF
             try:
-                z = _choice_base_z - i * (_choice_spacing * 0.16 + 0.5 * 0.12 + 0.54)  # approx 0.66 for default
-                # More precise: if we have spacing, use it directly
-                # For default 0.38 em -> 0.66 world, so scale factor ~1.736
+                z = _choice_base_z - i * (_choice_spacing * 0.16 + 0.5 * 0.12 + 0.54)
                 z = _choice_base_z - i * (0.66 if _choice_spacing==0.38 else _choice_spacing * 1.736)
             except Exception:
                 z = 1.05 - i * 0.66
@@ -2047,15 +2047,16 @@ except Exception:
             cname = f"{CHOICE_PREFIX}{i}"
             try:
                 def _mk(cname=cname):
-                    return _data_plane(cname, size=6.0, color=(1.0, 1.0, 1.0, 0.8),
+                    return _data_plane(cname, size=2.0, color=(1.0, 1.0, 1.0, 0.8),
                                        rot=PLANE_ROTATION)
                 ch = _get_or_create(scene, cname, _mk)
                 _link_ob(scene, ch, collections["VN_UI"])
-                # Adaptive width: 1185 => 4.63 scale for 0.617 factor, scale = factor * 7.5
+                # Fixed small width to avoid outside trigger — was 4.63 scale (9.26 world) huge
+                # Now 1.0 scale = 2.0 world width, reasonable default, auto layout will resize if ON
                 try:
-                    _w_scale = _choice_width_factor * 7.5
+                    _w_scale = 1.0  # was _choice_width_factor * 7.5 ~4.63
                 except Exception:
-                    _w_scale = 4.63
+                    _w_scale = 1.0
                 _apply_2d_layout(ch, loc, (_w_scale, 0.22, 1.0))
                 _single_material(ch, mat_choice)
                 _tint(ch, CHOICE_IDLE_COLOR)

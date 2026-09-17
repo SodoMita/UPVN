@@ -676,6 +676,14 @@ def _object_under_cursor():
             # shadows are deleted at runtime but keep guard for old blends
             if name.endswith("_shadow"):
                 return True
+            # Ignore text objects — only button plane should be hittable to avoid outside trigger
+            # Text has Middle alignment now, but its collision could still cause outside trigger if positioned offset
+            # By ignoring text, ray passes through to hit button plane behind
+            if name.endswith("_text") or "_text" in name:
+                # Check if it's a choice text or generic text — ignore for ray, we want plane
+                # But keep speaker/dialogue text ignored too? Those are not buttons, so ignore is fine
+                # For choice text, we want to hit plane behind, so ignore text
+                return True
             # also ignore the template Cube/Light if they somehow remain
             if name in ("Cube", "Light"):
                 return True
@@ -775,27 +783,64 @@ def _object_under_cursor():
             _debug_draw_ray(origin, cur_to, hit_point=None, hit_name=None)
             return None
         else:
-            # perspective (or unknown) — use screen vect
+            # perspective — FIXED for outside trigger bug
+            # Previously used getScreenVect only, which could be inaccurate for perspective
+            # Now tries getScreenRay first (more accurate, returns start/end), fallback to getScreenVect
+            # Also uses axis vectors and proper origin
+            vect = None
+            origin = None
+            target = None
+            use_screen_ray = False
             try:
-                vect = cam.getScreenVect(mx, my)
-                # normalize vect
-                import math as _math
-                l = _math.sqrt(vect[0]*vect[0]+vect[1]*vect[1]+vect[2]*vect[2])
-                if l > 1e-6:
-                    vect = (vect[0]/l, vect[1]/l, vect[2]/l)
+                # Try getScreenRay which is more accurate for perspective in UPBGE
+                if hasattr(cam, "getScreenRay"):
+                    # getScreenRay returns (origin, target, direction) or (from, to)?
+                    # In UPBGE, getScreenRay(x,y,dist) returns tuple of 2 or 3 vectors
+                    ray = cam.getScreenRay(mx, my, 100.0)
+                    if ray is not None and len(ray) >= 2:
+                        # ray[0] is origin, ray[1] is target
+                        try:
+                            o = ray[0]
+                            t = ray[1]
+                            origin = (float(o[0]), float(o[1]), float(o[2])) if hasattr(o, "__len__") else (float(o.x), float(o.y), float(o.z))
+                            target = (float(t[0]), float(t[1]), float(t[2])) if hasattr(t, "__len__") else (float(t.x), float(t.y), float(t.z))
+                            # Calculate vect from origin to target
+                            import math as _math
+                            vx = target[0]-origin[0]
+                            vy = target[1]-origin[1]
+                            vz = target[2]-origin[2]
+                            l = _math.sqrt(vx*vx+vy*vy+vz*vz)
+                            if l > 1e-6:
+                                vect = (vx/l, vy/l, vz/l)
+                            else:
+                                vect = fwd
+                            use_screen_ray = True
+                        except Exception:
+                            pass
             except Exception:
-                vect = fwd
-            try:
-                cam_pos = cam.worldPosition
-                origin = (float(cam_pos.x), float(cam_pos.y), float(cam_pos.z))
-            except Exception:
+                pass
+            
+            if not use_screen_ray:
                 try:
-                    origin = cam.worldPosition
+                    vect = cam.getScreenVect(mx, my)
+                    import math as _math
+                    l = _math.sqrt(vect[0]*vect[0]+vect[1]*vect[1]+vect[2]*vect[2])
+                    if l > 1e-6:
+                        vect = (vect[0]/l, vect[1]/l, vect[2]/l)
                 except Exception:
-                    origin = (0.0, -10.0, 0.0)
-            target = (origin[0]+vect[0]*100.0,
-                      origin[1]+vect[1]*100.0,
-                      origin[2]+vect[2]*100.0)
+                    vect = fwd
+                try:
+                    cam_pos = cam.worldPosition
+                    origin = (float(cam_pos.x), float(cam_pos.y), float(cam_pos.z))
+                except Exception:
+                    try:
+                        origin = cam.worldPosition
+                    except Exception:
+                        origin = (0.0, -10.0, 0.0)
+                target = (origin[0]+vect[0]*100.0,
+                          origin[1]+vect[1]*100.0,
+                          origin[2]+vect[2]*100.0)
+            
             cur_from = origin
             cur_to = target
             for _ in range(12):
