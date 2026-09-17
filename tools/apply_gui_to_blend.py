@@ -14,6 +14,7 @@ Usage:
 Idempotent.
 """
 import json
+import os
 import sys
 
 import bpy
@@ -58,19 +59,63 @@ def main() -> None:
         mat = box.material_slots[0].material
         mat.use_nodes = True
         nt = mat.node_tree
+        # Mode knob (UPVN_BOX_MODE): blend | dither | opaque.
+        # M29 found alpha paths black-framed on llvmpipe; EEVEE-Next wants
+        # surface_render_method set, so retry properly before falling back.
+        mode = os.environ.get("UPVN_BOX_MODE", "blend")
         if nt is not None:
-            # rebuild from scratch. Tried, on llvmpipe/EEVEE-Next (M29):
-            #   * Principled + Alpha, BLENDED  -> whole frame black
-            #   * Principled + Alpha, DITHERED -> whole frame black
-            #   * Emission + Transparent Mix   -> box stayed light gray
-            # Opaque emission in the sampled tint is the only robust result;
-            # stock Ren'Py textbox over a dark scene reads near-black too.
             nt.nodes.clear()
             out = nt.nodes.new("ShaderNodeOutputMaterial")
-            em = nt.nodes.new("ShaderNodeEmission")
-            em.inputs["Color"].default_value = (*rgba[:3], 1.0)
-            em.inputs["Strength"].default_value = 1.0
-            nt.links.new(em.outputs[0], out.inputs["Surface"])
+            if mode == "opaque":
+                em = nt.nodes.new("ShaderNodeEmission")
+                em.inputs["Color"].default_value = (*rgba[:3], 1.0)
+                em.inputs["Strength"].default_value = 1.0
+                nt.links.new(em.outputs[0], out.inputs["Surface"])
+            else:
+                # Emission + Transparent mixed by the sampled alpha
+                em = nt.nodes.new("ShaderNodeEmission")
+                em.inputs["Color"].default_value = (*rgba[:3], 1.0)
+                em.inputs["Strength"].default_value = 1.0
+                tr = nt.nodes.new("ShaderNodeBsdfTransparent")
+                mix = nt.nodes.new("ShaderNodeMixShader")
+                mix.inputs["Fac"].default_value = alpha
+                nt.links.new(tr.outputs[0], mix.inputs[1])
+                nt.links.new(em.outputs[0], mix.inputs[2])
+                nt.links.new(mix.outputs[0], out.inputs["Surface"])
+                try:
+                    mat.surface_render_method = ("BLENDED" if mode == "blend"
+                                                 else "DITHERED")
+                except Exception as e:
+                    print(f"[apply_gui] surface_render_method failed: {e}")
+            try:
+                mat.use_backface_culling = False
+            except Exception:
+                pass
+
+    # 3b) name tint: Speaker_Text gets its own emission material so the
+    # who-color stops sharing MAUI's white text emission (M29 residual gap)
+    name_col = colors.get("name") or colors.get("speaker") or "#ffffff"
+    hx = name_col.lstrip("#")
+    nrgba = [int(hx[i:i + 2], 16) / 255.0 for i in (0, 2, 4)]
+    spk = bpy.data.objects.get("Speaker_Text")
+    if spk is not None:
+        smat = bpy.data.materials.get("MASpeakerName")
+        if smat is None:
+            smat = bpy.data.materials.new("MASpeakerName")
+        smat.use_nodes = True
+        snt = smat.node_tree
+        if snt is not None:
+            snt.nodes.clear()
+            sout = snt.nodes.new("ShaderNodeOutputMaterial")
+            sem = snt.nodes.new("ShaderNodeEmission")
+            sem.inputs["Color"].default_value = (*nrgba[:3], 1.0)
+            sem.inputs["Strength"].default_value = 1.0
+            snt.links.new(sem.outputs[0], sout.inputs["Surface"])
+        try:
+            spk.data.materials.clear()
+            spk.data.materials.append(smat)
+        except Exception:
+            pass
 
     # 3) text sizes px -> world units
     world_h = ORTHO * h / w
