@@ -1695,9 +1695,10 @@ except Exception:
         # M28 Adaptive: colors from upvn_gui.json if present, else Ren'Py identical defaults
         # BG: neutral, but will be textured with actual bg images in converted projects
         _bg_color = (0.95, 0.95, 0.95, 1.0)
-        # Ren'Py default theme: white text on a DARK translucent textbox (white box made white text invisible)
-        _ui_color = (0.0, 0.0, 0.0, 0.35)
-        _choice_color = (1.0, 1.0, 1.0, 0.8)
+        # Ren'Py default theme: white text on a DARK textbox. Opaque: BGE drops
+        # material alpha, so translucent PNG looks are approximated with solid colors.
+        _ui_color = (0.07, 0.08, 0.10, 1.0)
+        _choice_color = (1.0, 1.0, 1.0, 1.0)
         try:
             if _adaptive_cfg:
                 cols = _adaptive_cfg.get("colors", {})

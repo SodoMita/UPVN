@@ -1,5 +1,9 @@
 """M26c — scale-on-hover for choice plates.
 
+Note: choice boxes are text-boundary sized (M29 layout), so these tests
+use equal-length choice texts — the hover bump multiplies each plate's
+own base size.
+
 Hover is applied inside layout_screen_ui (the single writer of choice-plane
 scale), so it cannot go stale on camera zoom and is testable headlessly with
 dict-like fake objects.
@@ -34,8 +38,8 @@ def _payload():
         "dialogue": "Pick one.",
         "dialogue_visible": True,
         "choices": [
-            {"name": "choice_0", "text": "1. Left", "visible": True},
-            {"name": "choice_1", "text": "2. Right", "visible": True},
+            {"name": "choice_0", "text": "Up", "visible": True},
+            {"name": "choice_1", "text": "No", "visible": True},
         ],
     }
 

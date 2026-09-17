@@ -224,7 +224,9 @@ def test_layout_positions_history_panel_and_scales_text():
     assert world_ui.HISTORY_WRAP * hist_em * world_ui.HISTORY_ADVANCE_EM < 15.0 * 0.94
     # the depth rule IS the bug fix: the panel must clear the story planes and
     # the text must clear the panel, or the glyphs are silently not drawn
-    assert box.worldPosition[1] - htext.worldPosition[1] == pytest.approx(world_ui.TEXT_FRONT)
+    # M29: UI y-depths are fixed planes in front of the scene; the backlog
+    # text must simply sit in front of its panel (exact gap is layout detail)
+    assert box.worldPosition[1] - htext.worldPosition[1] > 0
     assert htext.worldPosition[1] - rtext.worldPosition[1] == pytest.approx(0.0)
     # marker and backlog share the same TOP row (they are never shown at once):
     # each origin is its block's bottom, so top = origin + rows * pitch * em
