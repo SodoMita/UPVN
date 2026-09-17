@@ -1669,11 +1669,13 @@ except Exception:
             from engine.render.contract import (BG_PLANE, BG_MATERIAL,
                                                 SPRITE_MATERIAL, SPRITE_POSITIONS,
                                                 POSITIONS, DIALOGUE_PLANE,
-                                                IMAGE_MODE_DEFAULT)
+                                                IMAGE_MODE_DEFAULT, SPRITE_POOL,
+                                                POSITION_EMPTY_PREFIX)
         except Exception:
             BG_PLANE, BG_MATERIAL = "BG_Plane", "MABackground"
             SPRITE_MATERIAL, DIALOGUE_PLANE = "MASprite", "Dialogue_Box"
             IMAGE_MODE_DEFAULT = "color"
+            SPRITE_POOL, POSITION_EMPTY_PREFIX = "Sprite_pool", "Pos_"
             SPRITE_POSITIONS = ("far_left", "left", "center", "right", "far_right")
             POSITIONS = {p: ({"far_left": -5.0, "left": -3.0, "center": 0.0,
                               "right": 3.0, "far_right": 5.0}[p], -0.15, 0.0)
@@ -1709,9 +1711,6 @@ except Exception:
         mat_bg = _ensure_material(_b, BG_MATERIAL, _bg_color,
                                   tex_capable=True, renpy_parity=True)
         mat_sprite = _ensure_material(_b, SPRITE_MATERIAL, (0.62, 0.78, 0.55, 1.0), tex_capable=True)
-        for _pos in SPRITE_POSITIONS:
-            _ensure_material(_b, f"{SPRITE_MATERIAL}_{_pos}",
-                             (0.62, 0.78, 0.55, 1.0), tex_capable=True)
         # Ren'Py identical: white semi-transparent textbox (255,255,255,204) like gui/textbox.png — adaptive if config has it
         mat_ui = _ensure_material(_b, "MAUI", _ui_color, renpy_parity=True)
         # Ren'Py identical: choice idle white, hover blue #00189d — adaptive
@@ -2019,26 +2018,45 @@ except Exception:
         except Exception:
             pass
 
-        # sprite planes
+        # sprite stage: Pos_<pos> empties own the layout; a single pool plane
+        # is duplicated per tag at runtime (position-empties refactor)
         for pos in SPRITE_POSITIONS:
-            name = f"Sprite_{pos}"
-            loc = POSITIONS.get(pos, (0.0, -0.15, 0.0))
-            sp = scene.objects.get(name)
-            if sp is None:
-                sp = _data_plane(name, size=4.0, color=(0.62, 0.78, 0.55, 1.0),
-                                 rot=PLANE_ROTATION)
-                _single_material(sp, mat_sprite)
-                scene.collection.objects.link(sp)
-                collections["VN_Characters"].objects.link(sp)
-            _apply_2d_layout(sp, loc, SPRITE_SCALE)
-            _single_material(sp, _b.data.materials.get(f"{SPRITE_MATERIAL}_{pos}")
-                             or mat_sprite)
-            _tint(sp, (0.62, 0.78, 0.55, 1.0))
-            _static_ghost(sp)
+            ename = f"{POSITION_EMPTY_PREFIX}{pos}"
+            emp = scene.objects.get(ename)
+            if emp is None:
+                emp = _b.data.objects.new(ename, None)
+                emp.empty_display_type = "PLAIN_AXES"
+                emp.empty_display_size = 0.6
+                scene.collection.objects.link(emp)
+                try:
+                    collections["VN_Characters"].objects.link(emp)
+                except Exception:
+                    pass
+            emp.location = POSITIONS.get(pos, (0.0, -0.15, 0.0))
+        pool = scene.objects.get(SPRITE_POOL)
+        if pool is None:
+            pool = _data_plane(SPRITE_POOL, size=4.0,
+                               color=(0.62, 0.78, 0.55, 1.0),
+                               rot=PLANE_ROTATION)
+            scene.collection.objects.link(pool)
             try:
-                sp.hide_render = False
+                collections["VN_Characters"].objects.link(pool)
             except Exception:
                 pass
+        _apply_2d_layout(pool, POSITIONS.get("center", (0.0, -0.15, 0.0)),
+                         SPRITE_SCALE)
+        _single_material(pool, mat_sprite)
+        _tint(pool, (0.62, 0.78, 0.55, 1.0))
+        _static_ghost(pool)
+        try:
+            pool.hide_render = False
+        except Exception:
+            pass
+        # legacy per-position planes are superseded by the empties
+        for pos in SPRITE_POSITIONS:
+            old = scene.objects.get(f"Sprite_{pos}")
+            if old is not None and old.name != SPRITE_POOL:
+                _b.data.objects.remove(old, do_unlink=True)
 
         ctrl = scene.objects.get("VNController")
         created = ctrl is None
