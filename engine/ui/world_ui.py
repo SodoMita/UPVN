@@ -442,6 +442,19 @@ def _set_font_color(obj: Any, rgba) -> None:
             bo.color = rgba
         except Exception:
             pass
+        # EEVEE-Next on llvmpipe reads ObjectInfo.Color as white, so tint the
+        # emission node of the object's single-user font material directly
+        # (parity loop: name who-color must match the character color)
+        try:
+            for slot in bo.material_slots:
+                nt = getattr(slot.material, "node_tree", None)
+                if nt is None:
+                    continue
+                for n in nt.nodes:
+                    if n.type == "EMISSION":
+                        n.inputs["Color"].default_value = (*rgba[:3], 1.0)
+        except Exception:
+            pass
 
 
 def _set_object_color(obj: Any, rgba) -> None:
