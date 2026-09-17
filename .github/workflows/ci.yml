@@ -21,9 +21,8 @@ jobs:
       - name: Install test deps
         run: |
           python -m pip install --upgrade pip
-          # requirements.txt, not a bare `pip install pytest`: the headless
-          # renderer draws golden-trace PNGs with Pillow, and a missing dep
-          # used to abort test collection for the whole suite.
+          # requirements.txt, not a bare `pip install pytest`: installs the
+          # full pinned dep set so CI matches local runs.
           pip install -r requirements.txt
 
       - name: pytest
@@ -81,9 +80,8 @@ jobs:
       - name: Install test deps
         run: |
           python -m pip install --upgrade pip
-          # requirements.txt, not a bare `pip install pytest`: the headless
-          # renderer draws golden-trace PNGs with Pillow, and a missing dep
-          # used to abort test collection for the whole suite.
+          # requirements.txt, not a bare `pip install pytest`: installs the
+          # full pinned dep set so CI matches local runs.
           pip install -r requirements.txt
 
       # Only the scripts are needed — blob-filtered sparse checkout keeps this
@@ -126,9 +124,8 @@ jobs:
       - name: Install test deps
         run: |
           python -m pip install --upgrade pip
-          # requirements.txt, not a bare `pip install pytest`: the headless
-          # renderer draws golden-trace PNGs with Pillow, and a missing dep
-          # used to abort test collection for the whole suite.
+          # requirements.txt, not a bare `pip install pytest`: installs the
+          # full pinned dep set so CI matches local runs.
           pip install -r requirements.txt
 
       # A different codebase, written by different people in a different style:

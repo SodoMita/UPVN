@@ -55,7 +55,6 @@ def test_m17_engine_missing_is_friendly_not_crash():
         ok, msg = b.validate()
         assert ok is False
         assert "engine not found" in msg
-        assert b.preview_screenshot() is None  # no crash
         assert b.engine_ok() is False
 
 

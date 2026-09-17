@@ -4,7 +4,7 @@ Dialogue Box — UI front-end (M01 Kinetic + M02/M03 + M28 typewriter fix)
 MVP: plane + blf for text, typewriter, click-to-reveal.
 Per doc §5: UI lives in 3D scene (planes + blf), no DSL — LLM builds via python.
 
-Headless: show() stores current text for render_state / headless_renderer.
+show() stores current text in state (consumed by the UPBGE runtime UI).
 UPBGE: draws via 3D FONT objects (world_ui) + optional blf fallback.
 
 Typewriter: reveal over time, click does instant reveal before advancing.
@@ -169,7 +169,7 @@ class DialogueBox:
     def is_done(self) -> bool:
         return self._done
 
-    # headless helpers
+    # text accessors
     def fully_revealed(self) -> str:
         return self.current_text
 

@@ -42,7 +42,6 @@ twin: `tools/smoke_walkthrough.sh` (self-verifying, retry-until-state).
 - [ ] Add Character / Scene / Show / 3D Stage / Dialogue / Menu append to
       the script and the file keeps every existing line, additions BEFORE
       the label's `return` (BUG-018 regression check).
-- [ ] Install Pillow → Preview renders `screenshots/upvn_preview.png`.
 - [ ] Press P: game plays inside the editor; Space/menu/digits work; Esc
       returns to the editor (needs swap on small hosts).
 - [ ] **Live update (no restart)**: with the editor running, edit the
