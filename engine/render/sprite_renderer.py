@@ -98,6 +98,51 @@ class SpriteRenderer:
     def _bge_show(self, tag: str, asset: str, position: str, transition: str | None):
         try:
             scene = bge.logic.getCurrentScene()  # type: ignore
+            # M26 policy: "color" never touches image files; "auto" tries
+            # PNG/JPG/WebP first and falls back to the palette tint. The
+            # policy lives on the VNController game property (image_mode).
+            ctrl = scene.objects.get("VNController")
+            mode = image_mode_from(ctrl)
+            empty = scene.objects.get(f"{POSITION_EMPTY_PREFIX}{position}")
+            pos_world = (empty.worldPosition if empty is not None
+                         else POSITIONS[position])
+            # Image bank first (converted projects): Sprite_img_<stem> planes
+            # carry editor-assigned textures (tools/wire_converted_blend.py).
+            # Resolved before pool duplication so a failed addObject cannot
+            # abort the show (M29: SDK tutorial parity).
+            bank = None
+            if mode == "auto":
+                _stem = asset.replace(" ", "_")
+                _last = asset.split()[-1] if " " in asset else asset
+                for key in (asset, _stem, _last, tag):
+                    cand = scene.objects.get("Sprite_img_" + str(key).lower())
+                    if cand is not None:
+                        bank = cand
+                        break
+            if bank is not None:
+                try:
+                    for ob in scene.objects:
+                        if str(ob.name).startswith("Sprite_img_"):
+                            ob.visible = (ob is bank)
+                    old = scene.objects.get(f"{SPRITE_TAG_PREFIX}{tag}")
+                    if old is not None:
+                        old.visible = False
+                    bank.visible = True
+                    bank.worldPosition = pos_world  # type: ignore
+                    self.planes[tag] = {"obj": bank, "asset": asset,
+                                        "position": position,
+                                        "t0": time.time(),
+                                        "transition": transition,
+                                        "bank": True}
+                    _dbg(f"show {tag} '{asset}' → bank plane {bank.name}")
+                    if transition in ("dissolve", "fade"):
+                        bank.color = (1, 1, 1, 0.0)
+                        self.planes[tag].update({"t0": time.time()})
+                    else:
+                        bank.color = (1, 1, 1, 1.0)
+                    return
+                except Exception as e:
+                    _dbg(f"show {tag} '{asset}' bank show failed ({e}) → pool")
             # One plane per tag; stage layout lives on Pos_<pos> empties
             # (position-empties refactor). Legacy blends still carry
             # per-position Sprite_<pos> planes — used as duplication source.
@@ -111,21 +156,20 @@ class SpriteRenderer:
                 if src is None:
                     _dbg(f"show {tag}: no plane object in scene — skipped")
                     return
-                # duplicate a template plane on the fly
-                plane = scene.addObject(src, src)
+                try:
+                    # duplicate a template plane on the fly
+                    plane = scene.addObject(src, src)
+                except Exception as e:
+                    # addObject needs its source in an inactive layer; fall
+                    # back to reusing the source plane itself.
+                    _dbg(f"show {tag}: addObject failed ({e}) — reuse source")
+                    plane = src
                 plane.name = plane_name
                 _make_material_single_user(plane, tag)
-            empty = scene.objects.get(f"{POSITION_EMPTY_PREFIX}{position}")
             # place at correct world position (the empty owns the layout)
-            plane.worldPosition = (empty.worldPosition if empty is not None
-                                   else POSITIONS[position])  # type: ignore
+            plane.worldPosition = pos_world  # type: ignore
             plane.visible = True
             plane["upvn_asset"] = asset
-            # M26 policy: "color" never touches image files; "auto" tries
-            # PNG/JPG/WebP first and falls back to the palette tint. The
-            # policy lives on the VNController game property (image_mode).
-            ctrl = scene.objects.get("VNController")
-            mode = image_mode_from(ctrl if ctrl is not None else plane)
             tex_path = None
             if mode == "auto":
                 import bge.texture as vt
@@ -146,6 +190,12 @@ class SpriteRenderer:
                     for prefix in SPRITE_PATH_PREFIXES:
                         candidates.append(
                             bge.logic.expandPath(f"{prefix}{ASSET_SPRITES}/{stem}{ext}"))
+                # M29 parity: converted projects keep original file names with
+                # spaces ("eileen happy.png") — try the raw asset name too.
+                for ext in (".png", ".jpg", ".webp"):
+                    for prefix in SPRITE_PATH_PREFIXES:
+                        candidates.append(
+                            bge.logic.expandPath(f"{prefix}{ASSET_SPRITES}/{asset}{ext}"))
                 for p in candidates:
                     try:
                         if os.path.exists(p):
@@ -153,40 +203,6 @@ class SpriteRenderer:
                             break
                     except Exception:
                         continue
-            # image bank (converted projects): SPRIMG_<stem> planes carry
-            # editor-assigned textures (see tools/wire_converted_blend.py).
-            bank = None
-            if mode == "auto":
-                stem = asset.replace(" ", "_")
-                last = asset.split()[-1] if " " in asset else asset
-                for key in (asset, stem, last, tag):
-                    cand = scene.objects.get("Sprite_img_" + str(key).lower())
-                    if cand is not None:
-                        bank = cand
-                        break
-            if bank is not None:
-                try:
-                    for ob in scene.objects:
-                        if str(ob.name).startswith("Sprite_img_"):
-                            ob.visible = (ob is bank)
-                    plane.visible = False
-                    bank.visible = True
-                    bank.worldPosition = (empty.worldPosition
-                                          if empty is not None
-                                          else POSITIONS[position])  # type: ignore
-                    self.planes[tag] = {"obj": bank, "asset": asset,
-                                        "position": position, "t0": time.time(),
-                                        "transition": transition, "bank": True}
-                    _dbg(f"show {tag} '{asset}' → bank plane {bank.name}")
-                    if transition in ("dissolve", "fade"):
-                        bank.color = (1, 1, 1, 0.0)
-                        info_t0 = time.time()
-                        self.planes[tag].update({"t0": info_t0})
-                    else:
-                        bank.color = (1, 1, 1, 1.0)
-                    return
-                except Exception as e:
-                    _dbg(f"show {tag} '{asset}' bank show failed ({e}) → palette")
             def _palette_plane():
                 # palette fallback: hide every bank sprite first
                 try:
