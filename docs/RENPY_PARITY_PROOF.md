@@ -130,3 +130,15 @@ wtype -k space  # advance
 - `/home/user/UPVN/blend/UPVN_Template.blend` — 137KB, regenerated with Ren'Py materials
 - `/home/user/UPVN_LearnToCodeRPG/` — converted project, light (image bank removed) to avoid OOM, but retains Ren'Py script
 - `/home/user/UPVN/screenshots/renpy_parity/*.png` — grim captures from real UPBGE sway pixman
+
+## LTC (Learn to Code RPG) evidence — 2026-09-17 (branch refactor/sprite-position-empties)
+- Converted freeCodeCamp/LearnToCodeRPG (Ren'Py 8.3.6 SDK) with
+  tools/renpy_convert.py: 34 .rpy files, 127 labels, 0 parse errors,
+  50 backgrounds + 299 sprites, adaptive UI from original gui.
+- Original `renpy.sh lint` clean: 1,344 dialogue blocks, 66 menus, 51 screens.
+- Headless trace (mode=full, compat=True) reproduces the opening beats
+  verbatim (interview scene, name assign, raccoons menu); python-variable
+  driven jump/interpolation remain the documented compat boundary.
+- BGE player OOMs on the 154 MB packed blend in a 2 GB sandbox (dmesg
+  evidence); template demo renders on sway+pixman with Pos_* empty staging.
+- Full numbers: sandbox report ext/LTC_COMPARE_REPORT.md (kept out of repo).
