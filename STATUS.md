@@ -1,4 +1,4 @@
-# Current Status — 2026-09-15 (M28: Audit Fixes & Reliability Hardening, v0.7.1)
+# Current Status — 2026-09-16 (M29: Theme-Aware Wizards & Ren'Py SDK Validation, v0.7.2)
 
 ## Branch refactor/sprite-position-empties (2026-09-17, in progress)
 - M29: visual-parity loop vs the Ren'Py tutorial on sway: static blend parity
@@ -35,6 +35,19 @@
   (vhappy vs happy), name hue a touch brighter (228,254,228 vs 200,255,200).
 
 ## Last completed
+- **M29 Theme-Aware Wizards & Ren'Py SDK Validation (2026-09-16, v0.7.2)**: usability workflow improvements with higher quality scene and less Python coding.
+  - **4 theme-aware wizards**: school (library), fantasy (dragons/magic), scifi (aliens/AI), mystery (detective/noir). Each theme: unique characters, variables, 3+ branching paths, 2 endings, HQ scene.
+  - **create_quick_wizard(theme=)** now uses the theme parameter (was hardcoded school).
+  - **tools/play_game.sh**: one-click sway+pixman launcher — auto-installs packages, swap, UPBGE, starts headless compositor, plays game. `--wizard`, `--script`, `--blend`, `--setup-only` modes.
+  - **tools/upvn_game_creator.py**: standalone CLI game creation (no bpy needed).
+  - **Ren'Py SDK validation**: downloaded Ren'Py 8.5.1 SDK, The Question parses and runs headlessly (92 events, 56 say, 2 menus, 6 scenes, 13 shows). gui.rpy and screens.rpy parse.
+  - **28 new tests**: 4 themes x 5 test types + game creator + Ren'Py SDK comparison. Total: 391 passed / 30 skipped.
+  - **Less coding**: theme picker generates full story with one click; no typing .rpy needed.
+  - **Higher quality scene**: each theme has unique characters/colors, camera zoom, transitions.
+  - Docs: CHANGELOG 0.7.2, expected_behavior.md for each wizard theme.
+  - Branch: dev-improve-usability (3 pushes).
+
+## Previous
 - **M28 Audit Fixes Phase 1+2 (2026-09-15, v0.7.1)**: full engine/UI/frontend/addon reliability hardening — no silent failures.
   - **vn_interpreter.py**: _execute_node loc-aware — say interpolate with _loc + interp_warnings collection, pause dur safe_eval _loc with logged fallback, jump/call expr eval with _loc, assign safe_exec_assign _loc + div-zero guard, if cond eval failure logged as False, menu cond safe_eval _loc filters false choices, raises ScriptRuntimeError if no choices after filtering, caption preserved, for loop safe_eval iterable _loc + non-iterable handled via list() try/except treating as empty with log, _bind_for_target validates tuple unpack with TypeError/length mismatch warning, python block errors include loc in compat message and _loc in strict, screen render errors propagated to event and logged, camera_zoom/move easing handled, anim target missing logged. run() menu choice validates isinstance int and bounds 0..len-1 before indexing (was only run_headless), raises ScriptRuntimeError on bad choice. _eval_expr signature (_loc) with label/index, _eval_screen_expr returns None in full tier with log instead of crash, _render_screen returns errors dict with traceback snippet and prints, _run_init_python logs line number i+1 in compat errors. strip_tags improved + parse_rich_tags preserved.
   - **parser.py**: bare except at camera_zoom dur parsing (lines 1549/1557) fixed to except ValueError (prevents swallowing KeyboardInterrupt/SystemExit), Character fallback "??" replaced with "Unnamed" + warnings.warn for visibility.
