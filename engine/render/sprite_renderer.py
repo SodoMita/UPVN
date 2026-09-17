@@ -33,6 +33,61 @@ SPRITE_PATH_PREFIXES = ("//", "//game/", "//../", "//../game/",
 def _dbg(msg: str):
     print(f"[SpriteRenderer] {msg}")
 
+def _renpy_place(obj, position):
+    """Ren'Py-true stage placement (parity with 00definitions.rpy transforms):
+    left  = xpos 0.0 xanchor 0.0 ypos 1.0 yanchor 1.0  (flush left,  bottom)
+    right = xpos 1.0 xanchor 1.0 ypos 1.0 yanchor 1.0  (flush right, bottom)
+    center= xpos 0.5 xanchor 0.5 ypos 1.0 yanchor 1.0  (centered,    bottom)
+    Sprites keep NATIVE pixel size relative to the project's virtual height
+    (gui resolution), so they fill the frame height exactly like the original
+    at ANY window aspect. far_* positions stay owned by the Pos_* empties
+    (UPVN extension, no Ren'Py equivalent). No-op when data is missing."""
+    try:
+        if position not in ("left", "center", "right"):
+            return
+        scene = bge.logic.getCurrentScene()
+        cam = getattr(scene, "active_camera", None)
+        ortho = float(getattr(cam, "ortho_scale", 15.0) or 15.0)
+        W = float(bge.render.getWindowWidth() or 1280)
+        H = float(bge.render.getWindowHeight() or 720)
+        vw, vh = ortho, ortho * H / W
+        iw = ih = None
+        bo = getattr(obj, "blenderObject", None)
+        nt = getattr(plane_material(obj), "node_tree", None)
+        if nt is not None:
+            tex = next((n for n in nt.nodes if n.type == "TEX_IMAGE"), None)
+            img = getattr(tex, "image", None) if tex is not None else None
+            if img is not None and img.size[0]:
+                iw, ih = float(img.size[0]), float(img.size[1])
+        proj_h = 720.0
+        try:
+            from .gui_config import get_gui_config
+            res = (get_gui_config() or {}).get("resolution") or None
+            if res and len(res) >= 2 and float(res[1]) > 0:
+                proj_h = float(res[1])
+        except Exception:
+            pass
+        if iw and ih:
+            h_w = vh * (ih / proj_h)
+            w_w = h_w * (iw / ih)
+            dims = getattr(bo, "dimensions", None) if bo is not None else None
+            if dims is not None and dims.x > 0 and dims.y > 0:
+                old = tuple(bo.scale)
+                bo.scale = (old[0] * w_w / dims.x, old[1] * h_w / dims.y, old[2])
+        else:
+            d = getattr(obj, "dimensions", (0, 0, 0))
+            w_w, h_w = float(d[0]), float(d[2] or d[1])
+        if position == "left":
+            cx = -vw / 2.0 + w_w / 2.0
+        elif position == "right":
+            cx = vw / 2.0 - w_w / 2.0
+        else:
+            cx = 0.0
+        obj.worldPosition = (cx, obj.worldPosition[1], -vh / 2.0 + h_w / 2.0)
+    except Exception as e:  # never break show() for placement parity
+        _dbg(f"renpy_place skipped ({position}): {e}")
+
+
 # transition durations (seconds)
 TRANS_DUR = {"dissolve": 0.4, "fade": 0.5, None: 0.0}
 
@@ -174,6 +229,7 @@ class SpriteRenderer:
                         old.visible = False
                     bank.visible = True
                     bank.worldPosition = pos_world  # type: ignore
+                    _renpy_place(bank, position)
                     # M29 parity: sprite PNGs carry alpha; without blended
                     # transparency the plane shows a black rectangle around
                     # the character (SDK tutorial comparison).
@@ -301,6 +357,7 @@ class SpriteRenderer:
                                         "transition": transition,
                                         "tint": (1.0, 1.0, 1.0)}
                     _dbg(f"show {tag} '{asset}' → material texture {tex_path}")
+                    _renpy_place(plane, position)
                     if transition in ("dissolve", "fade"):
                         plane.color = (1, 1, 1, 1.0)
                     return
@@ -326,6 +383,7 @@ class SpriteRenderer:
                         pass
                     self.planes[tag] = {"obj": plane, "tex": tex, "asset": asset, "position": position, "t0": time.time(), "transition": transition, "tint": tint}
                     _dbg(f"show {tag} '{asset}' → image {tex_path}")
+                    _renpy_place(plane, position)
                     # start alpha fade for dissolve
                     if transition in ("dissolve", "fade"):
                         plane.color = (1,1,1,0.0)
