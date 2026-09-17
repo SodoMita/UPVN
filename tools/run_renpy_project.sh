@@ -51,7 +51,9 @@ export DISPLAY="${DISPLAY:-:0}" LIBGL_ALWAYS_SOFTWARE=1 SDL_AUDIODRIVER=dummy LP
 rm -f "$HB"
 read -r -a WIN <<< "${UPVN_WIN:-1280 720 0 0}"
 info "player ${WIN[*]} for ${SECS}s"
-env UPVN_HEARTBEAT="$HB" UPVN_DEBUG_TEE=/tmp/upvn_run_debug.log \
+# -u WAYLAND_DISPLAY: UPBGE 0.53 prefers its native Wayland backend and
+# segfaults in wl_proxy_get_version() on headless sway (no seat) — force X11.
+env -u WAYLAND_DISPLAY UPVN_HEARTBEAT="$HB" UPVN_DEBUG_TEE=/tmp/upvn_run_debug.log \
     "$UPBGE/blenderplayer" -w "${WIN[0]}" "${WIN[1]}" "${WIN[2]}" "${WIN[3]}" \
     "$BLEND" >/tmp/upvn_run_player.log 2>&1 &
 PID=$!

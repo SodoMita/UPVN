@@ -1,5 +1,34 @@
 # Changelog
 
+## 2026-09-18 — No more Pillow mocks; template stage wiped
+
+**Removed (never re-add — see `screenshots/README.md`):**
+- `tools/generate_screenshots.py`, `tools/generate_screenshots_v2.py`,
+  `tools/make_placeholder_art.py`, `tools/probe_shot.py`,
+  `tools/ascii_shot.py`, `tools/parity_probe.py` — every Pillow *drawing* and
+  every Pillow *measurement* helper.
+- Every screenshot those tools produced (`screenshots/mock_pil_engine/` (was
+  `engine/`), `showcase/`, `showcase_polish/`, `multi_sprite_proof/`,
+  `test_run/`, `wizard_themes/`, `q_*`, `m09_*`, `m10_*`, `m13_*`, `long_m*`,
+  `final_*`, `history_demo*`, `template_overview`, `upvn_*preview`,
+  `test_arbitrary_save`, `00_*`…`03_*`). `screenshots/` now holds **only**
+  real `grim` captures from the UPBGE player or from Ren'Py itself.
+- `tests/test_multi_sprite_emotions.py`: the Pillow "proof" screenshot
+  generator (the logic assertions stay).
+
+They were mistaken for engine output more than once: the mocks painted a
+`UPVN · UPBGE 0.50` watermark, a `Scene: …` label, a `click / space →` hint
+and flat "fridge" sprites that do not exist in the engine at all.
+
+**Template (`blend/UPVN_Template.blend`):** deleted the fake classroom stage —
+32 objects (`Floor_classroom`, `Wall_*`, `Desk_00…10`, `Chair_00…03`,
+`Blackboard`, `BoardFrame_*`, `Window_*`, `Light_0/1/2`,
+`Char_Eileen_placeholder`, `Char_Sylvie_placeholder`, `Cube`). Kept the
+functional rig: `VNController`, `Camera`/`Camera_3D`/`Camera_UI`, `BG_Plane`,
+`Sprite_pool`, `Pos_*` empties, `marker_*` (for `show3d`), `preset_*` camera
+presets, `Light`, `SUN_Soft` and the whole UI layer. The stage will be
+authored from scratch.
+
 ## 0.7.2-dev+ — M30 tutorial parity (visual match vs original Ren'Py tutorial)
 
 - world_ui: hide stale choice planes on non-menu events; dialogue wrap 66;

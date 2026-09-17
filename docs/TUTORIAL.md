@@ -798,3 +798,114 @@ label end_scene:
 2. Click **Setup Scene** in the UPVN panel (first time only).
 3. Recolor elements if desired (see Part 8).
 4. Press **P** to play.
+
+---
+
+## Part 9 — Assembling a Scene and Connecting Sprites
+
+Part 8 lists the objects a scene needs. This part explains **how they are wired
+together at runtime**, how a `show` line finds its art, and how to replace the
+flat sprite planes with **real 3D characters, animations and camera moves** —
+the original goal of this engine.
+
+All coordinates below are read from `blend/UPVN_Template.blend`:
+
+```bash
+blender --background blend/UPVN_Template.blend --python-expr \
+  "import bpy;[print(o.type,o.name,tuple(round(v,2) for v in o.location)) for o in bpy.data.objects]"
+```
+
+### 9.1 The scene graph (what is actually in the template)
+
+| Object | Role |
+|---|---|
+| `VNController` (Empty) | owns the game properties; the Always→Python brick boots `bge_frontend.frontend` |
+| `BG_Plane` (9×9 plane at origin) | the 2D background — `scene bg uni` swaps its texture |
+| `Sprite_pool` (plane at `(0,-1,0)`, 1.8×3.2) | the pool the renderer clones **one plane per character tag** |
+| `Pos_left / Pos_right / Pos_center / Pos_far_left / Pos_far_right` (Empties, y=-1) | the **stage marks**: x = -3.5 / +3.5 / 0 / -6 / +6. `show … at left` snaps the tag's plane to the matching Empty |
+| `Floor_classroom`, `Wall_*`, `Desk_*`, `Chair_*`, `Blackboard`, `Window_*` | the 3D classroom stage (real geometry, lit by `SUN_Soft` + `Light`) |
+| `Char_Eileen_placeholder`, `Char_Sylvie_placeholder` | 3D stand-ins for characters — boxes, and yes, they look like fridges. They are placeholders, not art |
+| `Camera` (7.36,-6.93,4.96), `Camera_3D` (0,-6,2.5), `Camera_UI` (0,-10,0) | 3D perspective, 3D framing, and the orthographic camera that looks at the UI layer |
+| `Dialogue_Box`, `Speaker_Text`, `Dialogue_Text` | UI, one metre apart in Y so draw order never fights |
+| `choice_0…8` + `choice_N_text` | choice buttons and their labels |
+| `History_Box`, `History_Text`, `Rewind_Text` | backlog panel |
+
+Depth rule: the 3D stage lives around **y ≈ 0**, the UI layer at **y = -2 … -9**
+(behind the stage from the player camera's point of view). Keep new UI between
+-2 and -9 and 1 m apart, or it will z-fight or be hidden by the stage.
+
+### 9.2 How a script line becomes a picture
+
+```
+scene bg uni          →  SceneManager.set_background(): swap BG_Plane's texture
+show sylvie green normal at right
+                      →  SpriteRenderer: one plane per tag, tint from the
+                         character colour, plane snapped to Pos_right
+hide sylvie           →  the tag's plane is hidden (pool slot released)
+```
+
+* **Art lookup** — `VNState.resolve_asset("images", name)`; names come from
+  `image name = "path"` declarations and fall back to the bare name. Put files
+  in `assets/sprites/` (converted Ren'Py projects: `tools/renpy_convert.py`
+  copies everything named `bg*` to `assets/backgrounds/` and the rest to
+  `assets/sprites/`).
+* **Positions** — `left | center | right` (and the `far_` variants) map to the
+  `Pos_*` Empties; **move the Empty, not the plane** — the layout lives there.
+* **Emotions** — one asset per emotion (`sylvie green normal`, `sylvie green
+  smile`); showing the same tag with a different asset *replaces* it, it does
+  not spawn a second sprite.
+* **Missing art** — the renderer shows the tag's plane with a flat fallback
+  colour. Drop real PNGs into `assets/sprites/`. (Placeholders used to be
+  *generated*; every generator was deleted because the fake pictures were
+  repeatedly mistaken for engine output.)
+
+### 9.3 Swapping the 2D plane for a 3D character
+
+The 2D plane is one backend, not the design. To use real 3D characters:
+
+1. **Model/rig** the character, name the object `Char_<Tag>` (e.g.
+   `Char_Sylvie`), give it an armature and actions (`idle`, `wave`, `talk`).
+2. **Park it on a mark**: parent (or snap) `Char_Sylvie` to `Pos_right` — the
+   same Empty the 2D pipeline uses, so `show sylvie … at right` keeps working.
+3. **Drive it from the script** (see `COMMAND_SPEC.md` → *3D stubs*):
+
+   ```
+   stage classroom_3d = "stages/classroom.blend"
+   load_stage classroom_3d
+   show3d sylvie at marker_sylvie
+   anim sylvie wave
+   camera preset closeup_sylvie
+   camera_zoom 1.5 duration 2.0 ease
+   ```
+
+   These emit `load_stage`, `show3d`, `anim`, `camera_preset`, `camera_zoom`
+   events; `engine/render/stage_manager.py` executes them
+   (`spawn()`, `play_anim()`, `camera_preset()`, `camera_zoom()`), and they can
+   also be driven directly from Python — no DSL required.
+4. **Hide the 2D plane for that tag** (or delete `Sprite_pool`) once the 3D
+   character covers the same mark, otherwise you get a billboard standing in
+   front of the mesh.
+
+### 9.4 Moving the camera in the 3D world
+
+* `Camera` — free 3D camera; the stage is authored for it.
+* `Camera_3D` — fixed 3D framing shot.
+* `Camera_UI` — orthographic, points at the UI layer (y ≈ -2…-9); never move
+  it, the dialogue box geometry assumes it.
+* Script/API moves: `camera preset <name>` and `camera_zoom <factor> duration
+  <s> ease`, executed by `StageManager.camera_zoom()` (eased, testable — see
+  `tests/test_m26c_camera_zoom.py`).
+
+### 9.5 Verify with real renders — never with a mock
+
+```bash
+tools/sandbox_rebuild.sh                     # after a reset: sway, UPBGE, Ren'Py
+source /tmp/wl-upvn/env.sh
+tools/upvn_shot.sh blend/UPVN_Template.blend /tmp/say.png "dialogue text"
+```
+
+`screenshots/` now contains **only** real `grim` captures. Every Pillow
+mock-up generator and its output were deleted on 2026-09-18 — the mocks used to
+paint a `UPVN · UPBGE 0.50` watermark, a `Scene: …` label and a `click /
+space →` hint that **do not exist in the engine**, and they were repeatedly
+mistaken for real renders. Never reintroduce one (see `screenshots/README.md`).

@@ -6,7 +6,9 @@ We test:
 1. Headless VNState supports multiple shown_actors simultaneously
 2. Same tag with different emotion replaces asset (not duplicate)
 3. SpriteRenderer fix: bank planes don't hide other tags
-4. Generate screenshots via PIL as proof
+
+Evidence is captured from the real player (tools/upvn_shot.sh, grim),
+never from a Pillow mock — see screenshots/README.md.
 """
 
 import sys
@@ -183,93 +185,6 @@ def test_sprite_renderer_multi_tag_fix():
     del sys.modules['bge.logic']
 
 
-def test_generate_screenshots_proof():
-    """Generate PIL screenshots as proof that multi-sprite and emotions work."""
-
-    from PIL import Image, ImageDraw, ImageFont
-    import os
-
-    out_dir = ROOT / "screenshots" / "multi_sprite_proof"
-    out_dir.mkdir(parents=True, exist_ok=True)
-
-    # Create 3 screenshots proving multi-sprite and emotions
-    def make_image(filename, title, sprites):
-        """
-        sprites: list of (tag, emotion, position, color)
-        """
-        W, H = 1280, 720
-        img = Image.new("RGB", (W, H), (30, 40, 70))
-        draw = ImageDraw.Draw(img)
-
-        # Background
-        draw.rectangle([0, 0, W, H], fill=(40, 50, 80))
-        # Simple bg plane
-        draw.rectangle([0, 0, W, 500], fill=(60, 70, 100))
-
-        # Draw sprites as colored rectangles with labels
-        pos_x = {"far_left": 150, "left": 350, "center": 640, "right": 930, "far_right": 1130}
-        for tag, emotion, position, color in sprites:
-            x = pos_x.get(position, 640)
-            # Sprite rectangle
-            draw.rectangle([x-80, 100, x+80, 450], fill=color, outline=(255,255,255), width=2)
-            draw.text((x-40, 200), f"{tag}", fill=(255,255,255))
-            draw.text((x-40, 230), f"{emotion}", fill=(255,255,255))
-            draw.text((x-40, 260), f"@{position}", fill=(200,200,200))
-
-        # Dialogue box
-        draw.rectangle([0, 500, W, H], fill=(20, 25, 40))
-        draw.text((50, 520), title, fill=(180, 255, 180))
-
-        # Save
-        path = out_dir / filename
-        img.save(path)
-        print(f"Saved proof screenshot: {path}")
-        return path
-
-    # Proof 1: Two sprites at once
-    make_image("01_two_sprites.png", "Both Eileen and Sylvie visible — multi-sprite works!", [
-        ("eileen", "neutral", "left", (120, 180, 140)),
-        ("sylvie", "green smile", "right", (80, 140, 110)),
-    ])
-
-    # Proof 2: Emotion change
-    make_image("02_emotion_change.png", "Eileen emotion changed to happy — emotion works!", [
-        ("eileen", "happy", "left", (150, 200, 100)),
-        ("sylvie", "green smile", "right", (80, 140, 110)),
-    ])
-
-    # Proof 3: Second emotion + multiple
-    make_image("03_both_emotions.png", "Both changed emotions — multi-emotion works!", [
-        ("eileen", "happy", "left", (150, 200, 100)),
-        ("sylvie", "green normal", "right", (100, 160, 130)),
-    ])
-
-    # Proof 4: Three sprites
-    make_image("04_three_sprites.png", "Three sprites at once — far_left, center, far_right", [
-        ("eileen", "neutral", "far_left", (120, 180, 140)),
-        ("sylvie", "green smile", "center", (80, 140, 110)),
-        ("player", "neutral", "far_right", (140, 120, 120)),
-    ])
-
-    # Check files exist and <100Kb? They will be >100Kb maybe, but these are in screenshots/ which we now allow small only?
-    # Our test_no_big_images excludes screenshots/multi_sprite_proof via .gitignore? Let's add to gitignore if needed
-    # For proof, we keep them small by using low quality or ensure <100Kb via resize
-    # Actually PNG 1280x720 is ~ few Kb with solid colors, should be <100Kb
-    for f in out_dir.glob("*.png"):
-        size = f.stat().st_size
-        print(f"{f.name}: {size/1024:.1f}Kb")
-        # If >100Kb, compress
-        if size > 100*1024:
-            # Re-save with lower quality or as JPEG? Keep PNG but smaller
-            img = Image.open(f)
-            img = img.resize((640, 360))
-            img.save(f)
-            print(f"  resized to {f.stat().st_size/1024:.1f}Kb")
-
-    print("✓ screenshots proof generated")
-
-
 if __name__ == "__main__":
     test_multi_sprite_headless()
     test_sprite_renderer_multi_tag_fix()
-    test_generate_screenshots_proof()

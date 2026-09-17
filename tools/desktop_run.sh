@@ -14,6 +14,16 @@ SECS="${2:-25}"
 # env.sh from tools/desktop_sway.sh carries the real DISPLAY / Wayland socket;
 # falling back to :0 keeps the old behaviour when the file is missing.
 [ -f "$WL/env.sh" ] && . "$WL/env.sh"
+# UPBGE 0.53 (Blender 5.3) ships a NATIVE Wayland backend and picks it whenever
+# WAYLAND_DISPLAY is set.  On headless sway there is no seat/pointer, so the
+# player dies in GHOST_SystemWayland::window_cursor_grab_set ->
+# wl_proxy_get_version(NULL) before the first frame (SIGSEGV, empty log).
+# Force the X11/XWayland path, which is the one documented in
+# docs/SANDBOX_UPBGE.md.  Set UPVN_WAYLAND=1 to try native Wayland anyway.
+if [ "${UPVN_WAYLAND:-0}" != "1" ]; then
+    unset WAYLAND_DISPLAY
+    unset WAYLAND_SOCKET
+fi
 export DISPLAY="${DISPLAY:-:0}"
 export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-$WL}"
 export WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-$(ls "$WL" 2>/dev/null | grep '^wayland-' | grep -v lock | head -1)}"
