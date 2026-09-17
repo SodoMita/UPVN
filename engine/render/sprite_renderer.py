@@ -204,11 +204,18 @@ class SpriteRenderer:
                         break
             if bank is not None:
                 try:
-                    for ob in scene.objects:
-                        if str(ob.name).startswith("Sprite_img_"):
-                            ob.visible = (ob is bank)
+                    # FIX: multi-sprite — only hide previous plane for SAME tag, not all Sprite_img_
+                    # Previous code hid ALL Sprite_img_ planes, breaking multiple sprites
+                    prev_info = self.planes.get(tag)
+                    prev_obj = prev_info.get("obj") if prev_info else None
+                    if prev_obj is not None and prev_obj is not bank:
+                        try:
+                            prev_obj.visible = False
+                        except Exception:
+                            pass
+                    # Also hide the pool fallback plane for this tag if exists
                     old = scene.objects.get(f"{SPRITE_TAG_PREFIX}{tag}")
-                    if old is not None:
+                    if old is not None and old is not bank:
                         old.visible = False
                     bank.visible = True
                     bank.worldPosition = pos_world  # type: ignore
@@ -297,11 +304,16 @@ class SpriteRenderer:
                     except Exception:
                         continue
             def _palette_plane():
-                # palette fallback: hide every bank sprite first
+                # FIX: multi-sprite — only hide previous bank for SAME tag, not all
                 try:
-                    for ob in scene.objects:
-                        if str(ob.name).startswith("Sprite_img_"):
-                            ob.visible = False
+                    prev_info = self.planes.get(tag)
+                    prev_obj = prev_info.get("obj") if prev_info else None
+                    if prev_obj is not None and str(prev_obj.name).startswith("Sprite_img_"):
+                        try:
+                            if prev_obj is not plane:
+                                prev_obj.visible = False
+                        except Exception:
+                            pass
                 except Exception:
                     pass
                 plane.visible = True
@@ -326,11 +338,14 @@ class SpriteRenderer:
             if tex_path:
                 # (2) direct material node swap first (M26b): each Sprite_*
                 # plane owns MASprite_<pos>, so sprites texture independently
+                # FIX: don't hide all Sprite_img_ — only hide previous for same tag
                 if apply_material_image(plane_material(plane), tex_path):
                     try:
-                        for ob in scene.objects:
-                            if str(ob.name).startswith("Sprite_img_"):
-                                ob.visible = False
+                        prev_info = self.planes.get(tag)
+                        prev_obj = prev_info.get("obj") if prev_info else None
+                        if prev_obj is not None and str(prev_obj.name).startswith("Sprite_img_"):
+                            if prev_obj is not plane:
+                                prev_obj.visible = False
                     except Exception:
                         pass
                     plane.visible = True
