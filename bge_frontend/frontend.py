@@ -92,9 +92,33 @@ def resolve_script_path(logic, owner=None, extra_candidates=None):
             candidates.append(c)
     for c in candidates:
         try:
-            p = logic.expandPath(c)
+            if c.startswith("//"):
+                # M29 fix: bge.logic.expandPath('//…') can yield a relative
+                # path in the standalone player (bpy.data.filepath handling
+                # differs from the editor), which made every converted game
+                # fall through to the "script not found" screen. Anchor '//'
+                # to the .blend directory ourselves; where bpy is unavailable
+                # (unit tests) or filepath empty, keep expandPath behaviour.
+                base = ""
+                try:
+                    import bpy as _bpy
+                    bp = getattr(getattr(_bpy, "data", None), "filepath", "") or ""
+                    base = os.path.dirname(os.path.abspath(bp)) if bp else ""
+                except Exception:
+                    base = ""
+                p = (os.path.normpath(os.path.join(base, c[2:])) if base
+                     else logic.expandPath(c))
+            else:
+                p = logic.expandPath(c)
         except Exception:
             p = c
+        if not getattr(logic, "_upvn_resolve_logged", False):
+            try:
+                import bpy as _bpy_dbg
+                _bp = getattr(getattr(_bpy_dbg, "data", None), "filepath", "")
+            except Exception:
+                _bp = "<no bpy>"
+            print(f"[UPVN] resolve try {c!r} -> {p!r} (blend={_bp!r})")
         tried.append(p)
         try:
             # M26: directories are valid script sources — VNController.load()
@@ -104,6 +128,7 @@ def resolve_script_path(logic, owner=None, extra_candidates=None):
                 return os.path.abspath(p), tried
         except Exception:
             pass
+    logic._upvn_resolve_logged = True
     return None, tried
 
 
@@ -145,6 +170,63 @@ def _unregister_overlay():
                     pd.remove(fn)
                 except Exception:
                     pass
+    except Exception:
+        pass
+
+
+def _hide_idle_ui():
+    """Hide UI pieces that must not show until story state opens them.
+
+    M29 parity (SDK tutorial comparison): converted blends shipped with
+    choice planes, the backlog panel and stray default Cube/Light visible
+    from frame one, drawing slabs over the scene.
+    """
+    if not HAS_BGE:
+        return
+    try:
+        import bge as _bge
+        sc = _bge.logic.getCurrentScene()
+        for ob in sc.objects:
+            n = str(ob.name)
+            if (n.startswith("choice_")
+                    or n in ("History_Box", "History_Text", "Rewind_Text",
+                             "Cube", "Light")):
+                ob.visible = False
+    except Exception:
+        pass
+
+
+def _apply_gui_box_color():
+    """Tint Dialogue_Box from upvn_gui.json colors.dialogue_box (M29 parity).
+
+    The wired blend bakes the generic white MAUI; the sampled textbox color
+    (dark translucent for stock Ren'Py gui) only reaches the player via the
+    json, so apply it as object color at load.
+    """
+    if not HAS_BGE:
+        return
+    try:
+        import bge as _bge
+        import json
+        import os
+        logic = _bge.logic
+        root = os.path.abspath(logic.expandPath("//"))
+        for cand in (os.path.join(root, os.pardir, "game", "upvn_gui.json"),
+                     os.path.join(root, "game", "upvn_gui.json")):
+            p = os.path.abspath(cand)
+            if not os.path.isfile(p):
+                continue
+            col = ((json.load(open(p, encoding="utf-8")) or {})
+                   .get("colors", {}).get("dialogue_box"))
+            if col:
+                hx = col.lstrip("#")
+                rgba = [int(hx[i:i + 2], 16) / 255.0 for i in (0, 2, 4)]
+                rgba.append(int(hx[6:8], 16) / 255.0 if len(hx) >= 8 else 0.8)
+                sc = logic.getCurrentScene()
+                box = sc.objects.get("Dialogue_Box")
+                if box is not None:
+                    box.color = rgba
+            break
     except Exception:
         pass
 
@@ -565,6 +647,17 @@ def main(cont=None):
     import bge as _bge
     logic = _bge.logic
     ensure_engine_syspath()
+    # M29 parity: in the standalone player bge.logic.expandPath('//…') and
+    # every relative asset/gui lookup resolve against the process cwd, which
+    # is wherever the player was launched from. Anchor the process to the
+    # .blend directory once so relative paths behave like the editor's.
+    try:
+        import bpy as _bpy_cd
+        bp = getattr(getattr(_bpy_cd, "data", None), "filepath", "") or ""
+        if bp:
+            os.chdir(os.path.dirname(os.path.abspath(bp)))
+    except Exception:
+        pass
     _install_debug_tee(logic)
     _bind_camera()
     _show_mouse()
@@ -584,11 +677,21 @@ def main(cont=None):
         parse_mode = _prop(owner, "parse_mode") or "safe"
 
         def _load_with(mode):
-            ctrl = VNController(script_path=path, mode=mode)
+            # M29: converted/drop-in projects (full tier) run real Ren'Py
+            # python blocks that the safe sandbox cannot execute; compat mode
+            # collects those failures instead of aborting the whole load.
+            comp = _prop(owner, "compat")
+            if comp in (None, ""):
+                comp = (mode == "full")
+            elif isinstance(comp, str):
+                comp = comp.strip().lower() in ("1", "true", "yes")
+            ctrl = VNController(script_path=path, mode=mode, compat=bool(comp))
             ctrl.load()
             logic._upvn_ctrl = ctrl
             _unregister_overlay()
             _hide_idle_sprites(ctrl)
+            _hide_idle_ui()
+            _apply_gui_box_color()
             print(f"[UPVN] Loaded script {path} (mode={mode}, from "
                   f"{'VNController.script_path' if owner is not None else 'candidate'})")
 
@@ -631,6 +734,8 @@ def main(cont=None):
             logic._upvn_ctrl = ctrl
             _unregister_overlay()
             _hide_idle_sprites(ctrl)
+            _hide_idle_ui()
+            _apply_gui_box_color()
 
     # per-frame tick with dt
     global _last_time
