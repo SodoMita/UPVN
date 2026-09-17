@@ -40,6 +40,72 @@ def _dbg(msg: str):
 BACKGROUND_LAYER = 0
 TRANSITIONS = {"fade": 0.6, "dissolve": 0.45, None: 0.0}
 
+def _fit_bg_to_view(plane) -> None:
+    """Scale/center BG_Plane so it exactly covers the ortho viewport.
+
+    Ren'Py fills the screen with a screen-sized background; the template's
+    default plane size left letterbox bands around converted backgrounds
+    (M29 parity fix, SDK tutorial comparison).
+    """
+    try:
+        import bge
+        from mathutils import Vector
+        scene = bge.logic.getCurrentScene()
+        cam = (getattr(scene, "active_camera", None)
+               or getattr(scene, "camera", None))
+        if cam is None:
+            return
+        ortho = float(getattr(cam, "ortho_scale", 0.0) or 0.0)
+        if ortho <= 0.0:
+            return
+        w = float(bge.render.getWindowWidth() or 1280)
+        h = float(bge.render.getWindowHeight() or 720)
+        # KX_GameObject has no .dimensions — ask the bpy datablock.
+        # dimensions are LOCAL (rotation not applied): a plane rotated 90deg
+        # on X maps local X->world X and local Y->world Z, so use x/y.
+        bo = getattr(plane, "blenderObject", None)
+        dims = getattr(bo, "dimensions", None) if bo is not None else None
+        if dims is None or dims.x <= 0.0 or dims.y <= 0.0:
+            return
+        if bo is None:
+            return
+        old_scale = tuple(bo.scale)
+        bo.scale = (old_scale[0] * ortho / dims.x,
+                    old_scale[1] * (ortho * h / w) / dims.y,
+                    old_scale[2])
+        _dbg(f"bg fit: ortho={ortho} win={w}x{h} dims="
+             f"({dims.x:.2f},{dims.y:.2f}) scale {tuple(round(s, 2) for s in old_scale)}"
+             f" -> {tuple(round(s, 2) for s in bo.scale)}")
+        # recenter on the camera view axis at the plane's depth
+        fwd = cam.worldOrientation @ Vector((0.0, 0.0, -1.0))
+        if abs(fwd.y) > 1e-6:
+            t = (plane.worldPosition.y - cam.worldPosition.y) / fwd.y
+            center = cam.worldPosition + fwd * t
+            plane.worldPosition = (center.x, plane.worldPosition.y, center.z)
+    except Exception as e:  # pragma: no cover - render-only courtesy
+        _dbg(f"bg fit skipped ({e})")
+
+
+def _hide_template_stage(scene) -> None:
+    """Hide the template's demo 3D classroom once a real background applies.
+
+    Converted Ren'Py projects ship their own backgrounds; leaving the demo
+    stage meshes visible drew desks/boards over them (M29 parity fix).
+    """
+    try:
+        import bpy
+        for cname in ("VN_3DStage",):
+            coll = bpy.data.collections.get(cname)
+            if coll is None:
+                continue
+            for ob in coll.objects:
+                kob = scene.objects.get(ob.name)
+                if kob is not None:
+                    kob.visible = False
+    except Exception as e:  # pragma: no cover
+        _dbg(f"stage hide skipped ({e})")
+
+
 class SceneManager:
     def __init__(self, state: VNState):
         self.state = state
@@ -139,6 +205,8 @@ class SceneManager:
                         # keep the palette plane behind the bank
                     plane.visible = False
                     bank.visible = True
+                    _fit_bg_to_view(bank)
+                    _hide_template_stage(scene)
                     _dbg(f"stage '{asset}' → bank plane {bank.name}")
                     if transition in ("fade", "dissolve"):
                         bank["upvn_transition"] = transition
@@ -174,6 +242,8 @@ class SceneManager:
                     except Exception:
                         pass
                     plane.visible = True
+                    _fit_bg_to_view(plane)
+                    _hide_template_stage(scene)
                     _dbg(f"stage '{asset}' → material texture {tex_path}")
                     if transition in ("fade", "dissolve"):
                         plane["upvn_transition"] = transition

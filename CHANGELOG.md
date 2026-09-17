@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.7.2-dev+ — M30 tutorial parity (visual match vs original Ren'Py tutorial)
+
+- world_ui: hide stale choice planes on non-menu events; dialogue wrap 66;
+  runtime font emission tint (name who-color parity on llvmpipe).
+- frontend: dialogue_box '#ffffff' json fallback -> '#000000cc' at runtime.
+- apply_gui_to_blend: Sprite_img_* bank native sizing; DejaVu font swap for
+  missing packed fonts; Standard view transform; opaque premultiplied box.
+
 ## 0.7.2-dev — sprite position empties (branch refactor/sprite-position-empties)
 
 - Template/addon: five per-position Sprite_<pos> image planes replaced by
@@ -10,6 +18,18 @@
 - Addon: _set_runtime_prop falls back to STRING game props on UPBGE 0.50
   (ENUM type removed in Blender 5.0) — Setup Scene no longer crashes.
 - tools/update_template_materials.py: single tex-capable MASprite on the pool.
+- M29 visual parity vs Ren'Py tutorial (sway capture loop):
+  - tools/apply_gui_to_blend.py: static parity pass baking upvn_gui.json into
+    converted blends (player ignores runtime bpy edits): BGIMG banks cover the
+    ortho viewport (scale + z offset), Dialogue_Box rebuilt as opaque emission
+    in the sampled textbox tint, Speaker/Dialogue sizes px->world units.
+  - parser: Character(_('Eileen'), color="#c8ffc8") kept its color hex as name
+    (double-quote fallback hit the kwarg); kwargs are stripped first now.
+  - scene_manager: _fit_bg_to_view uses bpy object scale (KX_GameObject has no
+    .scale attribute in the UPBGE 0.50 player).
+  - Verified on sway: full-bleed washington bg, centred alpha'd Eileen, dark
+    textbox band with name+dialogue at Ren'Py-like sizes (/home/user
+    upvn_tut_shot.png vs tut_scene_renpy.png).
 - Contract inventory + tests updated (Pos_* empties, Sprite_pool).
 
 ## 0.7.1 — M28: Audit Fixes & Reliability Hardening (no silent failures)

@@ -92,9 +92,33 @@ def resolve_script_path(logic, owner=None, extra_candidates=None):
             candidates.append(c)
     for c in candidates:
         try:
-            p = logic.expandPath(c)
+            if c.startswith("//"):
+                # M29 fix: bge.logic.expandPath('//…') can yield a relative
+                # path in the standalone player (bpy.data.filepath handling
+                # differs from the editor), which made every converted game
+                # fall through to the "script not found" screen. Anchor '//'
+                # to the .blend directory ourselves; where bpy is unavailable
+                # (unit tests) or filepath empty, keep expandPath behaviour.
+                base = ""
+                try:
+                    import bpy as _bpy
+                    bp = getattr(getattr(_bpy, "data", None), "filepath", "") or ""
+                    base = os.path.dirname(os.path.abspath(bp)) if bp else ""
+                except Exception:
+                    base = ""
+                p = (os.path.normpath(os.path.join(base, c[2:])) if base
+                     else logic.expandPath(c))
+            else:
+                p = logic.expandPath(c)
         except Exception:
             p = c
+        if not getattr(logic, "_upvn_resolve_logged", False):
+            try:
+                import bpy as _bpy_dbg
+                _bp = getattr(getattr(_bpy_dbg, "data", None), "filepath", "")
+            except Exception:
+                _bp = "<no bpy>"
+            print(f"[UPVN] resolve try {c!r} -> {p!r} (blend={_bp!r})")
         tried.append(p)
         try:
             # M26: directories are valid script sources — VNController.load()
@@ -104,6 +128,7 @@ def resolve_script_path(logic, owner=None, extra_candidates=None):
                 return os.path.abspath(p), tried
         except Exception:
             pass
+    logic._upvn_resolve_logged = True
     return None, tried
 
 
@@ -145,6 +170,201 @@ def _unregister_overlay():
                     pd.remove(fn)
                 except Exception:
                     pass
+    except Exception:
+        pass
+
+
+def _hide_idle_ui():
+    """Hide UI pieces that must not show until story state opens them.
+
+    M29 parity (SDK tutorial comparison): converted blends shipped with
+    choice planes, the backlog panel and stray default Cube/Light visible
+    from frame one, drawing slabs over the scene.
+    """
+    if not HAS_BGE:
+        return
+    try:
+        import bge as _bge
+        sc = _bge.logic.getCurrentScene()
+        for ob in sc.objects:
+            n = str(ob.name)
+            if (n.startswith("choice_")
+                    or n in ("History_Box", "History_Text", "Rewind_Text",
+                             "Cube", "Light")):
+                ob.visible = False
+    except Exception:
+        pass
+
+
+def _gui_json_path():
+    """Locate upvn_gui.json next to/above the .blend (player-safe)."""
+    try:
+        import bpy as _bpy
+        import os
+        bp = getattr(getattr(_bpy, "data", None), "filepath", "") or ""
+        if not bp:
+            return None
+        bdir = os.path.dirname(os.path.abspath(bp))
+        for cand in (os.path.join(bdir, os.pardir, "game", "upvn_gui.json"),
+                     os.path.join(bdir, os.pardir, "assets", "gui",
+                                  "upvn_gui.json"),
+                     os.path.join(bdir, "game", "upvn_gui.json")):
+            p = os.path.abspath(cand)
+            if os.path.isfile(p):
+                return p
+    except Exception:
+        pass
+    return None
+
+
+def _apply_gui_par():
+    """Runtime parity layer (M29): make the player frame match the original.
+
+    Wired blends bake generic defaults (white textbox, template text sizes)
+    and converted projects can carry stray stage meshes; the per-project
+    upvn_gui.json only reaches runtime consumers partially, so apply the
+    visible deltas here: textbox tint, json text sizes, stray-mesh hide.
+    """
+    if not HAS_BGE:
+        return
+    try:
+        import bge as _bge
+        import json
+        logic = _bge.logic
+        sc = logic.getCurrentScene()
+        cfg = {}
+        jp = _gui_json_path()
+        if jp:
+            try:
+                cfg = json.load(open(jp, encoding="utf-8")) or {}
+            except Exception:
+                cfg = {}
+        colors = cfg.get("colors") or {}
+        col = colors.get("dialogue_box")
+        if col in (None, "#ffffff", "#ffffffff"):
+            # unsampled stock gui: gui/textbox.png is flat black 80%
+            # (pixel-sampled in the parity loop); without this fallback the
+            # white default would be re-tinted into MAUI's emission at
+            # runtime, overwriting the baked dark box
+            col = "#000000cc"
+        print(f"[UPVN] gui_par: json={jp} dialogue_box={col!r}")
+        _box = sc.objects.get("Dialogue_Box")
+        print("[UPVN] gui_par: box color now",
+              tuple(round(c, 2) for c in _box.color) if _box else None)
+        if col:
+            hx = col.lstrip("#")
+            rgba = [int(hx[i:i + 2], 16) / 255.0 for i in (0, 2, 4)]
+            rgba.append(int(hx[6:8], 16) / 255.0 if len(hx) >= 8 else 0.8)
+            box = sc.objects.get("Dialogue_Box")
+            if box is not None:
+                box.color = rgba
+                # MAUI is an emission-based unlit material: object color does
+                # not multiply it — tint the emission node directly.
+                try:
+                    bo = getattr(box, "blenderObject", None)
+                    mat = (bo.material_slots[0].material
+                           if bo is not None and bo.material_slots else None)
+                    nt = getattr(mat, "node_tree", None)
+                    if nt is not None:
+                        for n in nt.nodes:
+                            if n.type == "EMISSION":
+                                n.inputs["Color"].default_value = rgba
+                            if n.type == "BSDF_PRINCIPLED":
+                                n.inputs["Base Color"].default_value = rgba
+                                if "Alpha" in n.inputs:
+                                    n.inputs["Alpha"].default_value = rgba[3]
+                except Exception:
+                    pass
+        sizes = cfg.get("sizes") or {}
+        ortho = 15.0
+        cam = (getattr(sc, "active_camera", None)
+               or getattr(sc, "camera", None))
+        if cam is not None:
+            ortho = float(getattr(cam, "ortho_scale", 15.0) or 15.0)
+        w = float(_bge.render.getWindowWidth() or 1280)
+        h = float(_bge.render.getWindowHeight() or 720)
+        world_h = ortho * h / w
+        px2wu = world_h / h
+        for obj_name, key in (("Speaker_Text", "name"),
+                              ("Dialogue_Text", "text")):
+            px = sizes.get(key)
+            ob = sc.objects.get(obj_name)
+            if px and ob is not None:
+                try:
+                    ob.size = float(px) * px2wu
+                except Exception:
+                    pass
+        # --- project fonts (Ren'Py parity): the converted project ships the
+        # original's typefaces in assets/fonts|game/fonts (copied by
+        # renpy_convert.py) and names them in upvn_gui.json["fonts"]. The
+        # wired template blend only knows //fonts/Lato|Hack (absent), so
+        # without this the player renders tofu/DejaVu instead of the
+        # project's face. Load once per process; check_existing dedupes.
+        fonts = cfg.get("fonts") or {}
+        if fonts and not getattr(logic, "_upvn_fonts_applied", False):
+            logic._upvn_fonts_applied = True
+            import bpy as _bpy
+            bdir = os.path.dirname(os.path.abspath(
+                getattr(getattr(_bpy, "data", None), "filepath", "") or "."))
+
+            def _load_font(fname):
+                if not fname:
+                    return None
+                base = os.path.basename(str(fname))
+                for rel in (os.path.join("..", "assets", "fonts", base),
+                            os.path.join("..", "game", "fonts", base),
+                            os.path.join("fonts", base),
+                            os.path.join("..", "blend", "fonts", base)):
+                    p = os.path.abspath(os.path.join(bdir, rel))
+                    try:
+                        if os.path.isfile(p):
+                            return _bpy.data.fonts.load(p, check_existing=True)
+                    except Exception:
+                        continue
+                # projects that reference a face without shipping it (stock
+                # gui.rpy names DejaVuSans.ttf): fall back to system fonts via
+                # the same resolver the baker uses
+                try:
+                    from engine.render.contract import find_ui_font
+                    fn = find_ui_font(base)
+                    if fn:
+                        return _bpy.data.fonts.load(fn, check_existing=True)
+                except Exception:
+                    pass
+                return None
+
+            f_text = _load_font(fonts.get("text"))
+            f_name = _load_font(fonts.get("name")) or f_text
+            applied = []
+            for obj_name, fnt in (("Dialogue_Text", f_text),
+                                  ("Dialogue_Shadow", f_text),
+                                  ("Speaker_Text", f_name),
+                                  ("Speaker_Shadow", f_name)):
+                ob = sc.objects.get(obj_name)
+                if ob is None or fnt is None:
+                    continue
+                # player: KX_GameObject wraps the bpy object; the FONT curve
+                # lives on blenderObject.data (editor: ob.data directly)
+                for holder in (getattr(ob, "blenderObject", None), ob):
+                    cur = getattr(holder, "data", None)
+                    if cur is not None and hasattr(cur, "font"):
+                        try:
+                            cur.font = fnt
+                            applied.append(obj_name)
+                        except Exception:
+                            pass
+                        break
+            print(f"[UPVN] gui_par: project fonts text={fonts.get('text')!r} "
+                  f"name={fonts.get('name')!r} applied_to={applied}")
+        keep = ("BGIMG_", "Sprite_img_", "Sprite_", "Dialogue_Box",
+                "Speaker_Text", "Dialogue_Text", "choice_", "History_",
+                "Rewind_", "Camera", "VNController", "Pos_", "marker_",
+                "preset_")
+        for ob in sc.objects:
+            n = str(ob.name)
+            if ob.visible and getattr(ob, "type", "") == "MESH" and \
+                    not n.startswith(keep):
+                ob.visible = False
     except Exception:
         pass
 
@@ -565,6 +785,17 @@ def main(cont=None):
     import bge as _bge
     logic = _bge.logic
     ensure_engine_syspath()
+    # M29 parity: in the standalone player bge.logic.expandPath('//…') and
+    # every relative asset/gui lookup resolve against the process cwd, which
+    # is wherever the player was launched from. Anchor the process to the
+    # .blend directory once so relative paths behave like the editor's.
+    try:
+        import bpy as _bpy_cd
+        bp = getattr(getattr(_bpy_cd, "data", None), "filepath", "") or ""
+        if bp:
+            os.chdir(os.path.dirname(os.path.abspath(bp)))
+    except Exception:
+        pass
     _install_debug_tee(logic)
     _bind_camera()
     _show_mouse()
@@ -584,11 +815,21 @@ def main(cont=None):
         parse_mode = _prop(owner, "parse_mode") or "safe"
 
         def _load_with(mode):
-            ctrl = VNController(script_path=path, mode=mode)
+            # M29: converted/drop-in projects (full tier) run real Ren'Py
+            # python blocks that the safe sandbox cannot execute; compat mode
+            # collects those failures instead of aborting the whole load.
+            comp = _prop(owner, "compat")
+            if comp in (None, ""):
+                comp = (mode == "full")
+            elif isinstance(comp, str):
+                comp = comp.strip().lower() in ("1", "true", "yes")
+            ctrl = VNController(script_path=path, mode=mode, compat=bool(comp))
             ctrl.load()
             logic._upvn_ctrl = ctrl
             _unregister_overlay()
             _hide_idle_sprites(ctrl)
+            _hide_idle_ui()
+            _apply_gui_par()
             print(f"[UPVN] Loaded script {path} (mode={mode}, from "
                   f"{'VNController.script_path' if owner is not None else 'candidate'})")
 
@@ -631,6 +872,8 @@ def main(cont=None):
             logic._upvn_ctrl = ctrl
             _unregister_overlay()
             _hide_idle_sprites(ctrl)
+            _hide_idle_ui()
+            _apply_gui_par()
 
     # per-frame tick with dt
     global _last_time

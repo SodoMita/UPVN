@@ -1,6 +1,12 @@
 # Current Status — 2026-09-15 (M28: Audit Fixes & Reliability Hardening, v0.7.1)
 
 ## Branch refactor/sprite-position-empties (2026-09-17, in progress)
+- M29: visual-parity loop vs the Ren'Py tutorial on sway: static blend parity
+  pass (tools/apply_gui_to_blend.py), parser char-name kwarg fix, bg fit via
+  bpy scale; tutorial beat now matches tut_scene_renpy.png closely (full-bleed
+  bg, centred sprite, dark textbox, sized name/dialogue). Known residual gaps:
+  textbox is opaque (alpha blends render black on llvmpipe), name tint not
+  applied to the shared MAUI text emission.
 - Sprite stage layout moved from five per-position image planes (Sprite_<pos>)
   to Pos_<pos> empties + ONE Sprite_pool plane, duplicated per tag at runtime
   with single-user MASprite_<tag> material copies. Template blend migrated via
@@ -14,6 +20,19 @@
   where UPBGE+Pillow exist; CI skips it).
 - Env notes: UPBGE 0.50 at /opt/upbge, headless sway+pixman desktop via
   tools/desktop_sway.sh; Pillow installed into UPBGE's bundled python.
+
+- M30 tutorial parity loop (2026-09-17, continued): UPVN-converted Ren'Py
+  tutorial now matches the original in-game beat on sway (side-by-side
+  workspace file tut_side_by_side.png): full-bleed bg, full-height centred
+  sprite, dark textbox band, green who-color, white dialogue with identical
+  line breaks. Fixes: stale choice planes hidden on non-menu events; runtime
+  dialogue_box white-default fallback; Sprite_img_* bank sizing from packed
+  images; missing packed fonts swapped for DejaVu; Standard view transform
+  (AgX was desaturating vs Ren'Py raw sRGB); font emission tinted at runtime
+  (llvmpipe ObjectInfo.Color reads white); dialogue wrap 66 chars.
+  Residual gaps: textbox opaque (llvmpipe renders Transparent BSDF white),
+  no Ren'Py navigation row (screen-language UI), sprite pose pick can differ
+  (vhappy vs happy), name hue a touch brighter (228,254,228 vs 200,255,200).
 
 ## Last completed
 - **M28 Audit Fixes Phase 1+2 (2026-09-15, v0.7.1)**: full engine/UI/frontend/addon reliability hardening — no silent failures.
