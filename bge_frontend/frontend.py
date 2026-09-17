@@ -294,6 +294,68 @@ def _apply_gui_par():
                     ob.size = float(px) * px2wu
                 except Exception:
                     pass
+        # --- project fonts (Ren'Py parity): the converted project ships the
+        # original's typefaces in assets/fonts|game/fonts (copied by
+        # renpy_convert.py) and names them in upvn_gui.json["fonts"]. The
+        # wired template blend only knows //fonts/Lato|Hack (absent), so
+        # without this the player renders tofu/DejaVu instead of the
+        # project's face. Load once per process; check_existing dedupes.
+        fonts = cfg.get("fonts") or {}
+        if fonts and not getattr(logic, "_upvn_fonts_applied", False):
+            logic._upvn_fonts_applied = True
+            import bpy as _bpy
+            bdir = os.path.dirname(os.path.abspath(
+                getattr(getattr(_bpy, "data", None), "filepath", "") or "."))
+
+            def _load_font(fname):
+                if not fname:
+                    return None
+                base = os.path.basename(str(fname))
+                for rel in (os.path.join("..", "assets", "fonts", base),
+                            os.path.join("..", "game", "fonts", base),
+                            os.path.join("fonts", base),
+                            os.path.join("..", "blend", "fonts", base)):
+                    p = os.path.abspath(os.path.join(bdir, rel))
+                    try:
+                        if os.path.isfile(p):
+                            return _bpy.data.fonts.load(p, check_existing=True)
+                    except Exception:
+                        continue
+                # projects that reference a face without shipping it (stock
+                # gui.rpy names DejaVuSans.ttf): fall back to system fonts via
+                # the same resolver the baker uses
+                try:
+                    from engine.render.contract import find_ui_font
+                    fn = find_ui_font(base)
+                    if fn:
+                        return _bpy.data.fonts.load(fn, check_existing=True)
+                except Exception:
+                    pass
+                return None
+
+            f_text = _load_font(fonts.get("text"))
+            f_name = _load_font(fonts.get("name")) or f_text
+            applied = []
+            for obj_name, fnt in (("Dialogue_Text", f_text),
+                                  ("Dialogue_Shadow", f_text),
+                                  ("Speaker_Text", f_name),
+                                  ("Speaker_Shadow", f_name)):
+                ob = sc.objects.get(obj_name)
+                if ob is None or fnt is None:
+                    continue
+                # player: KX_GameObject wraps the bpy object; the FONT curve
+                # lives on blenderObject.data (editor: ob.data directly)
+                for holder in (getattr(ob, "blenderObject", None), ob):
+                    cur = getattr(holder, "data", None)
+                    if cur is not None and hasattr(cur, "font"):
+                        try:
+                            cur.font = fnt
+                            applied.append(obj_name)
+                        except Exception:
+                            pass
+                        break
+            print(f"[UPVN] gui_par: project fonts text={fonts.get('text')!r} "
+                  f"name={fonts.get('name')!r} applied_to={applied}")
         keep = ("BGIMG_", "Sprite_img_", "Sprite_", "Dialogue_Box",
                 "Speaker_Text", "Dialogue_Text", "choice_", "History_",
                 "Rewind_", "Camera", "VNController", "Pos_", "marker_",
