@@ -196,37 +196,113 @@ def _hide_idle_ui():
         pass
 
 
-def _apply_gui_box_color():
-    """Tint Dialogue_Box from upvn_gui.json colors.dialogue_box (M29 parity).
+def _gui_json_path():
+    """Locate upvn_gui.json next to/above the .blend (player-safe)."""
+    try:
+        import bpy as _bpy
+        import os
+        bp = getattr(getattr(_bpy, "data", None), "filepath", "") or ""
+        if not bp:
+            return None
+        bdir = os.path.dirname(os.path.abspath(bp))
+        for cand in (os.path.join(bdir, os.pardir, "game", "upvn_gui.json"),
+                     os.path.join(bdir, os.pardir, "assets", "gui",
+                                  "upvn_gui.json"),
+                     os.path.join(bdir, "game", "upvn_gui.json")):
+            p = os.path.abspath(cand)
+            if os.path.isfile(p):
+                return p
+    except Exception:
+        pass
+    return None
 
-    The wired blend bakes the generic white MAUI; the sampled textbox color
-    (dark translucent for stock Ren'Py gui) only reaches the player via the
-    json, so apply it as object color at load.
+
+def _apply_gui_par():
+    """Runtime parity layer (M29): make the player frame match the original.
+
+    Wired blends bake generic defaults (white textbox, template text sizes)
+    and converted projects can carry stray stage meshes; the per-project
+    upvn_gui.json only reaches runtime consumers partially, so apply the
+    visible deltas here: textbox tint, json text sizes, stray-mesh hide.
     """
     if not HAS_BGE:
         return
     try:
         import bge as _bge
         import json
-        import os
         logic = _bge.logic
-        root = os.path.abspath(logic.expandPath("//"))
-        for cand in (os.path.join(root, os.pardir, "game", "upvn_gui.json"),
-                     os.path.join(root, "game", "upvn_gui.json")):
-            p = os.path.abspath(cand)
-            if not os.path.isfile(p):
-                continue
-            col = ((json.load(open(p, encoding="utf-8")) or {})
-                   .get("colors", {}).get("dialogue_box"))
-            if col:
-                hx = col.lstrip("#")
-                rgba = [int(hx[i:i + 2], 16) / 255.0 for i in (0, 2, 4)]
-                rgba.append(int(hx[6:8], 16) / 255.0 if len(hx) >= 8 else 0.8)
-                sc = logic.getCurrentScene()
-                box = sc.objects.get("Dialogue_Box")
-                if box is not None:
-                    box.color = rgba
-            break
+        sc = logic.getCurrentScene()
+        cfg = {}
+        jp = _gui_json_path()
+        if jp:
+            try:
+                cfg = json.load(open(jp, encoding="utf-8")) or {}
+            except Exception:
+                cfg = {}
+        colors = cfg.get("colors") or {}
+        col = colors.get("dialogue_box")
+        if col in (None, "#ffffff", "#ffffffff"):
+            # unsampled stock gui: gui/textbox.png is flat black 80%
+            # (pixel-sampled in the parity loop); without this fallback the
+            # white default would be re-tinted into MAUI's emission at
+            # runtime, overwriting the baked dark box
+            col = "#000000cc"
+        print(f"[UPVN] gui_par: json={jp} dialogue_box={col!r}")
+        _box = sc.objects.get("Dialogue_Box")
+        print("[UPVN] gui_par: box color now",
+              tuple(round(c, 2) for c in _box.color) if _box else None)
+        if col:
+            hx = col.lstrip("#")
+            rgba = [int(hx[i:i + 2], 16) / 255.0 for i in (0, 2, 4)]
+            rgba.append(int(hx[6:8], 16) / 255.0 if len(hx) >= 8 else 0.8)
+            box = sc.objects.get("Dialogue_Box")
+            if box is not None:
+                box.color = rgba
+                # MAUI is an emission-based unlit material: object color does
+                # not multiply it — tint the emission node directly.
+                try:
+                    bo = getattr(box, "blenderObject", None)
+                    mat = (bo.material_slots[0].material
+                           if bo is not None and bo.material_slots else None)
+                    nt = getattr(mat, "node_tree", None)
+                    if nt is not None:
+                        for n in nt.nodes:
+                            if n.type == "EMISSION":
+                                n.inputs["Color"].default_value = rgba
+                            if n.type == "BSDF_PRINCIPLED":
+                                n.inputs["Base Color"].default_value = rgba
+                                if "Alpha" in n.inputs:
+                                    n.inputs["Alpha"].default_value = rgba[3]
+                except Exception:
+                    pass
+        sizes = cfg.get("sizes") or {}
+        ortho = 15.0
+        cam = (getattr(sc, "active_camera", None)
+               or getattr(sc, "camera", None))
+        if cam is not None:
+            ortho = float(getattr(cam, "ortho_scale", 15.0) or 15.0)
+        w = float(_bge.render.getWindowWidth() or 1280)
+        h = float(_bge.render.getWindowHeight() or 720)
+        world_h = ortho * h / w
+        px2wu = world_h / h
+        for obj_name, key in (("Speaker_Text", "name"),
+                              ("Dialogue_Text", "text")):
+            px = sizes.get(key)
+            ob = sc.objects.get(obj_name)
+            if px and ob is not None:
+                try:
+                    ob.size = float(px) * px2wu
+                except Exception:
+                    pass
+        keep = ("BGIMG_", "Sprite_img_", "Sprite_", "Dialogue_Box",
+                "Speaker_Text", "Dialogue_Text", "choice_", "History_",
+                "Rewind_", "Camera", "VNController", "Pos_", "marker_",
+                "preset_")
+        for ob in sc.objects:
+            n = str(ob.name)
+            if ob.visible and getattr(ob, "type", "") == "MESH" and \
+                    not n.startswith(keep):
+                ob.visible = False
     except Exception:
         pass
 
@@ -691,7 +767,7 @@ def main(cont=None):
             _unregister_overlay()
             _hide_idle_sprites(ctrl)
             _hide_idle_ui()
-            _apply_gui_box_color()
+            _apply_gui_par()
             print(f"[UPVN] Loaded script {path} (mode={mode}, from "
                   f"{'VNController.script_path' if owner is not None else 'candidate'})")
 
@@ -735,7 +811,7 @@ def main(cont=None):
             _unregister_overlay()
             _hide_idle_sprites(ctrl)
             _hide_idle_ui()
-            _apply_gui_box_color()
+            _apply_gui_par()
 
     # per-frame tick with dt
     global _last_time
