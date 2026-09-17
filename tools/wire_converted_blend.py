@@ -47,13 +47,20 @@ def _plane(name, size=10.0):
     return ob
 
 
-def _image_material(name, img_path):
+def _image_material(name, img_path, alpha: bool = False):
+    """Unlit image material.
+
+    `alpha=True` (character sprites, any PNG with transparency) routes the
+    image's Alpha into the surface and switches the material to alpha
+    blending.  Without it a character PNG renders as a solid quad — the field
+    report was "no sprite at all", because the transparent area was drawn
+    opaque over the background.  Backgrounds stay OPAQUE (full-frame JPEGs).
+    """
     mat = bpy.data.materials.new(name)
     mat.use_nodes = True
     nt = mat.node_tree
     nt.nodes.clear()
     out = nt.nodes.new("ShaderNodeOutputMaterial")
-    em = nt.nodes.new("ShaderNodeEmission")
     tex = nt.nodes.new("ShaderNodeTexImage")
     img = bpy.data.images.load(str(img_path))
     try:
@@ -61,14 +68,30 @@ def _image_material(name, img_path):
     except Exception:
         pass
     tex.image = img
+    pr = nt.nodes.new("ShaderNodeBsdfPrincipled")
     try:
-        em.inputs["Strength"].default_value = 1.0
+        nt.links.new(tex.outputs["Color"], pr.inputs["Base Color"])
     except Exception:
         pass
-    nt.links.new(tex.outputs["Color"], em.inputs["Color"])
-    nt.links.new(em.outputs[0], out.inputs[0])
+    # unlit: emission carries the pixels, so neither lamp nor Cycles/EEVEE
+    # sampling can dim or noise the art
+    for cname in ("Emission Color", "Emission Colour"):
+        if cname in pr.inputs:
+            try:
+                nt.links.new(tex.outputs["Color"], pr.inputs[cname])
+            except Exception:
+                pass
+            break
+    if "Emission Strength" in pr.inputs:
+        pr.inputs["Emission Strength"].default_value = 1.0
+    if alpha:
+        try:
+            nt.links.new(tex.outputs["Alpha"], pr.inputs["Alpha"])
+        except Exception:
+            pass
+    nt.links.new(pr.outputs["BSDF"], out.inputs["Surface"])
     try:
-        mat.blend_method = "OPAQUE"
+        mat.blend_method = "BLEND" if alpha else "OPAQUE"
         mat.shadow_method = "NONE"
         mat.use_backface_culling = False
     except Exception:
@@ -133,7 +156,7 @@ def main():
                 continue
             ob = _plane(name, size=10.0)
             ob.location = (0.0, 0.0, 0.0)
-            ob.data.materials.append(_image_material(name + "_mat", f))
+            ob.data.materials.append(_image_material(name + "_mat", f, alpha=False))
             ob.game.physics_type = "STATIC"
             ob.hide_render = False
             scene.collection.objects.link(ob)
@@ -150,7 +173,7 @@ def main():
             ob = _plane(name, size=4.0)
             ob.scale = (1.5, 2.4, 1.0)
             ob.location = (0.0, -0.15, 0.0)
-            ob.data.materials.append(_image_material(name + "_mat", f))
+            ob.data.materials.append(_image_material(name + "_mat", f, alpha=True))
             ob.game.physics_type = "STATIC"
             scene.collection.objects.link(ob)
             n_sp += 1

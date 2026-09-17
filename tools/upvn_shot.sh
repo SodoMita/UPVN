@@ -61,7 +61,8 @@ while [ "$elapsed" -lt "$MAXS" ]; do
     if [ -z "$MATCH" ] || printf '%s' "$line" | grep -qi -- "$MATCH"; then
         sleep 2; shoot
         echo "MATCH after ${elapsed}s: $line"
-        echo "shot=$OUT"
+        python3 -c "import json;d=json.load(open('/tmp/upvn_shot_hb.json'));print('PAYLOAD:',repr((d.get('dialogue') or ''))[:70]);print('FONT_BODY:',repr(d.get('font_body'))[:70]);print('FONT_VIS:',d.get('font_body_vis'),'DIM:',d.get('font_body_dim'));print('STAGE:',d.get('stage'))"
+echo "shot=$OUT"
         kill -9 $PID 2>/dev/null
         exit 0
     fi

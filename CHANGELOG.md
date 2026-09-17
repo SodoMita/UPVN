@@ -1,5 +1,27 @@
 # Changelog
 
+## 2026-09-18 — text/sprite sync + sprite transparency (the two field bugs)
+
+- `engine/ui/world_ui.py`: `set_font_text()` rewritten. It now tries every path a
+  UPBGE FONT object exposes (`obj.text`, `obj.Text`, `blenderObject.data.body`,
+  `obj.data.body`, `obj["Text"]`) and **verifies each write by reading it back**,
+  returning True only on a match. The old code returned True after the first
+  assignment that did not raise — a silent no-op left the previous dialogue line
+  on screen while the heartbeat already reported the new one ("one line behind").
+  Added `font_text()` read-back helper; removed the `_upvn_text` cache that could
+  mask a failed write.
+- `bge_frontend/frontend.py`: heartbeat now reports `stage` — every `Sprite_*`,
+  `BGIMG_*` and `BG_Plane` object with visibility, world position and scale, so a
+  sprite that is "shown" but invisible/off-camera is diagnosable from the JSON.
+- `tools/wire_converted_blend.py`: character sprite materials now link the PNG's
+  Alpha into the surface and use `blend_method = "BLEND"`; backgrounds stay
+  OPAQUE. Previously every image bank material was an opaque Emission shader, so a
+  character's transparent area painted over the background (field report: "no
+  sprite"). Sprites also get emission-driven unlit pixels.
+- `engine/render/sprite_renderer.py`: `_ensure_sprite_alpha()` no longer raises
+  `'Material' object has no attribute 'upvn_alpha_fixed'` on runtime material
+  proxies — the "fixed" marker is tracked by `id()` in a module set.
+
 ## 2026-09-18 — No more Pillow mocks; template stage wiped
 
 **Removed (never re-add — see `screenshots/README.md`):**

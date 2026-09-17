@@ -74,6 +74,10 @@ def _renpy_place(obj, position):
 # transition durations (seconds)
 TRANS_DUR = {"dissolve": 0.4, "fade": 0.5, None: 0.0}
 
+_ALPHA_FIXED: set = set()   # id() of materials already rewired (runtime
+                            # material proxies reject arbitrary attributes)
+
+
 def _ensure_sprite_alpha(mat) -> None:
     """Wire TexImage.Alpha into the surface so sprite PNGs keep transparency.
 
@@ -83,7 +87,7 @@ def _ensure_sprite_alpha(mat) -> None:
     Principled(Emission Color=Color, Emission Strength=1, Alpha=Alpha)
     with blended surface rendering.
     """
-    if mat is None or getattr(mat, "upvn_alpha_fixed", False):
+    if mat is None or id(mat) in _ALPHA_FIXED:
         return
     try:
         nt = getattr(mat, "node_tree", None)
@@ -114,7 +118,10 @@ def _ensure_sprite_alpha(mat) -> None:
             mat.surface_render_method = "BLENDED"
         except Exception:
             pass
-        mat.upvn_alpha_fixed = True
+        try:
+            _ALPHA_FIXED.add(id(mat))
+        except Exception:
+            pass
     except Exception as e:  # pragma: no cover
         _dbg(f"sprite alpha fix skipped ({e})")
 

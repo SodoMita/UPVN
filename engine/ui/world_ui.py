@@ -321,43 +321,72 @@ def parse_hex_color(value):
         return None
 
 
-def set_font_text(obj: Any, text: str):
+def font_text(obj: Any) -> Optional[str]:
+    """Read back what a FONT object will actually draw (None if unreadable).
+
+    UPBGE builds disagree about where a KX_FontObject keeps its string:
+    0.50 exposes nothing usable (BUG-004) and only the *Blender* data-block
+    works, while 0.5x also accepts `obj.text`.  Writing to a path that does
+    not silently no-ops is the whole bug behind "the dialogue is one line
+    behind", so every write is verified with this read-back.
+    """
     if obj is None:
         return None
-    bo = getattr(obj, "blenderObject", None)
-    if bo is not None:
-        data = getattr(bo, "data", None)
-        if data is not None and hasattr(data, "body"):
-            if getattr(data, "body", None) == text:
-                return True
-            try:
-                data.body = text
-                return True
-            except Exception:
-                pass
-    _cached = getattr(obj, "_upvn_text", None)
-    if _cached is not None and _cached == text:
-        return True
     for attr in ("text", "Text"):
         try:
-            setattr(obj, attr, text)
+            v = getattr(obj, attr, None)
+            if isinstance(v, str):
+                return v
+        except Exception:
+            pass
+    for src in (getattr(obj, "blenderObject", None), obj):
+        data = getattr(src, "data", None)
+        if data is not None:
             try:
-                obj._upvn_text = text
+                v = getattr(data, "body", None)
+                if isinstance(v, str):
+                    return v
+            except Exception:
+                pass
+    return None
+
+
+def set_font_text(obj: Any, text: str):
+    """Set a FONT object's string, trying every known path **and verifying**.
+
+    Returns True only when the read-back equals `text`, so a silent no-op can
+    never leave the screen showing the previous line while the heartbeat
+    already reports the new one.
+    """
+    if obj is None:
+        return None
+    text = "" if text is None else str(text)
+    if font_text(obj) == text:
+        return True
+    bo = getattr(obj, "blenderObject", None)
+    paths = [("obj.text", lambda: setattr(obj, "text", text)),
+             ("obj.Text", lambda: setattr(obj, "Text", text))]
+    if getattr(bo, "data", None) is not None:
+        paths.append(("blenderObject.data.body",
+                      lambda: setattr(bo.data, "body", text)))
+    if getattr(obj, "data", None) is not None:
+        paths.append(("obj.data.body", lambda: setattr(obj.data, "body", text)))
+    paths.append(("obj['Text']", lambda: obj.__setitem__("Text", text)))
+
+    for name, setter in paths:
+        try:
+            setter()
+        except Exception:
+            continue
+        if font_text(obj) == text:
+            try:
+                obj["_upvn_font_path"] = name
             except Exception:
                 pass
             return True
-        except Exception:
-            pass
     try:
-        obj["Text"] = text
-        return True
-    except Exception:
-        pass
-    try:
-        data = getattr(obj, "data", None)
-        if data is not None and hasattr(data, "body"):
-            data.body = text
-            return True
+        print(f"[world_ui] font text did not apply "
+              f"(read-back={font_text(obj)!r}, wanted={text[:40]!r})")
     except Exception:
         pass
     return False

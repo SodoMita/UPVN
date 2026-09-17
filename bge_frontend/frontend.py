@@ -1382,6 +1382,27 @@ def main(cont=None):
                         pass
             except Exception:
                 pass
+            # Stage evidence: which background/sprite planes are actually
+            # visible and where. A sprite that is "shown" but off-camera or
+            # hidden again by the idle-sprite reconciler has to be visible
+            # here, otherwise the field report is "no sprite, no error".
+            try:
+                _scs = logic.getCurrentScene()
+                _stage = []
+                for _o in _scs.objects:
+                    _n2 = str(getattr(_o, "name", ""))
+                    if not (_n2.startswith("Sprite_") or _n2.startswith("BGIMG_")
+                            or _n2.startswith("BG_Plane")):
+                        continue
+                    _stage.append({
+                        "name": _n2,
+                        "vis": bool(getattr(_o, "visible", False)),
+                        "pos": [round(float(v), 2) for v in getattr(_o, "worldPosition", (0, 0, 0))],
+                        "scale": [round(float(v), 2) for v in getattr(_o, "worldScale", (1, 1, 1))],
+                    })
+                _hb_data["stage"] = _stage
+            except Exception:
+                pass
             with open(_hb, "w") as _f:
                 _f.write(_json.dumps(_hb_data))
     except Exception:
