@@ -70,10 +70,10 @@ def _load_adaptive_config():
         choice = config.get("choice", {})
         
         # World positions from parsed gui.rpy — generic fallback, not LTCR specific
-        dialogue_loc = world.get("dialogue_location", [0.0, -0.4, -3.496])
+        dialogue_loc = world.get("dialogue_location", [0.0, -2.0, -3.496])
         dialogue_scale = world.get("dialogue_scale", [7.5, 0.722, 1.0])
-        speaker_loc = world.get("speaker_location", [-5.625, -0.55, -2.873])
-        dialogue_text_loc = world.get("dialogue_text_location", [-5.406, -0.55, -3.264])
+        speaker_loc = world.get("speaker_location", [-5.625, -3.0, -2.873])
+        dialogue_text_loc = world.get("dialogue_text_location", [-5.406, -4.0, -3.264])
         choice_width = world.get("choice_width_factor", 0.411)
         choice_height = world.get("choice_height_factor", 0.096)
         choice_spacing = world.get("choice_spacing_em", 0.252)
@@ -157,10 +157,10 @@ def _load_adaptive_config():
         # These are Ren'Py's default template values — NOT hardcoded LTCR
         print(f"[contract] adaptive config load failed: {e}, using generic defaults")
         return {
-            "dialogue_location": (0.0, -0.4, -3.496),
+            "dialogue_location": (0.0, -2.0, -3.496),
             "dialogue_scale": (7.5, 0.722, 1.0),
-            "speaker_location": (-5.625, -0.55, -2.873),
-            "dialogue_text_location": (-5.406, -0.55, -3.264),
+            "speaker_location": (-5.625, -3.0, -2.873),
+            "dialogue_text_location": (-5.406, -4.0, -3.264),
             "choice_width_factor": 0.411,
             "choice_height_factor": 0.096,
             "choice_spacing_em": 0.252,
@@ -364,11 +364,11 @@ def style_font_curve(data, bold: bool = False, shear: float | None = None, font_
 
 # Rest of contract (unchanged)
 POSITIONS = {
-    "far_left": (-6.0, -0.15, 0.0),
-    "left": (-3.5, -0.15, 0.0),
-    "center": (0.0, -0.15, 0.0),
-    "right": (3.5, -0.15, 0.0),
-    "far_right": (6.0, -0.15, 0.0),
+    "far_left": (-6.0, -1.0, 0.0),
+    "left": (-3.5, -1.0, 0.0),
+    "center": (0.0, -1.0, 0.0),
+    "right": (3.5, -1.0, 0.0),
+    "far_right": (6.0, -1.0, 0.0),
 }
 
 COLLECTIONS = ("VN_Backgrounds", "VN_Characters", "VN_UI", "VN_Effects", "VN_3DStage")

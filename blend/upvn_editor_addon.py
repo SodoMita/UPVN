@@ -1192,6 +1192,7 @@ if HAS_BPY:
 # It bootstraps sys.path so the engine is importable no matter where this .blend
 # lives, then ticks the frontend. You normally never need to edit this.
 import bge, sys, os
+# __UPVN_SETUP_ROOTS__
 
 _cont = bge.logic.getCurrentController()
 _owner = _cont.owner
@@ -1619,7 +1620,7 @@ except Exception:
             CAMERA_3D_LOCATION = (0.0, -6.0, 2.5)
             CAMERA_3D_ROTATION = (1.15, 0.0, 0.0)
             PLANE_ROTATION = (1.5707963267948966, 0.0, 0.0)
-            DIALOGUE_LOCATION = (0.0, -0.4, -3.2)
+            DIALOGUE_LOCATION = (0.0, -2.0, -3.2)
             DIALOGUE_SCALE = (4.0, 1.2, 1.0)
             SPRITE_SCALE = (1.5, 2.4, 1.0)
 
@@ -1690,7 +1691,7 @@ except Exception:
             SPRITE_POOL, POSITION_EMPTY_PREFIX = "Sprite_pool", "Pos_"
             SPRITE_POSITIONS = ("far_left", "left", "center", "right", "far_right")
             POSITIONS = {p: ({"far_left": -5.0, "left": -3.0, "center": 0.0,
-                              "right": 3.0, "far_right": 5.0}[p], -0.15, 0.0)
+                              "right": 3.0, "far_right": 5.0}[p], -1.0, 0.0)
                          for p in SPRITE_POSITIONS}
 
         def _ensure_material(_b, name, color, tex_capable=False, hq=False, renpy_parity=False):
@@ -1781,8 +1782,8 @@ except Exception:
                                                 CHOICE_COUNT, CHOICE_PREFIX)
         except Exception:
             SPEAKER_TEXT, DIALOGUE_TEXT = "Speaker_Text", "Dialogue_Text"
-            SPEAKER_LOCATION = (-3.6, -0.55, -2.55)
-            DIALOGUE_TEXT_LOCATION = (-3.6, -0.55, -3.15)
+            SPEAKER_LOCATION = (-3.6, -3.0, -2.55)
+            DIALOGUE_TEXT_LOCATION = (-3.6, -4.0, -3.15)
             CHOICE_COUNT, CHOICE_PREFIX = 9, "choice_"
 
         def _ensure_font(name, loc, size=0.32, bold=False, shear=None,
@@ -1902,12 +1903,12 @@ except Exception:
                                    color=(0.02, 0.03, 0.08, 1.0), rot=PLANE_ROTATION)
             hb = _get_or_create(scene, HISTORY_PLANE, _mk_hist)
             _link_ob(scene, hb, collections["VN_UI"])
-            _apply_2d_layout(hb, (0.0, -0.45, 0.9), (6.6, 3.0, 1.0))
+            _apply_2d_layout(hb, (0.0, -7.0, 0.9), (6.6, 3.0, 1.0))
             _single_material(hb, mat_ui)
             _tint(hb, (0.02, 0.03, 0.08, 1.0))
             _static_ghost(hb)
-        _ensure_font(HISTORY_TEXT, (-6.0, -0.5, 3.4), size=0.20)
-        _ensure_font(REWIND_TEXT, (-6.0, -0.5, 4.4), size=0.17, shear=0.18)
+        _ensure_font(HISTORY_TEXT, (-6.0, -8.0, 3.4), size=0.20)
+        _ensure_font(REWIND_TEXT, (-6.0, -9.0, 4.4), size=0.17, shear=0.18)
 
         # M28 Adaptive choice layout — uses config if present, else LearnToCodeRPG parity
         # Ren'Py: gui.choice_button_width=1185 (61.7% screen), height 52px, ypos 405 centered, spacing 33px
@@ -1953,7 +1954,7 @@ except Exception:
                 z = _choice_base_z - i * (0.66 if _choice_spacing==0.38 else _choice_spacing * 1.736)
             except Exception:
                 z = 1.05 - i * 0.66
-            loc = (0.0, -0.5, z)
+            loc = (0.0, -5.0, z)
             cname = f"{CHOICE_PREFIX}{i}"
             try:
                 def _mk(cname=cname):
@@ -1966,13 +1967,13 @@ except Exception:
                     _w_scale = _choice_width_factor * 7.5
                 except Exception:
                     _w_scale = 4.63
-                _apply_2d_layout(ch, loc, (_w_scale, 0.36, 1.0))
+                _apply_2d_layout(ch, loc, (_w_scale, 0.22, 1.0))
                 _single_material(ch, mat_choice)
                 _tint(ch, CHOICE_IDLE_COLOR)
                 _static_ghost(ch)
                 tname = cname + "_text"
                 # Text centered (Ren'Py xalign 0.5) at -2.1 offset to center 1185 width
-                _ensure_font(tname, (loc[0] - 2.1, loc[1] - 0.05, loc[2] + 0.08),
+                _ensure_font(tname, (loc[0] - 2.1, -6.0, loc[2] + 0.08),
                              size=0.22, bold=False,
                              shadow=cname + "_shadow", renpy_color=CHOICE_TEXT_IDLE, font_file=UI_FONT_INTERFACE)
             except Exception as exc:
@@ -2111,7 +2112,18 @@ except Exception:
             if launcher is None:
                 launcher = _b.data.texts.new("upvn_launcher")
             launcher.clear()
-            launcher.write(_UPVN_LAUNCHER_TEXT)
+            _lt = _UPVN_LAUNCHER_TEXT
+            try:
+                _here = os.path.dirname(os.path.abspath(__file__))
+                _roots = [r for r in (os.path.dirname(_here), _here)
+                          if os.path.isdir(os.path.join(r, "bge_frontend"))]
+                _ins = ("for _r in %r:\n"
+                        "    if _r and _r not in sys.path:\n"
+                        "        sys.path.insert(0, _r)\n" % (_roots,))
+                _lt = _lt.replace("# __UPVN_SETUP_ROOTS__", _ins)
+            except Exception:
+                _lt = _lt.replace("# __UPVN_SETUP_ROOTS__", "")
+            launcher.write(_lt)
             try:
                 sensor_names = {s.name for s in ctrl.game.sensors}
                 controller_names = {c.name for c in ctrl.game.controllers}
