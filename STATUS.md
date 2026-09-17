@@ -21,6 +21,19 @@
 - Env notes: UPBGE 0.50 at /opt/upbge, headless sway+pixman desktop via
   tools/desktop_sway.sh; Pillow installed into UPBGE's bundled python.
 
+- M30 tutorial parity loop (2026-09-17, continued): UPVN-converted Ren'Py
+  tutorial now matches the original in-game beat on sway (side-by-side
+  workspace file tut_side_by_side.png): full-bleed bg, full-height centred
+  sprite, dark textbox band, green who-color, white dialogue with identical
+  line breaks. Fixes: stale choice planes hidden on non-menu events; runtime
+  dialogue_box white-default fallback; Sprite_img_* bank sizing from packed
+  images; missing packed fonts swapped for DejaVu; Standard view transform
+  (AgX was desaturating vs Ren'Py raw sRGB); font emission tinted at runtime
+  (llvmpipe ObjectInfo.Color reads white); dialogue wrap 66 chars.
+  Residual gaps: textbox opaque (llvmpipe renders Transparent BSDF white),
+  no Ren'Py navigation row (screen-language UI), sprite pose pick can differ
+  (vhappy vs happy), name hue a touch brighter (228,254,228 vs 200,255,200).
+
 ## Last completed
 - **M28 Audit Fixes Phase 1+2 (2026-09-15, v0.7.1)**: full engine/UI/frontend/addon reliability hardening — no silent failures.
   - **vn_interpreter.py**: _execute_node loc-aware — say interpolate with _loc + interp_warnings collection, pause dur safe_eval _loc with logged fallback, jump/call expr eval with _loc, assign safe_exec_assign _loc + div-zero guard, if cond eval failure logged as False, menu cond safe_eval _loc filters false choices, raises ScriptRuntimeError if no choices after filtering, caption preserved, for loop safe_eval iterable _loc + non-iterable handled via list() try/except treating as empty with log, _bind_for_target validates tuple unpack with TypeError/length mismatch warning, python block errors include loc in compat message and _loc in strict, screen render errors propagated to event and logged, camera_zoom/move easing handled, anim target missing logged. run() menu choice validates isinstance int and bounds 0..len-1 before indexing (was only run_headless), raises ScriptRuntimeError on bad choice. _eval_expr signature (_loc) with label/index, _eval_screen_expr returns None in full tier with log instead of crash, _render_screen returns errors dict with traceback snippet and prints, _run_init_python logs line number i+1 in compat errors. strip_tags improved + parse_rich_tags preserved.

@@ -36,6 +36,14 @@ def main() -> None:
 
     # 1) bank backgrounds cover the viewport: 15 x 15*h/w world units
     scene = bpy.context.scene
+    # Ren'Py outputs raw sRGB; Blender's default AgX view transform desaturates
+    # and dims emission (white text -> 197, green name -> gray-green).
+    # Standard view transform restores 1:1 color parity.
+    try:
+        scene.view_settings.view_transform = "Standard"
+        scene.view_settings.look = "None"
+    except Exception as e:
+        print(f"[apply_gui] view transform failed: {e}")
     w = float(scene.render.resolution_x or 1280)
     h = float(scene.render.resolution_y or 720)
     # vertical overscan + drop: the player's view centre for these banks sits
@@ -146,7 +154,8 @@ def main() -> None:
         if ob.type != "MESH":
             continue
         is_pool = ob.name == "Sprite_pool"
-        if not (is_pool or ob.name.startswith("SPRIMG_")):
+        is_bank = ob.name.startswith(("SPRIMG_", "Sprite_img_"))
+        if not (is_pool or is_bank):
             continue
         img = None
         for slot in ob.material_slots:
@@ -158,8 +167,10 @@ def main() -> None:
                         break
             if img is not None:
                 break
-        if img is None and ob.name.startswith("SPRIMG_"):
-            stem = ob.name[len("SPRIMG_"):]
+        if img is None and is_bank:
+            stem = (ob.name[len("SPRIMG_"):]
+                    if ob.name.startswith("SPRIMG_")
+                    else ob.name[len("Sprite_img_"):])
             for im in bpy.data.images:
                 fp = (im.filepath or "").replace("\\", "/")
                 if im.name.startswith(stem) or (stem and stem in fp):
@@ -179,9 +190,35 @@ def main() -> None:
         except Exception as e:
             print(f"[apply_gui] sprite dims failed for {ob.name}: {e}")
 
+    # 5) FONT objects: swap missing packed font paths for the project's or
+    # the system DejaVu (tofu glyphs in player frames came from //fonts/
+    # paths absent in converted snapshots)
+    import os as _os
+    bdir = _os.path.dirname(bpy.data.filepath)
+    proj = _os.path.dirname(bdir)
+    cand = [_os.path.join(proj, "game", "fonts", "DejaVuSans.ttf"),
+            _os.path.join(proj, "assets", "fonts", "DejaVuSans.ttf"),
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"]
+    fpath = next((p for p in cand if _os.path.isfile(p)), None)
+    n_font = 0
+    if fpath:
+        for ob in bpy.data.objects:
+            if ob.type != "FONT":
+                continue
+            cur = ob.data.font
+            cp = bpy.path.abspath(cur.filepath) if cur.filepath else ""
+            if cp and _os.path.isfile(cp):
+                continue
+            try:
+                ob.data.font = bpy.data.fonts.load(fpath, check_existing=True)
+                n_font += 1
+            except Exception as e:
+                print(f"[apply_gui] font swap failed on {ob.name}: {e}")
+
     bpy.ops.wm.save_as_mainfile(filepath=bpy.data.filepath)
     print(f"[apply_gui] OK bgs={n_bg} box={col} alpha={alpha:.2f} "
-          f"name_px={sizes.get('name')} text_px={sizes.get('text')} sp={n_sp}")
+          f"name_px={sizes.get('name')} text_px={sizes.get('text')} sp={n_sp} "
+          f"fonts={n_font}")
 
 
 main()

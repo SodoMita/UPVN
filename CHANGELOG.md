@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.7.2-dev+ — M30 tutorial parity (visual match vs original Ren'Py tutorial)
+
+- world_ui: hide stale choice planes on non-menu events; dialogue wrap 66;
+  runtime font emission tint (name who-color parity on llvmpipe).
+- frontend: dialogue_box '#ffffff' json fallback -> '#000000cc' at runtime.
+- apply_gui_to_blend: Sprite_img_* bank native sizing; DejaVu font swap for
+  missing packed fonts; Standard view transform; opaque premultiplied box.
+
 ## 0.7.2-dev — sprite position empties (branch refactor/sprite-position-empties)
 
 - Template/addon: five per-position Sprite_<pos> image planes replaced by
