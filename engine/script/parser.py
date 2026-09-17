@@ -192,11 +192,14 @@ def _parse_character_args(inner: str) -> Tuple[str, str, dict]:
     if m:
         name = m.group(1)
     else:
-        m2 = re.search(r'"([^"]+)"', inner)
+        # M29: strip kwarg assignments first, else the double-quote
+        # fallback grabs a kwarg value (color="#c8ffc8") as the name.
+        stripped = re.sub(r"[A-Za-z_]\w*\s*=\s*(?:[^,()]|\([^)]*\))*", "", inner)
+        m2 = re.search(r'"([^"]+)"', stripped)
         if m2:
             name = m2.group(1)
         else:
-            m3 = re.search(r"'([^']+)'", inner)
+            m3 = re.search(r"'([^']+)'", stripped)
             if m3:
                 name = m3.group(1)
             else:

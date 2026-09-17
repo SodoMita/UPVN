@@ -60,14 +60,22 @@ def _fit_bg_to_view(plane) -> None:
             return
         w = float(bge.render.getWindowWidth() or 1280)
         h = float(bge.render.getWindowHeight() or 720)
-        # KX_GameObject has no .dimensions — ask the bpy datablock
+        # KX_GameObject has no .dimensions — ask the bpy datablock.
+        # dimensions are LOCAL (rotation not applied): a plane rotated 90deg
+        # on X maps local X->world X and local Y->world Z, so use x/y.
         bo = getattr(plane, "blenderObject", None)
         dims = getattr(bo, "dimensions", None) if bo is not None else None
-        if dims is None or dims.x <= 0.0 or dims.z <= 0.0:
+        if dims is None or dims.x <= 0.0 or dims.y <= 0.0:
             return
-        plane.scale = (plane.scale[0] * ortho / dims.x,
-                       plane.scale[1],
-                       plane.scale[2] * (ortho * h / w) / dims.z)
+        if bo is None:
+            return
+        old_scale = tuple(bo.scale)
+        bo.scale = (old_scale[0] * ortho / dims.x,
+                    old_scale[1] * (ortho * h / w) / dims.y,
+                    old_scale[2])
+        _dbg(f"bg fit: ortho={ortho} win={w}x{h} dims="
+             f"({dims.x:.2f},{dims.y:.2f}) scale {tuple(round(s, 2) for s in old_scale)}"
+             f" -> {tuple(round(s, 2) for s in bo.scale)}")
         # recenter on the camera view axis at the plane's depth
         fwd = cam.worldOrientation @ Vector((0.0, 0.0, -1.0))
         if abs(fwd.y) > 1e-6:

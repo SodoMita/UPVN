@@ -28,11 +28,14 @@ from typing import Any, Callable, Optional
 
 # History constants
 try:
-    from ..render.contract import HISTORY_PLANE as HISTORY_BOX, HISTORY_TEXT, REWIND_TEXT
+    from ..render.contract import (HISTORY_PLANE as HISTORY_BOX, HISTORY_TEXT,
+                                   REWIND_TEXT, CHOICE_PREFIX, CHOICE_COUNT)
 except Exception:
     HISTORY_BOX = "History_Box"
     HISTORY_TEXT = "History_Text"
     REWIND_TEXT = "Rewind_Text"
+    CHOICE_PREFIX = "choice_"
+    CHOICE_COUNT = 9
 
 HISTORY_MAX_LINES = 8
 HISTORY_WRAP = 44
@@ -710,6 +713,13 @@ def apply_world_ui(get_obj: Callable[[str], Any], payload: dict, ortho: float | 
             _set_visible(shadow_obj, False)
         if on:
             set_font_text(text_obj, ch.get("text") or "")
+
+    if not payload.get("choices"):
+        # non-menu events carry no choice entries: hide stale menu planes
+        # (blend-initial visibility or leftovers from a previous menu)
+        for i in range(CHOICE_COUNT):
+            _set_visible(get_obj(f"{CHOICE_PREFIX}{i}"), False)
+            _set_visible(get_obj(f"{CHOICE_PREFIX}{i}_text"), False)
 
     if ortho is not None:
         try:
