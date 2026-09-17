@@ -31,10 +31,21 @@ resulting `script.rpy` in the Text Editor.
 
 ### UI Layout — Aspect Ratio
 
-The in-game UI (dialogue box, choice buttons, speaker name) is designed for
-**landscape widescreen** (1024×576 or 1280×720). If you use a different
-aspect ratio, elements may overlap — especially the menu choices and dialogue
-box. Stick to 16:9 or similar widescreen ratios.
+The in-game UI (dialogue box, choice buttons, speaker name) adapts to your
+window's aspect ratio. All standard ratios work:
+
+| Ratio | Example | Status |
+|-------|---------|--------|
+| 16:9 | 1920×1080 | ✓ Perfect |
+| 16:10 | 1280×800 | ✓ Perfect |
+| 4:3 | 1024×768 | ✓ Works (choices more compact) |
+| 3:2 | 1440×960 | ✓ Perfect |
+| 21:9 | 2560×1080 | ✓ Perfect |
+| 1:1 | Square | ✓ Works (choices more compact) |
+| 9:16 | Portrait | ⚠ Speaker name may clip at edges |
+
+The engine automatically caps choice spacing so they never overlap the dialogue
+box, regardless of window shape.
 
 ### Set Element Colors
 
@@ -442,7 +453,7 @@ Create 5 planes for character positions. Each needs a material named `MASprite`:
 
 For each:
 1. Add → Mesh → Plane. Name it exactly (e.g. `Sprite_center`).
-2. Scale: `(1.5, 2.4, 1)` — roughly portrait-sized.
+2. Scale: `(1.8, 3.2, 1)` — roughly portrait-sized (engine overrides at runtime).
 3. Rotation: `(90°, 0, 0)` — standing upright.
 4. Y location: `-0.15`, Z location: `0`.
 5. Add material `MASprite`. Emission shader, strength 1.0.
@@ -455,9 +466,9 @@ The engine swaps `obj.color` and optionally loads image textures at runtime.
 
 **Dialogue_Box** — panel behind the dialogue text:
 1. Add → Mesh → Plane. Name it `Dialogue_Box`.
-2. Scale: `(4.0, 1.2, 1)`.
+2. Scale: `(7.5, 0.723, 1)` (engine overrides at runtime; these match the contract defaults).
 3. Rotation: `(90°, 0, 0)`.
-4. Location: `(0, -0.4, -3.2)`.
+4. Location: `(0, -0.4, -3.496)`.
 5. Add material `MAUI`. Emission shader.
 6. Object Color: `(1.0, 1.0, 1.0, 0.8)` (white, 80% alpha).
 7. Move to `VN_UI` collection.
@@ -474,7 +485,7 @@ The engine swaps `obj.color` and optionally loads image textures at runtime.
 1. Add → Text. Name it `Dialogue_Text`.
 2. Size: `0.26`.
 3. Rotation: `(90°, 0, 0)`.
-4. Location: `(-5.4, -0.55, -3.3)`.
+4. Location: `(-5.406, -0.55, -3.264)`.
 5. Move to `VN_UI`.
 
 #### Step 6: Choice buttons
@@ -483,9 +494,9 @@ Create 9 pairs of objects for menu choices (`choice_0` through `choice_8`):
 
 For each `choice_N` (N = 0..8):
 1. Add → Mesh → Plane. Name it `choice_N`.
-2. Scale: `(4.6, 0.36, 1)`.
+2. Scale: `(6.172, 1.444, 1)` (engine overrides at runtime).
 3. Rotation: `(90°, 0, 0)`.
-4. Z location: `1.05 - N * 0.66` (choice_0 at 1.05, choice_1 at 0.39, etc.).
+4. Z location: `1.055 - N * 0.253` (choice_0 at 1.055, choice_1 at 0.802, choice_2 at 0.549, etc.).
 5. Y location: `-0.5`.
 6. Material `MAUI`. Object Color: `(1.0, 1.0, 1.0, 0.8)`.
 7. Move to `VN_UI`.
