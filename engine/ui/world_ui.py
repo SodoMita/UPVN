@@ -363,27 +363,40 @@ def set_font_text(obj: Any, text: str):
     text = "" if text is None else str(text)
     if font_text(obj) == text:
         return True
+    # Precedence is the one the player actually renders with (BUG-004:
+    # KX_FontObject exposes no usable text attribute in 0.50, so the Blender
+    # data-block comes first), but every write is now verified against the
+    # *same* source it wrote to — a settable-looking attribute that silently
+    # no-ops can no longer win the race.
     bo = getattr(obj, "blenderObject", None)
-    paths = [("obj.text", lambda: setattr(obj, "text", text)),
-             ("obj.Text", lambda: setattr(obj, "Text", text))]
+    paths = []
     if getattr(bo, "data", None) is not None:
-        paths.append(("blenderObject.data.body",
-                      lambda: setattr(bo.data, "body", text)))
+        paths.append(("blenderObject.data.body", bo.data, "body"))
+    for attr in ("text", "Text"):
+        paths.append((f"obj.{attr}", obj, attr))
     if getattr(obj, "data", None) is not None:
-        paths.append(("obj.data.body", lambda: setattr(obj.data, "body", text)))
-    paths.append(("obj['Text']", lambda: obj.__setitem__("Text", text)))
+        paths.append(("obj.data.body", obj.data, "body"))
 
-    for name, setter in paths:
+    for name, target, attr in paths:
         try:
-            setter()
+            setattr(target, attr, text)
         except Exception:
             continue
-        if font_text(obj) == text:
-            try:
-                obj["_upvn_font_path"] = name
-            except Exception:
-                pass
+        try:
+            if getattr(target, attr, None) == text:
+                try:
+                    obj["_upvn_font_path"] = name
+                except Exception:
+                    pass
+                return True
+        except Exception:
+            continue
+    try:
+        obj["Text"] = text
+        if obj["Text"] == text:
             return True
+    except Exception:
+        pass
     try:
         print(f"[world_ui] font text did not apply "
               f"(read-back={font_text(obj)!r}, wanted={text[:40]!r})")
