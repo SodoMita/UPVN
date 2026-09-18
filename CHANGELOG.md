@@ -1,3 +1,21 @@
+## 2026-09-18 — sprite transparency solved (CLIP), backdrop fit, runner guide
+
+- Converted character sprites now use an alpha-cutout material: the PNG's Alpha
+  is wired into the surface with `blend_method = "CLIP"` (threshold 0.5).
+  Measured in the player with the new `tools/make_alpha_probe.py` (three planes,
+  one screenshot): OPAQUE draws an opaque quad around the character, BLEND washes
+  the plane into the background, CLIP is sharp and correct. Sylvie is now visible.
+- `_fit_bg_to_view()` covers the viewport keeping the image aspect; it previously
+  produced a 15 x 8.44 backdrop inside the 26.7 x 15 frame (letterbox bars).
+- New `BACKGROUND_LAYER` constant (both `engine/render/scene_manager.py` and
+  `tools/wire_converted_blend.py`): measured that a backdrop plane at y=10 is not
+  rendered by the player at all, so it stays at 0.0.
+- Heartbeat reports the active camera (name/position/ortho) and per-object
+  `frustum`/`color`; `tools/upvn_shot.sh` prints the story state it captured.
+- New `docs/RENPY_RUNNER_GUIDE.md`: what each script in the Ren'Py runner does,
+  which knobs change the picture (with the measurements behind them), and how to
+  run and tune it on a real PC.
+
 # Changelog
 
 ## 2026-09-18 — text/sprite sync + sprite transparency (the two field bugs)
