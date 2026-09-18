@@ -43,6 +43,7 @@ import json
 import shutil
 import subprocess
 import sys
+import os
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -254,7 +255,12 @@ def convert(src: Path, out: Path, blender: Path | None = None) -> dict:
     for e in errs[:8]:
         print(f"  ! {e.get('file')}:{e.get('line')}: {e.get('error')}")
     print(f"[convert] project ready: {out}")
-    print(f"[convert] play: blenderplayer /opt/upbge/upbge-0.50-linux-x64/blenderplayer {out}/blend/UPVN_Template.blend")
+    # honour UPBGE_DIR/UPBGE_BIN: the old hardcoded 0.50 path sent people to a
+    # build that cannot open a blend written by the build that just converted it.
+    _upbge = os.environ.get("UPBGE_BIN") or os.environ.get("UPBGE_DIR") or "/opt/upbge/upbge-0.50-linux-x64"
+    _player = os.path.join(_upbge, "bin", "blenderplayer") \
+        if os.path.isdir(os.path.join(_upbge, "bin")) else os.path.join(_upbge, "blenderplayer")
+    print(f"[convert] play: {_player} {out}/blend/UPVN_Template.blend")
     if gui_config:
         print(f"[convert] adaptive: YES — UI will match original Ren'Py project via upvn_gui.json")
     else:
