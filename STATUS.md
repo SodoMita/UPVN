@@ -1,3 +1,15 @@
+# Current Status — 2026-09-18 (scene-settings + no classroom)
+
+## Last completed
+- **Scene generator settings unified** (`engine/render/scene_settings.py`):
+  every Setup Scene / make_template / repair-tool knob in one file, including
+  Blender factory-equal values (clip 0.1, lens 50 mm, fps 24, gravity −9.81,
+  resolution 1920×1080) so they can be edited later without hunting bpy docs
+  or five scripts. Re-run Setup Scene or `tools/make_template.py` to apply.
+  Object names stay in `engine/render/contract.py`.
+- **Default template no longer builds a fake classroom.** `VN_3DStage` is
+  empty; put a real 3D scene there. Sample `stages/*.blend` files are unchanged.
+
 # Current Status — 2026-09-16 (M29: Theme-Aware Wizards & Ren'Py SDK Validation, v0.7.2)
 
 ## Branch refactor/sprite-position-empties (2026-09-17, in progress)

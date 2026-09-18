@@ -14,9 +14,15 @@ palette on BG_Plane / Sprite_*.
 import sys
 from pathlib import Path
 
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 import bpy  # noqa: E402
 
-IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".webp")
+from engine.render import scene_settings as ss
+
+IMAGE_EXTS = ss.IMAGE_EXTS
 
 
 def _slug(name: str) -> str:
@@ -29,21 +35,19 @@ def _slug(name: str) -> str:
 
 def _plane(name, size=10.0):
     mesh = bpy.data.meshes.new(name + "_mesh")
-    mesh.from_pydata([(-1, -1, 0), (1, -1, 0), (1, 1, 0), (-1, 1, 0)], [],
-                     [(0, 1, 2, 3)])
+    mesh.from_pydata(list(ss.UNIT_QUAD_VERTS), [], list(ss.UNIT_QUAD_FACES))
     mesh.update()
     # The rasterizer samples TexImage through UVs — from_pydata creates no UV
     # layer and the texture then renders black in the player.
     try:
-        uv = mesh.uv_layers.new(name="UVMap")
-        uvs = ((0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0))
-        for i, (u, v) in enumerate(uvs):
+        uv = mesh.uv_layers.new(name=ss.UV_LAYER_NAME)
+        for i, (u, v) in enumerate(ss.UNIT_QUAD_UVS):
             uv.data[i].uv = (u, v)
     except Exception as e:
         print(f"[wire] uv layer failed on {name}: {e}")
     ob = bpy.data.objects.new(name, mesh)
     ob.scale = (size / 2, size / 2, 1)
-    ob.rotation_euler = (1.5707963267948966, 0.0, 0.0)
+    ob.rotation_euler = ss.PLANE_ROTATION
     return ob
 
 
@@ -95,16 +99,16 @@ def _image_material(name, img_path, alpha: bool = False):
             pass
     nt.links.new(pr.outputs["BSDF"], out.inputs["Surface"])
     try:
-        mat.blend_method = "CLIP" if alpha else "OPAQUE"
-        mat.alpha_threshold = 0.5
-        mat.shadow_method = "NONE"
-        mat.use_backface_culling = False
+        mat.blend_method = ss.MAT_BLEND_CLIP if alpha else ss.MAT_BLEND_OPAQUE
+        mat.alpha_threshold = ss.MAT_ALPHA_THRESHOLD
+        mat.shadow_method = ss.MAT_SHADOW_METHOD
+        mat.use_backface_culling = ss.MAT_USE_BACKFACE_CULLING
     except Exception:
         pass
     return mat
 
 
-BACKGROUND_LAYER = 0.0   # backdrop depth (see _image_material / bank planes)
+BACKGROUND_LAYER = ss.BACKGROUND_LAYER   # backdrop depth — edit scene_settings.py
 
 
 def img_w_h(path):
@@ -152,12 +156,12 @@ def main():
     scene = bpy.context.scene
     ctrl = bpy.data.objects.get("VNController")
     if ctrl is not None:
-        set_runtime_prop(ctrl, "script_path", "//../game")
-        set_runtime_prop(ctrl, "image_mode", "auto")
+        set_runtime_prop(ctrl, "script_path", ss.CONVERTED_SCRIPT_PATH)
+        set_runtime_prop(ctrl, "image_mode", ss.CONVERTED_IMAGE_MODE)
         # A converted project IS Ren'Py source, so it needs the full parse tier
         # (extend / init / screen). Without this the runtime parses it with the
         # declarative subset and refuses to start.
-        set_runtime_prop(ctrl, "parse_mode", "full")
+        set_runtime_prop(ctrl, "parse_mode", ss.CONVERTED_PARSE_MODE)
         print("[wire] script_path=//../game image_mode=auto parse_mode=full")
 
     # hide the palette fallback planes' default state stays as-is; add banks
@@ -172,14 +176,14 @@ def main():
             name = f"BGIMG_{_slug(f.name)}"
             if bpy.data.objects.get(name):
                 continue
-            ob = _plane(name, size=10.0)
+            ob = _plane(name, size=ss.IMAGE_BANK_BG_SIZE)
             # BACKGROUND_LAYER: the backdrop sits 10 units BEHIND the stage
             # (camera at y=-10, stage/sprites around y=-1..0), so 3D characters
             # and camera moves have room instead of clipping into the backdrop.
             # Ortho projection makes distance irrelevant to apparent size, and
             # SceneManager._fit_bg_to_view() re-covers the frame at runtime.
             ob.location = (0.0, float(BACKGROUND_LAYER), 0.0)
-            ob.game.physics_type = "STATIC"
+            ss.apply_mesh_physics(ob, is_text=False)
             ob.hide_render = False
             scene.collection.objects.link(ob)
             n_bg += 1
@@ -196,7 +200,7 @@ def main():
             ob.scale = (1.5, 2.4, 1.0)
             ob.location = (0.0, -0.15, 0.0)
             ob.data.materials.append(_image_material(name + "_mat", f, alpha=True))
-            ob.game.physics_type = "STATIC"
+            ss.apply_mesh_physics(ob, is_text=False)
             scene.collection.objects.link(ob)
             n_sp += 1
     print(f"[wire] image bank: {n_bg} backgrounds, {n_sp} sprites")

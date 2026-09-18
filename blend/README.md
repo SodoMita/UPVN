@@ -16,7 +16,7 @@ Scene: VN_Main
   Collection: VN_Characters   (planes “Sprite_*” at contract POSITIONS, y=-0.15)
   Collection: VN_UI           (plane “Dialogue_Box” + Text objects)
   Collection: VN_Effects      (for fade/dissolve shader planes)
-  Collection: VN_3DStage      (empty markers: marker_eileen etc., 3D classroom mesh)
+  Collection: VN_3DStage      (empty — drop your own 3D scene here)
   Text datablock: upvn_launcher   (path-bootstrap; imported by the Python brick)
 ```
 
@@ -57,6 +57,24 @@ Headless fallback: `tools/upvn_game_creator.py` uses same `UPVN_GameBuilder` API
 python tools/upvn_game_creator.py
 # quick_game(project="my_game", characters=[("e","Eileen","#c8ffc8")], dialogues=[("e","Hi")])
 ```
+
+## Scene settings (single place to edit)
+
+All generator knobs — cameras, render, world, gravity, units, EEVEE samples,
+clip/sensor/lens (including values that match Blender's factory defaults),
+UI layout, materials, lights, physics — live in
+**`engine/render/scene_settings.py`**. The default template does not generate
+a demo classroom; author a 3D scene into `VN_3DStage` instead.
+
+Change a number there, then either press **Setup Scene** or regenerate:
+
+```bash
+upbge-0.50-linux-x64/blender --background --python tools/make_template.py
+```
+
+Do not copy the same numbers into `make_template.py`, the add-on, or the
+repair tools; they all import this module. Object *names* stay in
+`engine/render/contract.py`.
 
 ## Generation
 

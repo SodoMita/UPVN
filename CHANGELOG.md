@@ -1,3 +1,30 @@
+## 2026-09-18 — no generated classroom in the default template
+
+- Removed the procedural 3D classroom (floor, walls, desks, chairs, blackboard,
+  windows, lamps, capsule placeholders) from `tools/make_template.py` and the
+  matching `STAGE_*` knobs from `engine/render/scene_settings.py`. It looked
+  awful and ate a lot of generator code. `VN_3DStage` is created empty — drop
+  a real scene in, or bake one with `tools/bake_stage_into_template.py`.
+  Sample games may still ship their own `stages/*.blend`.
+
+## 2026-09-18 — scene generator settings in one file
+
+- New `engine/render/scene_settings.py` is the **single place** to edit the
+  default VN scene: cameras, render (resolution/fps/engine), color management
+  (`VIEW_TRANSFORM = "Standard"` vs Blender's AgX), world, gravity, units,
+  EEVEE samples, camera clip/sensor/lens/shift (even when they equal Blender's
+  factory 0.1 / 50 mm / 36 mm), UI layout, materials, lights, physics, and the
+  classroom stage.
+- `build_vn_scene` (Setup Scene), `tools/make_template.py`,
+  `add_template_ui_objects.py`, `update_template_materials.py`,
+  `wire_converted_blend.py`, `apply_gui_to_blend.py` and
+  `bake_stage_into_template.py` all import from that module. Changing a value
+  no longer means hunting five scripts.
+- `apply_scene_environment(scene)` writes the blender-default-equal knobs onto
+  the scene so they are explicit in the .blend, not leftover factory state.
+- `contract.py` re-exports generation numbers from scene_settings (names stay
+  in the contract). Tests: `tests/test_scene_settings.py`.
+
 ## 2026-09-18 — sprite transparency solved (CLIP), backdrop fit, runner guide
 
 - Converted character sprites now use an alpha-cutout material: the PNG's Alpha

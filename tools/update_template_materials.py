@@ -18,26 +18,13 @@ if str(ROOT) not in sys.path:
 
 import bpy  # noqa: E402
 
-TEX_NODE_NAME = "UPVN Tex Image"
-MIX_NODE_NAME = "UPVN Tex Mix"
-WHITE_IMAGE_NAME = "UPVN_White1px"
-SPRITE_POSITIONS = ("far_left", "left", "center", "right", "far_right")
+from engine.render.contract import (TEX_NODE_NAME, MIX_NODE_NAME, WHITE_IMAGE_NAME,
+                                    SPRITE_POSITIONS)
+from engine.render import scene_settings as ss
 
-# material name -> fallback color (used when an object never sets a tint)
-MATERIALS = {
-    "MABackground": (0.12, 0.14, 0.22, 1.0),
-    "MASprite": (0.62, 0.78, 0.55, 1.0),
-    "MAUI": (0.05, 0.06, 0.14, 1.0),
-    "MAChoice": (0.12, 0.18, 0.32, 1.0),
-    "MAFont": (0.92, 0.93, 1.0, 1.0),
-}
-TEX_CAPABLE = {"MABackground", "MASprite"}
-
-# object name -> default object tint (what the rasterizer multiplies in)
-OBJECT_TINTS = {
-    "BG_Plane": (0.12, 0.14, 0.22, 1.0),
-    "Dialogue_Box": (0.05, 0.06, 0.14, 1.0),
-}
+MATERIALS = dict(ss.UNLIT_MATERIALS)
+TEX_CAPABLE = set(ss.UNLIT_TEX_CAPABLE)
+OBJECT_TINTS = dict(ss.OBJECT_TINTS)
 
 
 def ensure_white_image():
@@ -45,7 +32,7 @@ def ensure_white_image():
     img = bpy.data.images.get(WHITE_IMAGE_NAME)
     if img is None:
         img = bpy.data.images.new(WHITE_IMAGE_NAME, 1, 1, alpha=True)
-        img.pixels = [1.0, 1.0, 1.0, 1.0]
+        img.pixels = list(ss.WHITE_IMAGE_PIXELS)
     if not img.packed_file:
         img.file_format = "PNG"
         img.pack()
@@ -69,7 +56,7 @@ def rewrite_unlit(mat, color, tex_capable=False):
         tex.name = TEX_NODE_NAME
         tex.image = ensure_white_image()
         try:
-            tex.interpolation = "Closest"
+            tex.interpolation = ss.TEX_INTERPOLATION
         except Exception:
             pass
         mix = nt.nodes.new("ShaderNodeMix")
@@ -82,10 +69,11 @@ def rewrite_unlit(mat, color, tex_capable=False):
     else:
         nt.links.new(objinfo.outputs["Color"], em.inputs["Color"])
     em.inputs["Color"].default_value = color
-    em.inputs["Strength"].default_value = 1.0
+    em.inputs["Strength"].default_value = ss.MAT_EMISSION_STRENGTH
     nt.links.new(em.outputs[0], out.inputs[0])
-    for attr, val in (("blend_method", "OPAQUE"), ("shadow_method", "NONE"),
-                      ("use_backface_culling", False)):
+    for attr, val in (("blend_method", ss.MAT_BLEND_OPAQUE),
+                      ("shadow_method", ss.MAT_SHADOW_METHOD),
+                      ("use_backface_culling", ss.MAT_USE_BACKFACE_CULLING)):
         try:
             setattr(mat, attr, val)
         except Exception:
@@ -143,9 +131,7 @@ def fix_physics():
         if ob.name.startswith(("choice_", "Sprite_", "BG_", "Dialogue_")) and \
                 not ob.name.endswith("_text"):
             try:
-                ob.game.physics_type = "STATIC"
-                ob.game.use_collision_bounds = True
-                ob.game.collision_bounds_type = "BOX"
+                ss.apply_mesh_physics(ob, is_text=False)
                 n += 1
             except Exception:
                 pass
@@ -157,7 +143,8 @@ def widen_bg():
     bg = bpy.data.objects.get("BG_Plane")
     if bg is not None and not bg.get("upvn_layout_custom"):
         try:
-            bg.scale = (9.0, 9.0, 1.0)
+            half = ss.BG_PLANE_SIZE / 2.0
+            bg.scale = (half, half, 1.0)
         except Exception:
             pass
 
@@ -213,7 +200,7 @@ def main():
 
     ctrl = bpy.data.objects.get("VNController")
     if ctrl is not None:
-        set_runtime_prop(ctrl, "image_mode", "color")
+        set_runtime_prop(ctrl, "image_mode", ss.IMAGE_MODE_DEFAULT)
         print("[update_template] image_mode=color written to VNController")
 
     bpy.ops.wm.save_mainfile()

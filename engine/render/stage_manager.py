@@ -199,7 +199,7 @@ class StageManager:
                 import bge.logic as logic
                 scene = logic.getCurrentScene()
                 marker_obj = scene.objects.get(marker) if marker else None
-                # asset could be an object name in stage collection, e.g. Char_Eileen_placeholder or eileen
+                # asset could be an object name in the stage collection
                 # try to find template object
                 template = None
                 template_active = False
@@ -236,7 +236,7 @@ class StageManager:
                     print(f"[StageManager] spawn {asset} at {marker} -> {obj.name} (repositioned template)")
                 elif template:
                     # spawn at origin if no marker
-                    obj = scene.addObject(template, scene.objects.get("Floor_classroom") or marker_obj, 0)
+                    obj = scene.addObject(template, marker_obj or scene.active_camera, 0)
                     print(f"[StageManager] spawn {asset} (no marker) -> {obj.name}")
             except Exception as e:
                 print(f"[StageManager] spawn failed {asset}@{marker}: {e}")

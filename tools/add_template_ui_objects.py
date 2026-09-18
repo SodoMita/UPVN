@@ -19,12 +19,17 @@ the whole Setup Scene headless is not supported — its logic-brick operators ne
 the UI context).
 """
 import sys
+from pathlib import Path
 
-HISTORY_PLANE = "History_Box"
-HISTORY_TEXT = "History_Text"
-REWIND_TEXT = "Rewind_Text"
-PLANE_ROT = (1.5707963267948966, 0.0, 0.0)
-UI_MATERIAL = "MAUI"
+_ROOT = Path(__file__).resolve().parents[1]
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
+
+from engine.render.contract import (HISTORY_PLANE, HISTORY_TEXT, REWIND_TEXT,
+                                    UI_MATERIAL)
+from engine.render import scene_settings as ss
+
+PLANE_ROT = ss.PLANE_ROTATION
 
 
 def _args():
@@ -79,14 +84,12 @@ def _unit_quad(mesh):
         mesh.clear_geometry()
     except Exception:
         pass
-    mesh.from_pydata([(-1, -1, 0), (1, -1, 0), (1, 1, 0), (-1, 1, 0)],
-                     [], [(0, 1, 2, 3)])
+    mesh.from_pydata(list(ss.UNIT_QUAD_VERTS), [], list(ss.UNIT_QUAD_FACES))
     mesh.update()
     if not mesh.uv_layers:            # TexImage nodes sample through UVs
         try:
-            uv = mesh.uv_layers.new(name="UVMap")
-            for i, (u, v) in enumerate(((0.0, 0.0), (1.0, 0.0),
-                                         (1.0, 1.0), (0.0, 1.0))):
+            uv = mesh.uv_layers.new(name=ss.UV_LAYER_NAME)
+            for i, (u, v) in enumerate(ss.UNIT_QUAD_UVS):
                 uv.data[i].uv = (u, v)
         except Exception:
             pass
@@ -141,12 +144,15 @@ def ensure_plane(scene, name, color):
 def _ghost(ob):
     """Static + BOX collision like the other plates (ray-hittable, immovable)."""
     try:
-        g = ob.game
-        g.physics_type = "STATIC"
-        g.use_collision_bounds = True
-        g.collision_bounds_type = "BOX"
+        ss.apply_mesh_physics(ob, is_text=getattr(ob, "type", "") == "FONT")
     except Exception:
-        pass
+        try:
+            g = ob.game
+            g.physics_type = ss.PHYSICS_TYPE_MESH
+            g.use_collision_bounds = ss.PHYSICS_USE_COLLISION_BOUNDS
+            g.collision_bounds_type = ss.PHYSICS_BOUNDS_FALLBACK
+        except Exception:
+            pass
 
 
 def ensure_font(scene, name, loc, em, bold=False, shear=None, shadow=None,
@@ -232,24 +238,24 @@ def main():
     # Always run the helpers, even when the objects exist: half the point of
     # this tool is repairing templates authored by an earlier version (wrong
     # mesh size, missing tint) — both are invisible failures in the player.
-    ensure_plane(scene, HISTORY_PLANE, (0.03, 0.04, 0.09, 1.0))
-    for name, loc, em, kw in ((HISTORY_TEXT, (-6.0, -0.5, 3.4), 0.20, {}),
-                              (REWIND_TEXT, (-6.0, -0.5, 4.4), 0.17,
-                               {"shear": 0.18})):
+    ensure_plane(scene, HISTORY_PLANE, ss.HISTORY_COLOR)
+    for name, loc, em, kw in ((HISTORY_TEXT, ss.HISTORY_TEXT_LOCATION, ss.HISTORY_TEXT_SIZE, {}),
+                              (REWIND_TEXT, ss.REWIND_TEXT_LOCATION, ss.REWIND_TEXT_SIZE,
+                               {"shear": ss.REWIND_SHEAR})):
         ob = ensure_font(scene, name, loc, em, **kw)
-        _tint(ob, (0.92, 0.93, 1.0, 1.0))
+        _tint(ob, ss.FONT_TINT_DEFAULT)
     # M26i: style the dialogue/choice text too (bold speaker + choice labels,
     # regular body) and make sure the drop-shadow twins exist — this is the
     # repair path for every template authored before M26i.
-    for name, loc, em, kw in (("Speaker_Text", (-3.6, -0.55, -2.55), 0.28,
+    for name, loc, em, kw in (("Speaker_Text", ss.SPEAKER_LOCATION, ss.SPEAKER_TEXT_SIZE,
                                {"bold": True, "shadow": "Speaker_Shadow"}),
-                              ("Dialogue_Text", (-3.6, -0.55, -3.15), 0.26,
+                              ("Dialogue_Text", ss.DIALOGUE_TEXT_LOCATION, ss.DIALOGUE_TEXT_SIZE,
                                {"shadow": "Dialogue_Shadow"})):
         ensure_font(scene, name, loc, em, **kw)
-    for i in range(9):
-        loc = (0.0 - 2.8, -0.55, 2.4 - i * 0.7 + 0.08)
-        ensure_font(scene, f"choice_{i}_text", loc, 0.24, bold=True,
-                   shadow=f"choice_{i}_shadow")
+    for i in range(ss.CHOICE_COUNT):
+        ensure_font(scene, f"choice_{i}_text", ss.choice_text_location(i),
+                    ss.CHOICE_TEXT_SIZE, bold=True,
+                    shadow=f"choice_{i}_shadow")
     if _CHANGES:
         print("UPVN_UI_OBJECTS_CHANGED " + ",".join(_CHANGES))
     else:

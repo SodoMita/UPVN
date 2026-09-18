@@ -71,27 +71,38 @@ try:
         _gui_config = {}
         _choice_base_z = CHOICE_BASE_Z
 except Exception:
-    # Fallback to generic defaults (not LearnToCodeRPG specific) — generic Ren'Py template
-    DIALOGUE_LOCATION = (0.0, -0.4, -3.496)
-    DIALOGUE_SCALE = (7.5, 0.722, 1.0)
-    SPEAKER_LOCATION = (-5.625, -0.55, -2.873)
-    DIALOGUE_TEXT_LOCATION = (-5.406, -0.55, -3.264)
-    DIALOGUE_BOX_COLOR = (0.07, 0.08, 0.10, 1.0)  # dark box (opaque: BGE drops alpha)
-    CHOICE_IDLE_COLOR = (1.0, 1.0, 1.0, 1.0)
-    CHOICE_HOVER_COLOR = (0.0, 0.094, 0.616, 1.0)
-    CHOICE_TEXT_IDLE = (0.12, 0.13, 0.15, 1.0)
-    CHOICE_TEXT_HOVER = (1.0, 1.0, 1.0, 1.0)
-    DEFAULT_TEXT_COLOR = (1.0, 1.0, 1.0, 1.0)
-    SPEAKER_DEFAULT_COLOR = (1.0, 0.498, 0.498, 1.0)
+    # Fallback to scene_settings (the generator's single settings file)
+    try:
+        from ..render.scene_settings import (
+            DIALOGUE_LOCATION, DIALOGUE_SCALE,
+            SPEAKER_LOCATION, DIALOGUE_TEXT_LOCATION,
+            DIALOGUE_BOX_COLOR, CHOICE_IDLE_COLOR, CHOICE_HOVER_COLOR,
+            CHOICE_TEXT_IDLE, CHOICE_TEXT_HOVER,
+            DEFAULT_TEXT_COLOR, SPEAKER_DEFAULT_COLOR,
+            CHOICE_WIDTH_FACTOR, CHOICE_HEIGHT_FACTOR,
+            CHOICE_SPACING_EM, CHOICE_BASE_Z,
+        )
+    except Exception:
+        DIALOGUE_LOCATION = (0.0, -2.0, -3.2)
+        DIALOGUE_SCALE = (4.0, 1.2, 1.0)
+        SPEAKER_LOCATION = (-3.6, -3.0, -2.55)
+        DIALOGUE_TEXT_LOCATION = (-3.6, -4.0, -3.15)
+        DIALOGUE_BOX_COLOR = (0.07, 0.08, 0.10, 1.0)
+        CHOICE_IDLE_COLOR = (1.0, 1.0, 1.0, 1.0)
+        CHOICE_HOVER_COLOR = (0.0, 0.094, 0.616, 1.0)
+        CHOICE_TEXT_IDLE = (0.12, 0.13, 0.15, 1.0)
+        CHOICE_TEXT_HOVER = (1.0, 1.0, 1.0, 1.0)
+        DEFAULT_TEXT_COLOR = (1.0, 1.0, 1.0, 1.0)
+        SPEAKER_DEFAULT_COLOR = (1.0, 0.498, 0.498, 1.0)
+        CHOICE_WIDTH_FACTOR = 0.617
+        CHOICE_HEIGHT_FACTOR = 0.096
+        CHOICE_SPACING_EM = 0.38
+        CHOICE_BASE_Z = 1.05
     SPEAKER_SHADOW = "Speaker_Shadow"
     DIALOGUE_SHADOW = "Dialogue_Shadow"
     CHOICE_SHADOW_SUFFIX = "_shadow"
     SHADOW_COLOR = (0.0, 0.0, 0.0, 0.0)
     SHADOW_OFFSET = (0.0, 0.0, 0.0)
-    CHOICE_WIDTH_FACTOR = 0.411
-    CHOICE_HEIGHT_FACTOR = 0.096
-    CHOICE_SPACING_EM = 0.252
-    CHOICE_BASE_Z = 1.054
     _choice_base_z = CHOICE_BASE_Z
     UI_FONT_REGULAR = "DejaVuSans.ttf"
     UI_FONT_BOLD = "DejaVuSans-Bold.ttf"
@@ -701,7 +712,7 @@ def _is_auto_layout_enabled(get_obj: Callable[[str], Any]) -> bool:
     return True
 
 
-def layout_screen_ui(get_obj: Callable[[str], Any], payload: dict, ortho: float = 15.0,
+def layout_screen_ui(get_obj: Callable[[str], Any], payload: dict, ortho: float = None,
                      hovered: str | None = None, auto_layout: bool | None = None) -> None:
     """
     FIXED layout — no responsive, no aspect adaptation, no gui_config scaling.
@@ -757,7 +768,14 @@ def layout_screen_ui(get_obj: Callable[[str], Any], payload: dict, ortho: float 
     # Perspective fix: when camera is perspective, ortho=0, half would be 1 -> tiny buttons
     # User reports perspective triggers outside, ortho OK — because perspective had tiny visual but large collision or mismatched ray
     # Use default ortho 15 for perspective to keep button size reasonable and consistent
-    ortho_for_layout = float(ortho) if float(ortho) > 0.001 else 15.0
+    try:
+        from ..render.scene_settings import CAMERA_UI_ORTHO_SCALE as _ORTHO_FALLBACK
+    except Exception:
+        _ORTHO_FALLBACK = 15.0
+    if ortho is None:
+        ortho_for_layout = _ORTHO_FALLBACK
+    else:
+        ortho_for_layout = float(ortho) if float(ortho) > 0.001 else _ORTHO_FALLBACK
     half = max(1.0, ortho_for_layout / 2.0)
     set_font_size(sp, half * 0.065)
     set_font_size(dt, half * 0.055)

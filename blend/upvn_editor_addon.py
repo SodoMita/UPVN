@@ -1501,6 +1501,14 @@ except Exception:
     def _static_ghost(obj):
         """Static, ray-hittable physics for VN plates — but text should NOT be hittable to avoid outside trigger."""
         try:
+            from engine.render.scene_settings import apply_mesh_physics
+            name = getattr(obj, "name", "")
+            is_text = obj.type == "FONT" if hasattr(obj, "type") else ("_text" in str(name))
+            apply_mesh_physics(obj, is_text=is_text)
+            return
+        except Exception:
+            pass
+        try:
             # Text objects should have NO collision to avoid triggering button outside visible mesh
             # User reported buttons triggered outside visible mesh — text collision was part of it
             name = getattr(obj, "name", "")
@@ -1598,9 +1606,13 @@ except Exception:
 
     def _data_camera(name, ortho=True, size=10.0, loc=(0.0, -10.0, 0.0), rot=(1.5707963267948966, 0.0, 0.0)):
         cam_data = bpy.data.cameras.new(name)
-        if ortho:
-            cam_data.type = "ORTHO"
-            cam_data.ortho_scale = size
+        try:
+            from engine.render.scene_settings import apply_camera_optics
+            apply_camera_optics(cam_data, ortho=ortho, ortho_scale=size)
+        except Exception:
+            if ortho:
+                cam_data.type = "ORTHO"
+                cam_data.ortho_scale = size
         obj = bpy.data.objects.new(name, cam_data)
         obj.location = loc
         obj.rotation_euler = rot
@@ -1697,9 +1709,20 @@ except Exception:
             except Exception:
                 pass
 
+        # All generator knobs (cameras, render, gravity, materials, layout)
+        # live in engine/render/scene_settings.py — including values that
+        # match Blender's factory defaults so they can be changed later.
+        try:
+            from engine.render import scene_settings as _ss
+            _ss.apply_scene_environment(scene, _b)
+            _col_names = list(_ss.COLLECTIONS)
+        except Exception:
+            _ss = None
+            _col_names = ["VN_Backgrounds", "VN_Characters", "VN_UI", "VN_Effects", "VN_3DStage"]
+
         # collections
         collections = {}
-        for name in ["VN_Backgrounds", "VN_Characters", "VN_UI", "VN_Effects", "VN_3DStage"]:
+        for name in _col_names:
             col = _b.data.collections.get(name)
             if col is None:
                 col = _b.data.collections.new(name)
@@ -1808,13 +1831,10 @@ except Exception:
                 pass
             return mat
 
-        # M28 Adaptive: colors from upvn_gui.json if present, else Ren'Py identical defaults
-        # BG: neutral, but will be textured with actual bg images in converted projects
-        _bg_color = (0.95, 0.95, 0.95, 1.0)
-        # Ren'Py default theme: white text on a DARK textbox. Opaque: BGE drops
-        # material alpha, so translucent PNG looks are approximated with solid colors.
-        _ui_color = (0.07, 0.08, 0.10, 1.0)
-        _choice_color = (1.0, 1.0, 1.0, 1.0)
+        # Colors: scene_settings first (single generator source), then adaptive overlay
+        _bg_color = getattr(_ss, "MAT_BG_COLOR", (0.95, 0.95, 0.95, 1.0)) if _ss else (0.95, 0.95, 0.95, 1.0)
+        _ui_color = getattr(_ss, "MAT_UI_COLOR", (0.07, 0.08, 0.10, 1.0)) if _ss else (0.07, 0.08, 0.10, 1.0)
+        _choice_color = getattr(_ss, "MAT_CHOICE_COLOR", (1.0, 1.0, 1.0, 1.0)) if _ss else (1.0, 1.0, 1.0, 1.0)
         try:
             if _adaptive_cfg:
                 cols = _adaptive_cfg.get("colors", {})
@@ -1828,7 +1848,8 @@ except Exception:
 
         mat_bg = _ensure_material(_b, BG_MATERIAL, _bg_color,
                                   tex_capable=True, renpy_parity=True)
-        mat_sprite = _ensure_material(_b, SPRITE_MATERIAL, (0.62, 0.78, 0.55, 1.0), tex_capable=True)
+        _sprite_mat_color = getattr(_ss, "MAT_SPRITE_COLOR", (0.62, 0.78, 0.55, 1.0)) if _ss else (0.62, 0.78, 0.55, 1.0)
+        mat_sprite = _ensure_material(_b, SPRITE_MATERIAL, _sprite_mat_color, tex_capable=True)
         # Ren'Py identical: white semi-transparent textbox (255,255,255,204) like gui/textbox.png — adaptive if config has it
         mat_ui = _ensure_material(_b, "MAUI", _ui_color, renpy_parity=True)
         # Ren'Py identical: choice idle white, hover blue #00189d — adaptive
@@ -1988,9 +2009,11 @@ except Exception:
         except Exception as e:
             print(f"[UPVN] Adaptive font/color override failed: {e}")
 
-        _ensure_font(SPEAKER_TEXT, SPEAKER_LOCATION, size=0.30, bold=True,
+        _spk_sz = getattr(_ss, "SPEAKER_TEXT_SIZE", 0.30) if _ss else 0.30
+        _dlg_sz = getattr(_ss, "DIALOGUE_TEXT_SIZE", 0.26) if _ss else 0.26
+        _ensure_font(SPEAKER_TEXT, SPEAKER_LOCATION, size=_spk_sz, bold=True,
                      shadow="Speaker_Shadow", renpy_color=SPEAKER_DEFAULT_COLOR, font_file=UI_FONT_NAME)
-        _ensure_font(DIALOGUE_TEXT, DIALOGUE_TEXT_LOCATION, size=0.26,
+        _ensure_font(DIALOGUE_TEXT, DIALOGUE_TEXT_LOCATION, size=_dlg_sz,
                      shadow="Dialogue_Shadow", renpy_color=DEFAULT_TEXT_COLOR, font_file=UI_FONT_REGULAR)
 
         try:
@@ -2006,12 +2029,20 @@ except Exception:
                                    color=(0.02, 0.03, 0.08, 1.0), rot=PLANE_ROTATION)
             hb = _get_or_create(scene, HISTORY_PLANE, _mk_hist)
             _link_ob(scene, hb, collections["VN_UI"])
-            _apply_2d_layout(hb, (0.0, -7.0, 0.9), (6.6, 3.0, 1.0))
+            _h_loc = getattr(_ss, "HISTORY_LOCATION", (0.0, -7.0, 0.9)) if _ss else (0.0, -7.0, 0.9)
+            _h_scl = getattr(_ss, "HISTORY_SCALE", (6.6, 3.0, 1.0)) if _ss else (6.6, 3.0, 1.0)
+            _h_col = getattr(_ss, "HISTORY_COLOR", (0.02, 0.03, 0.08, 1.0)) if _ss else (0.02, 0.03, 0.08, 1.0)
+            _apply_2d_layout(hb, _h_loc, _h_scl)
             _single_material(hb, mat_ui)
-            _tint(hb, (0.02, 0.03, 0.08, 1.0))
+            _tint(hb, _h_col)
             _static_ghost(hb)
-        _ensure_font(HISTORY_TEXT, (-6.0, -8.0, 3.4), size=0.20)
-        _ensure_font(REWIND_TEXT, (-6.0, -9.0, 4.4), size=0.17, shear=0.18)
+        _ht_loc = getattr(_ss, "HISTORY_TEXT_LOCATION", (-6.0, -8.0, 3.4)) if _ss else (-6.0, -8.0, 3.4)
+        _ht_sz = getattr(_ss, "HISTORY_TEXT_SIZE", 0.20) if _ss else 0.20
+        _rt_loc = getattr(_ss, "REWIND_TEXT_LOCATION", (-6.0, -9.0, 4.4)) if _ss else (-6.0, -9.0, 4.4)
+        _rt_sz = getattr(_ss, "REWIND_TEXT_SIZE", 0.17) if _ss else 0.17
+        _rt_sh = getattr(_ss, "REWIND_SHEAR", 0.18) if _ss else 0.18
+        _ensure_font(HISTORY_TEXT, _ht_loc, size=_ht_sz)
+        _ensure_font(REWIND_TEXT, _rt_loc, size=_rt_sz, shear=_rt_sh)
 
         # M28 Adaptive choice layout — uses config if present, else LearnToCodeRPG parity
         # Ren'Py: gui.choice_button_width=1185 (61.7% screen), height 52px, ypos 405 centered, spacing 33px
@@ -2048,91 +2079,99 @@ except Exception:
                     _choice_spacing = float(world["choice_spacing_em"])
         except Exception as e:
             print(f"[UPVN] Adaptive choice override failed: {e}")
+        _ch_size = getattr(_ss, "CHOICE_PLANE_SIZE", 2.0) if _ss else 2.0
+        _ch_scale = getattr(_ss, "CHOICE_PLANE_SCALE", (1.0, 0.22, 1.0)) if _ss else (1.0, 0.22, 1.0)
+        _ch_plane_color = getattr(_ss, "CHOICE_PLANE_COLOR", (1.0, 1.0, 1.0, 0.8)) if _ss else (1.0, 1.0, 1.0, 0.8)
+        _ch_text_size = getattr(_ss, "CHOICE_TEXT_SIZE", 0.22) if _ss else 0.22
         for i in range(CHOICE_COUNT):
-            # Fixed layout — no adaptive, small default to avoid outside trigger
-            # Previously used _choice_width_factor*7.5 ~4.63 which was huge (9.26 world width) causing outside trigger when auto_layout OFF
-            # Now small default 1.0 width (2.0 world) — will be resized by auto layout if ON, or kept custom if OFF
-            try:
-                z = _choice_base_z - i * (_choice_spacing * 0.16 + 0.5 * 0.12 + 0.54)
-                z = _choice_base_z - i * (0.66 if _choice_spacing==0.38 else _choice_spacing * 1.736)
-            except Exception:
-                z = 1.05 - i * 0.66
-            loc = (0.0, -5.0, z)
+            if _ss is not None:
+                loc = _ss.choice_location(i)
+                tloc = _ss.choice_text_location(i)
+            else:
+                try:
+                    z = _choice_base_z - i * (0.66 if _choice_spacing == 0.38 else _choice_spacing * 1.736)
+                except Exception:
+                    z = 1.05 - i * 0.66
+                loc = (0.0, -5.0, z)
+                tloc = (loc[0], -6.0, loc[2] + 0.08)
             cname = f"{CHOICE_PREFIX}{i}"
             try:
                 def _mk(cname=cname):
-                    return _data_plane(cname, size=2.0, color=(1.0, 1.0, 1.0, 0.8),
+                    return _data_plane(cname, size=_ch_size, color=_ch_plane_color,
                                        rot=PLANE_ROTATION)
                 ch = _get_or_create(scene, cname, _mk)
                 _link_ob(scene, ch, collections["VN_UI"])
-                # Fixed small width to avoid outside trigger — was 4.63 scale (9.26 world) huge
-                # Now 1.0 scale = 2.0 world width, reasonable default, auto layout will resize if ON
-                try:
-                    _w_scale = 1.0  # was _choice_width_factor * 7.5 ~4.63
-                except Exception:
-                    _w_scale = 1.0
-                _apply_2d_layout(ch, loc, (_w_scale, 0.22, 1.0))
+                _apply_2d_layout(ch, loc, _ch_scale)
                 _single_material(ch, mat_choice)
                 _tint(ch, CHOICE_IDLE_COLOR)
                 _static_ghost(ch)
                 tname = cname + "_text"
-                # Text Middle vertical alignment per user request — CENTER/CENTER
-                # Previously at -2.1 offset for LEFT alignment, now centered at loc[0] for CENTER alignment
-                _ensure_font(tname, (loc[0], -6.0, loc[2] + 0.08),
-                             size=0.22, bold=False,
+                _ensure_font(tname, tloc,
+                             size=_ch_text_size, bold=False,
                              shadow=cname + "_shadow", renpy_color=CHOICE_TEXT_IDLE, font_file=UI_FONT_INTERFACE)
             except Exception as exc:
                 print(f"[UPVN] choice {cname} create failed: {exc}")
 
-        # M27 HQ: world setup — dark gradient, not pure black
+        # World + lighting — knobs in scene_settings (apply_scene_environment
+        # already wrote the world; re-apply here so a second Setup Scene refreshes).
         try:
-            world = scene.world
-            if world is None:
-                world = _b.data.worlds.new("UPVN_World")
-                scene.world = world
-            world.use_nodes = True
-            bg_n = world.node_tree.nodes.get("Background")
-            if bg_n:
-                bg_n.inputs[0].default_value = (0.015, 0.018, 0.032, 1.0)
-                bg_n.inputs[1].default_value = 0.6
+            if _ss is not None:
+                _ss.apply_world(scene, _b)
+            else:
+                world = scene.world
+                if world is None:
+                    world = _b.data.worlds.new("UPVN_World")
+                    scene.world = world
+                world.use_nodes = True
+                bg_n = world.node_tree.nodes.get("Background")
+                if bg_n:
+                    bg_n.inputs[0].default_value = (0.015, 0.018, 0.032, 1.0)
+                    bg_n.inputs[1].default_value = 0.6
         except Exception:
             pass
 
-        # M27 HQ: soft lighting for 3D stage — keep one sun, hide others
-        # Previous code hid ALL lights, which made 3D stage flat. Keep a soft sun for depth.
         try:
-            # ensure at least one sun for 3D stage depth
-            sun_name = "SUN_Soft"
+            sun_name = getattr(_ss, "SUN_NAME", "SUN_Soft") if _ss else "SUN_Soft"
+            sun_energy = getattr(_ss, "SUN_ENERGY", 0.8) if _ss else 0.8
+            sun_color = getattr(_ss, "SUN_COLOR", (0.9, 0.92, 1.0)) if _ss else (0.9, 0.92, 1.0)
+            sun_loc = getattr(_ss, "SUN_LOCATION", (2.0, -3.0, 4.0)) if _ss else (2.0, -3.0, 4.0)
+            sun_rot = getattr(_ss, "SUN_ROTATION", (0.8, 0.1, 0.5)) if _ss else (0.8, 0.1, 0.5)
+            other_e = getattr(_ss, "OTHER_LIGHT_ENERGY", 0.3) if _ss else 0.3
             sun = _b.data.objects.get(sun_name)
             if sun is None and _b.data.lights:
-                # try to reuse existing sun
                 for ob in list(scene.objects):
                     if ob.type == "LIGHT" and ob.data.type == "SUN":
                         sun = ob
                         break
             if sun is None:
-                light_data = _b.data.lights.new(name="SUN_Soft", type='SUN')
-                light_data.energy = 0.8
-                light_data.color = (0.9, 0.92, 1.0)
+                light_data = _b.data.lights.new(name=sun_name, type='SUN')
+                light_data.energy = sun_energy
+                light_data.color = sun_color
+                try:
+                    if _ss is not None:
+                        light_data.angle = _ss.SUN_ANGLE
+                except Exception:
+                    pass
                 sun_obj = _b.data.objects.new(name=sun_name, object_data=light_data)
-                sun_obj.location = (2.0, -3.0, 4.0)
-                sun_obj.rotation_euler = (0.8, 0.1, 0.5)
+                sun_obj.location = sun_loc
+                sun_obj.rotation_euler = sun_rot
                 scene.collection.objects.link(sun_obj)
                 collections["VN_3DStage"].objects.link(sun_obj)
             else:
                 try:
                     sun.hide_viewport = False
                     sun.hide_render = False
-                    sun.data.energy = 0.8
+                    sun.data.energy = sun_energy
+                    sun.data.color = sun_color
+                    sun.location = sun_loc
+                    sun.rotation_euler = sun_rot
                 except Exception:
                     pass
-            # hide other harsh lights
             for ob in list(scene.objects):
                 try:
-                    if ob.type == "LIGHT" and ob.name != sun_name and ob.name != "SUN_Soft":
-                        # keep but dim
+                    if ob.type == "LIGHT" and ob.name != sun_name:
                         if ob.data:
-                            ob.data.energy = 0.3
+                            ob.data.energy = other_e
                 except Exception:
                     pass
         except Exception:
@@ -2145,8 +2184,8 @@ except Exception:
             emp = scene.objects.get(ename)
             if emp is None:
                 emp = _b.data.objects.new(ename, None)
-                emp.empty_display_type = "PLAIN_AXES"
-                emp.empty_display_size = 0.6
+                emp.empty_display_type = getattr(_ss, "POSITION_EMPTY_DISPLAY", "PLAIN_AXES") if _ss else "PLAIN_AXES"
+                emp.empty_display_size = getattr(_ss, "POSITION_EMPTY_SIZE", 0.6) if _ss else 0.6
                 scene.collection.objects.link(emp)
                 try:
                     collections["VN_Characters"].objects.link(emp)
@@ -2155,8 +2194,8 @@ except Exception:
             emp.location = POSITIONS.get(pos, (0.0, -0.15, 0.0))
         pool = scene.objects.get(SPRITE_POOL)
         if pool is None:
-            pool = _data_plane(SPRITE_POOL, size=4.0,
-                               color=(0.62, 0.78, 0.55, 1.0),
+            pool = _data_plane(SPRITE_POOL, size=getattr(_ss, "SPRITE_POOL_SIZE", 4.0) if _ss else 4.0,
+                               color=getattr(_ss, "SPRITE_POOL_COLOR", (0.62, 0.78, 0.55, 1.0)) if _ss else (0.62, 0.78, 0.55, 1.0),
                                rot=PLANE_ROTATION)
             scene.collection.objects.link(pool)
             try:
@@ -2182,7 +2221,11 @@ except Exception:
         created = ctrl is None
         if ctrl is None:
             ctrl = _b.data.objects.new("VNController", None)
-            ctrl.empty_display_type = "CUBE"
+            ctrl.empty_display_type = getattr(_ss, "CONTROLLER_EMPTY_DISPLAY", "CUBE") if _ss else "CUBE"
+            try:
+                ctrl.empty_display_size = getattr(_ss, "CONTROLLER_EMPTY_SIZE", 1.0) if _ss else 1.0
+            except Exception:
+                pass
             scene.collection.objects.link(ctrl)
         effective_script_path = script_path
         try:
@@ -2199,7 +2242,8 @@ except Exception:
         except Exception:
             pass
         _set_runtime_prop(_b, ctrl, "script_path", effective_script_path)
-        _set_runtime_prop(_b, ctrl, "image_mode", IMAGE_MODE_DEFAULT)
+        _set_runtime_prop(_b, ctrl, "image_mode",
+                          getattr(_ss, "IMAGE_MODE_DEFAULT", IMAGE_MODE_DEFAULT) if _ss else IMAGE_MODE_DEFAULT)
         try:
             if "parse_mode" not in ctrl:
                 _set_runtime_prop(_b, ctrl, "parse_mode", "safe")

@@ -30,6 +30,13 @@ import argparse
 import os
 import sys
 import tempfile
+from pathlib import Path
+
+_ROOT = Path(__file__).resolve().parents[1]
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
+
+from engine.render import scene_settings as ss
 
 EXCLUDE_SUFFIX = ("Camera",)
 
@@ -61,13 +68,13 @@ with bpy.data.libraries.load(SRC, link=False) as (data_from, data_to):
                        and not n.split(".")[0].endswith({EXCLUDE_SUFFIX!r})]
     data_to.actions = list(data_from.actions)
 
-TEMPLATE_NAMES = {{"eileen", "sylvie"}}  # extend per game: show3d asset names
+TEMPLATE_NAMES = {set(ss.STAGE_TEMPLATE_NAMES)!r}  # extend per game: show3d asset names
 for ob in data_to.objects:
     for c in list(ob.users_collection):
         c.objects.unlink(ob)
     sc.collection.objects.link(ob)
     if ob.name.split(".")[0] in TEMPLATE_NAMES:
-        ob.location = (30.0, -3.0, -30.0)  # parked out of the UI frustum
+        ob.location = {ss.STAGE_TEMPLATE_PARK!r}  # parked out of the UI frustum
 
 act = data_to.actions[0] if data_to.actions else None
 if act:
