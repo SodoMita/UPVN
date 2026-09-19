@@ -1,6 +1,9 @@
 # Current Status — 2026-09-19 (GitHub CI: plugin + OS templates + sway smoke)
 
 ## Last completed
+- **Slim UPBGE player for CI/agents**: tag `upbge-player-0.50`, fetched by
+  `tools/fetch_upbge.sh` (fallback official). Recreate on `build` when the
+  UPBGE version changes.
 - **Runnable 7z only on `build` + tags**: `main`/`agent/**` stay small
   (addon + templates). `runnable.yml` on branch `build`; GitHub Release
   on `v*` tags (`publish.yml`).

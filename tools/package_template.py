@@ -37,6 +37,10 @@ BLEND_SRC = ROOT / "blend" / "UPVN_Template.blend"
 LICENSE_SRC = ROOT / "LICENSE"
 SUB_TREES = ("engine", "bge_frontend")
 
+# Bump this when switching official UPBGE releases; rebuild slim player on
+# branch `build` so CI/agents pick up tag upbge-player-<version>.
+UPBGE_VERSION = "0.50"
+
 UPBGE_URLS = {
     "linux": (
         "https://github.com/UPBGE/upbge/releases/download/v0.50/"
@@ -59,6 +63,11 @@ PLATFORM_SLUG = {
 }
 
 TOP = "upvn-game-template"
+
+PLAYER_ARCHIVE_TOP = {
+    "linux": f"upbge-{UPBGE_VERSION}-linux-x64",
+    "windows": f"upbge-{UPBGE_VERSION}-windows-x64",
+}
 
 # Editor-only / optional GPU denoise — blenderplayer does not need these.
 _PLAYER_DROP_TOP = {
@@ -673,7 +682,8 @@ def _7z_bin() -> str | None:
     return shutil.which("7z") or shutil.which("7za")
 
 
-def _7z_dir(src: pathlib.Path, dest: pathlib.Path) -> pathlib.Path:
+def _7z_dir(src: pathlib.Path, dest: pathlib.Path,
+            root: str = TOP) -> pathlib.Path:
     """Solid LZMA2 7z — ~25% smaller than zip on the player tree."""
     exe = _7z_bin()
     if not exe:
@@ -687,7 +697,7 @@ def _7z_dir(src: pathlib.Path, dest: pathlib.Path) -> pathlib.Path:
         dest.unlink()
     # dest MUST be absolute: 7z is run with cwd=src (the staging tree).
     proc = subprocess.run(
-        [exe, "a", "-t7z", "-mx=7", "-ms=on", "-snl", str(dest), TOP],
+        [exe, "a", "-t7z", "-mx=7", "-ms=on", "-snl", str(dest), root],
         cwd=src, capture_output=True, text=True, timeout=1800,
     )
     if proc.returncode != 0 or not dest.is_file():
@@ -807,6 +817,40 @@ def build_platform_zip(out_dir: pathlib.Path, platform: str,
     return dest
 
 
+def player_archive_name(platform: str) -> str:
+    return f"upvn-upbge-player-{UPBGE_VERSION}-{PLATFORM_SLUG[platform]}.7z"
+
+
+def build_player_archive(out_dir: pathlib.Path, platform: str,
+                         player_src: pathlib.Path) -> pathlib.Path:
+    """Stripped blenderplayer tree, same folder name as official UPBGE.
+
+    For CI / agents who only *run* games. No editor. Recreate when
+    UPBGE_VERSION changes (branch ``build`` publishes tag
+    ``upbge-player-<version>``).
+    """
+    if platform not in PLAYER_ARCHIVE_TOP:
+        raise SystemExit(f"--player-only is linux/windows, not {platform}")
+    player_src = detect_upbge_root(player_src)
+    kind = player_tree_platform(player_src)
+    if kind != platform:
+        raise SystemExit(f"--with-player tree is {kind}, not {platform}")
+    out_dir = pathlib.Path(out_dir).resolve()
+    out_dir.mkdir(parents=True, exist_ok=True)
+    dest = out_dir / player_archive_name(platform)
+    top = PLAYER_ARCHIVE_TOP[platform]
+    with tempfile.TemporaryDirectory(prefix="upvn_player_") as tmp:
+        staging = pathlib.Path(tmp)
+        copy_stripped_player(player_src, staging / top)
+        if platform == "linux":
+            write_portable_userpref(player_src, staging / top)
+        _7z_dir(staging, dest, root=top)
+    n = len(archive_list(dest))
+    print(f"[package_template] player-only {dest} — {n} entries, "
+          f"{dest.stat().st_size // 1024}KB")
+    return dest
+
+
 def build_all(out_dir: pathlib.Path, platforms: list[str],
               player_src: pathlib.Path | None = None) -> list[pathlib.Path]:
     version = addon_version(ADDON_SRC)
@@ -831,10 +875,24 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="extracted UPBGE 0.50 linux or windows tree (bundles blenderplayer)",
     )
+    ap.add_argument(
+        "--player-only",
+        action="store_true",
+        help="archive a stripped blenderplayer tree (no game template) "
+             "for CI/agents; requires --with-player",
+    )
     args = ap.parse_args(argv)
     platforms = [p.strip() for p in args.platforms.split(",") if p.strip()]
     player = pathlib.Path(args.with_player) if args.with_player else None
-    built = build_all(pathlib.Path(args.out_dir), platforms, player_src=player)
+    if args.player_only:
+        if player is None:
+            raise SystemExit("--player-only requires --with-player")
+        kind = player_tree_platform(player)
+        want = [p for p in platforms if p == kind] or [kind]
+        built = [build_player_archive(pathlib.Path(args.out_dir), p, player)
+                 for p in want]
+    else:
+        built = build_all(pathlib.Path(args.out_dir), platforms, player_src=player)
     for p in built:
         print(f"[package_template] OK -> {p}")
     return 0

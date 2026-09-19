@@ -21,8 +21,6 @@ WORK="${UPVN_SMOKE_DIR:-${RUNNER_TEMP:-/tmp}/upvn_ci_project}"
 LOG="${UPVN_LOG:-/tmp/upvn_ci_player.log}"
 HB="${UPVN_HEARTBEAT:-/tmp/upvn_ci_hb.json}"
 TEE="${UPVN_DEBUG_TEE:-/tmp/upvn_ci_debug.log}"
-TARBALL_URL="https://github.com/UPBGE/upbge/releases/download/v0.50/upbge-0.50-linux-x64.tar.xz"
-
 die() { echo "FATAL: $*" >&2; exit 1; }
 info() { echo "▸ $*"; }
 
@@ -31,17 +29,9 @@ ensure_upbge() {
         info "UPBGE player: $UPBGE/blenderplayer"
         return
     fi
-    local cache="${UPVN_UPBGE_CACHE:-${RUNNER_TEMP:-/tmp}/upbge-cache}"
-    mkdir -p "$cache" "$(dirname "$UPBGE")"
-    local tar="$cache/upbge-0.50-linux-x64.tar.xz"
-    if [ ! -f "$tar" ]; then
-        info "Downloading UPBGE 0.50 (~408 MB)…"
-        curl -L --retry 5 --retry-delay 2 -o "$tar.partial" "$TARBALL_URL"
-        mv "$tar.partial" "$tar"
-    fi
-    info "Extracting UPBGE → $(dirname "$UPBGE")"
-    tar -xJf "$tar" -C "$(dirname "$UPBGE")"
-    [ -x "$UPBGE/blenderplayer" ] || die "extract did not produce $UPBGE/blenderplayer"
+    mkdir -p "$(dirname "$UPBGE")"
+    bash "$SCRIPT_DIR/fetch_upbge.sh" "$(dirname "$UPBGE")"
+    [ -x "$UPBGE/blenderplayer" ] || die "fetch_upbge.sh did not produce $UPBGE/blenderplayer"
 }
 
 ensure_desktop() {
@@ -70,24 +60,30 @@ make_project() {
     [ -f "$WORK/game/script.rpy" ] || die "creator did not write script.rpy"
 
     # Bake script_path so the player loads //../game/script.rpy (repo layout:
-    # blend/ next to game/).
-    info "Baking VNController.script_path → //../game/script.rpy"
-    LIBGL_ALWAYS_SOFTWARE=1 "$UPBGE/blender" --background \
-        "$WORK/blend/UPVN_Template.blend" --python-expr \
-        "import bpy; ob=bpy.data.objects.get('VNController');
+    # blend/ next to game/). Slim player has no editor — skip bpy and use
+    # the file-next-to-blend fallback.
+    if [ -x "$UPBGE/blender" ]; then
+        info "Baking VNController.script_path → //../game/script.rpy"
+        LIBGL_ALWAYS_SOFTWARE=1 "$UPBGE/blender" --background \
+            "$WORK/blend/UPVN_Template.blend" --python-expr \
+            "import bpy; ob=bpy.data.objects.get('VNController');
 props=[p for p in (ob.game.properties if ob else []) if p.name=='script_path'];
 props and setattr(props[0],'value','//../game/script.rpy');
 ob and ob.__setitem__('script_path','//../game/script.rpy');
 print('FLIPPED','//../game/script.rpy'); bpy.ops.wm.save_mainfile()" \
-        >/tmp/upvn_ci_flip.log 2>&1 || true
-    if ! grep -q FLIPPED /tmp/upvn_ci_flip.log; then
-        echo "WARN: blend flip did not print FLIPPED (see /tmp/upvn_ci_flip.log)"
-        tail -30 /tmp/upvn_ci_flip.log || true
-        # Fallback: also drop a copy next to the blend (ENGINE_CANDIDATES).
+            >/tmp/upvn_ci_flip.log 2>&1 || true
+        if ! grep -q FLIPPED /tmp/upvn_ci_flip.log; then
+            echo "WARN: blend flip did not print FLIPPED (see /tmp/upvn_ci_flip.log)"
+            tail -30 /tmp/upvn_ci_flip.log || true
+            mkdir -p "$WORK/blend/game"
+            cp "$WORK/game/script.rpy" "$WORK/blend/game/script.rpy"
+        fi
+        rm -f "$WORK/blend/UPVN_Template.blend1"
+    else
+        info "No blender editor (slim player) — script next to blend"
         mkdir -p "$WORK/blend/game"
         cp "$WORK/game/script.rpy" "$WORK/blend/game/script.rpy"
     fi
-    rm -f "$WORK/blend/UPVN_Template.blend1"
 }
 
 run_player() {

@@ -256,6 +256,18 @@ def test_with_player_rejects_os_mismatch(tmp_path):
         pkg.build_platform_zip(tmp_path / "out", "windows", player_src=linux)
 
 
+def test_player_only_archive_keeps_official_folder_name(tmp_path):
+    src = _fake_upbge(tmp_path / "upbge")
+    zpath = pkg.build_player_archive(tmp_path / "out", "linux", src)
+    assert zpath.name == "upvn-upbge-player-0.50-linux-x64.7z"
+    names = set(pkg.archive_list(zpath))
+    assert "upbge-0.50-linux-x64/blenderplayer" in names
+    assert "upbge-0.50-linux-x64/5.0/datafiles/fonts/droidsans.ttf" in names
+    assert not any(n.endswith("/blender") for n in names)
+    assert not any("addons_core" in n for n in names)
+    assert not any("upvn-game-template" in n for n in names)
+
+
 def test_repair_flattened_zip_sonames(tmp_path):
     lib = tmp_path / "lib"
     lib.mkdir()

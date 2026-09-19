@@ -365,6 +365,13 @@ On every push/PR:
   `.github/workflows/runnable.yml` (CI artifacts). A `v*` tag (or
   **Publish Release**) attaches `upvn-runnable-{linux,windows}-x64.7z`
   to the GitHub Release via `publish.yml`.
+- **Slim UPBGE player for CI/agents** — same strip, no game template.
+  Tag `upbge-player-0.50` holds `upvn-upbge-player-0.50-{linux,windows}-x64.7z`.
+  `tools/fetch_upbge.sh` prefers that (~170 MB) and falls back to the
+  official 408 MB tarball. Player-smoke and `desktop_sway.sh` use it.
+  Recreate when UPBGE's version changes: bump `UPBGE_VERSION` in
+  `tools/package_template.py` and merge to `build`. No editor in the slim
+  tree — authoring still needs official UPBGE.
 
 The *template* zips do not bundle UPBGE (download 0.50 from the URL in
 each zip's README). The *runnable* 7z archives do.
