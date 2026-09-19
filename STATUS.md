@@ -1,6 +1,9 @@
 # Current Status — 2026-09-19 (GitHub CI: plugin + OS templates + sway smoke)
 
 ## Last completed
+- **Host Vulkan / zip-symlink stubs**: `play.sh` repairs flattened `.so`
+  symlinks (or drops them so `ld.so` uses the system lib). `libvulkan*` is
+  not bundled.
 - **Smaller linux runner + readable type**: player zip no longer copies
   soname `.so` three times; `blenderplayer` is stripped; tofu fonts fixed by
   shipping/binding `blend/fonts/DejaVuSans.ttf`.

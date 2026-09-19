@@ -74,6 +74,10 @@ _PLAYER_DROP_DIR_PARTS = {
 }
 _PLAYER_DROP_NAME_PREFIX = (
     "libhiprt", "libOpenImageDenoise_device_",
+    # Host Vulkan loader + ICD — a bundled loader is a 20-byte zip-symlink
+    # stub after many GUI extractors, and ld.so then says "file too short"
+    # instead of using the system libvulkan.so.1.
+    "libvulkan",
 )
 _PLAYER_DROP_SUFFIX = (".a",)
 _PLAYER_DROP_NAME_CONTAINS = ("config-3.",)
@@ -121,10 +125,14 @@ def _readme(platform: str, version: str, bundled: bool) -> str:
             "UPBGE is GPL; its licenses are in player/license/.\n"
             "UPVN is MIT (see LICENSE).\n"
             "\n"
-            "System libraries the player still expects from the OS:\n"
-            "  libX11, libGL (or Mesa llvmpipe), libpulse0 (audio; we set\n"
+            "System libraries (not bundled — the host copy is used):\n"
+            "  libvulkan1, libX11, libGL (or Mesa), libpulse0.\n"
             "  audio=None in the bundled userpref so a missing Pulse server\n"
-            "  should not crash).\n"
+            "  should not crash.\n"
+            "\n"
+            "If a GUI unzipper turns .so symlinks into tiny files, play.sh\n"
+            "repairs them (or deletes a stub so the system library loads).\n"
+            "Prefer extracting with:  unzip upvn-runnable-linux-x64.zip\n"
             f"Full UPBGE (if you want the editor): {url}\n"
         )
     if platform == "linux":
@@ -173,8 +181,55 @@ def _readme(platform: str, version: str, bundled: bool) -> str:
     )
 
 
+# Recreate soname symlinks that python zipfile / some GUI unzippers write as
+# tiny regular files (contents = the link target). ld.so does not skip those
+# ("file too short") and will not fall through to the system library.
+REPAIR_PLAYER_LIBS_PY = r"""
+import os, sys
+from pathlib import Path
+d = Path(sys.argv[1])
+if not d.is_dir():
+    raise SystemExit(0)
+for p in list(d.iterdir()):
+    if p.is_symlink() or not p.is_file():
+        continue
+    try:
+        sz = p.stat().st_size
+    except OSError:
+        continue
+    if sz < 1 or sz >= 200:
+        continue
+    raw = p.read_bytes().split(b"\0", 1)[0].decode("utf-8", "replace").strip()
+    if not raw or "/" in raw or "\\" in raw or "\n" in raw:
+        continue
+    if not (raw.startswith("lib") and ".so" in raw):
+        continue
+    dest = d / raw
+    p.unlink()
+    if dest.exists() or dest.is_symlink():
+        os.symlink(raw, p)
+    # else: stub with no bundled target — leave it deleted so ld.so uses
+    # the host library (libvulkan.so.1, libpulse.so.0, …).
+"""
+
+
+def repair_player_lib_stubs(libdir) -> int:
+    """Turn flattened zip-symlinks into real symlinks (or drop the stub)."""
+    libdir = pathlib.Path(libdir)
+    old_argv = sys.argv
+    try:
+        sys.argv = ["repair", str(libdir)]
+        exec(REPAIR_PLAYER_LIBS_PY, {"__name__": "__repair__"})
+    finally:
+        sys.argv = old_argv
+    if not libdir.is_dir():
+        return 0
+    return sum(1 for p in libdir.iterdir() if p.is_symlink())
+
+
 def _play_sh() -> str:
-    return """#!/usr/bin/env bash
+    return (
+        """#!/usr/bin/env bash
 # UPVN launcher — prefers a bundled player/ tree (no extra download).
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -200,6 +255,15 @@ PLAYER="$(pick)" || {
   exit 2
 }
 if [ -d "$HERE/player/lib" ]; then
+  # python zipfile / Archive Manager write Unix zip-symlinks as tiny files.
+  # ld.so then errors "file too short" and never tries the system copy.
+  if command -v python3 >/dev/null 2>&1; then
+    python3 - "$HERE/player/lib" <<'PY'
+"""
+        + REPAIR_PLAYER_LIBS_PY.strip()
+        + """
+PY
+  fi
   export LD_LIBRARY_PATH="$HERE/player/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 fi
 cd "$HERE"
@@ -207,6 +271,7 @@ unset WAYLAND_DISPLAY WAYLAND_SOCKET || true
 export SDL_AUDIODRIVER="${SDL_AUDIODRIVER:-dummy}"
 exec "$PLAYER" -w 1280 720 0 0 "$HERE/blend/UPVN_Template.blend"
 """
+    )
 
 
 def _play_bat() -> str:

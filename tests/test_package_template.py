@@ -101,6 +101,9 @@ def _fake_upbge(root: Path) -> Path:
     (root / "blender").write_text("#!/bin/sh\necho editor\n", encoding="utf-8")
     (root / "lib" / "liboslexec.so.1.13").write_bytes(b"osl-real")
     (root / "lib" / "liboslexec.so").symlink_to("liboslexec.so.1.13")
+    (root / "lib" / "libvulkan.so.1.3.296").write_bytes(b"vk-real" * 20)
+    (root / "lib" / "libvulkan.so.1").symlink_to("libvulkan.so.1.3.296")
+    (root / "lib" / "libvulkan.so").symlink_to("libvulkan.so.1")
     (root / "lib" / "libtbb.so.12").write_bytes(b"so")
     (root / "lib" / "mesa" / "libGL.so").write_bytes(b"mesa")
     (root / "lib" / "libhiprt64.so").write_bytes(b"hip")
@@ -138,6 +141,9 @@ def test_copy_stripped_player_drops_editor_and_cycles(tmp_path):
     assert not (dest / "5.0" / "python" / "lib" / "python3.11" / "site-packages" / "pxr").exists()
     assert not (dest / "5.0" / "python" / "bin").exists()
     assert not (dest / "5.0" / "datafiles" / "fonts").exists()
+    assert not (dest / "lib" / "libvulkan.so.1").exists()
+    assert not (dest / "lib" / "libvulkan.so").exists()
+    assert not list(dest.glob("lib/libvulkan*"))
 
 
 def test_runnable_linux_zip_embeds_player(tmp_path):
@@ -155,3 +161,24 @@ def test_runnable_linux_zip_embeds_player(tmp_path):
     assert "player/blenderplayer" in play
     assert "No extra download" in readme
     assert "upvn-game-template/game/script.rpy" in names
+    assert not any("libvulkan" in n for n in names)
+    assert "file too short" in play
+    assert "python3" in play
+    with zipfile.ZipFile(zpath) as zf:
+        info = zf.getinfo("upvn-game-template/player/lib/liboslexec.so")
+        assert (info.external_attr >> 16) & 0o170000 == stat.S_IFLNK
+        assert zf.read(info) == b"liboslexec.so.1.13"
+
+
+def test_repair_flattened_zip_sonames(tmp_path):
+    lib = tmp_path / "lib"
+    lib.mkdir()
+    (lib / "liboslexec.so.1.13").write_bytes(b"ELF" + b"x" * 100)
+    (lib / "liboslexec.so").write_text("liboslexec.so.1.13")
+    (lib / "libvulkan.so.1").write_text("libvulkan.so.1.3.296")
+    (lib / "notes.txt").write_text("leave me")
+    pkg.repair_player_lib_stubs(lib)
+    assert (lib / "liboslexec.so").is_symlink()
+    assert os.readlink(lib / "liboslexec.so") == "liboslexec.so.1.13"
+    assert not (lib / "libvulkan.so.1").exists()
+    assert (lib / "notes.txt").read_text() == "leave me"

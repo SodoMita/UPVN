@@ -1,3 +1,12 @@
+## 2026-09-19 — use the host Vulkan loader (file too short)
+
+- GUI unzippers / `zipfile.extract` turn soname zip-symlinks into 20-byte
+  files. `ld.so` then errors `libvulkan.so.1: file too short` and never
+  tries the system copy. `play.sh` now recreates those symlinks, or deletes
+  a stub with no bundled target so the OS library loads.
+- `libvulkan*` is no longer shipped — blenderplayer uses the host
+  `libvulkan1` (and its GPU ICD). Same for libX11 / libGL.
+
 ## 2026-09-19 — smaller linux runner + readable type
 
 - `copy_stripped_player` now keeps soname **symlinks** (copy2 had duplicated
