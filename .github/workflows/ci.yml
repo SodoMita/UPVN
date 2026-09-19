@@ -167,15 +167,19 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Cache UPBGE 0.50 tarball
+      - name: Install 7-Zip (slim player extract)
+        run: sudo apt-get update -y && (sudo apt-get install -y 7zip || sudo apt-get install -y p7zip-full)
+
+      - name: Cache slim UPBGE player
         uses: actions/cache@v4
         with:
           path: ${{ runner.temp }}/upbge-cache
-          key: upbge-0.50-linux-x64
+          key: upvn-upbge-player-0.50-linux-x64
 
       - name: Create project, run blenderplayer under sway
         env:
           UPVN_UPBGE_CACHE: ${{ runner.temp }}/upbge-cache
+          UPVN_PLAYER_REPO: ${{ github.repository }}
           UPBGE_DIR: /opt/upbge/upbge-0.50-linux-x64
           UPVN_SMOKE_SECS: "20"
           UPVN_WL_DIR: ${{ runner.temp }}/wl-upvn
