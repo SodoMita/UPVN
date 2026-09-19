@@ -236,6 +236,20 @@ def test_runnable_windows_zip_embeds_player(tmp_path):
     assert "play.bat" in readme
 
 
+def test_runnable_7z_honors_relative_out_dir(tmp_path, monkeypatch):
+    """7z is invoked with cwd=staging; dest must be absolute or CI writes
+    the archive into /tmp and then thinks dist/ is empty (exit 1, rc 0)."""
+    src = _fake_upbge(tmp_path / "upbge")
+    work = tmp_path / "work"
+    work.mkdir()
+    monkeypatch.chdir(work)
+    zpath = pkg.build_platform_zip(Path("dist"), "linux", player_src=src)
+    expect = (work / "dist" / "upvn-runnable-linux-x64.7z").resolve()
+    assert zpath.resolve() == expect
+    assert expect.is_file() and expect.stat().st_size > 0
+    assert zpath.name == "upvn-runnable-linux-x64.7z"
+
+
 def test_with_player_rejects_os_mismatch(tmp_path):
     linux = _fake_upbge(tmp_path / "linux")
     with pytest.raises(SystemExit):

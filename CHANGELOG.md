@@ -1,3 +1,9 @@
+## 2026-09-19 — 7z dest path is absolute (CI wrote into staging)
+
+- `7z a` runs with `cwd` = the staging tree. A relative `dist/…7z` was
+  created *inside* that temp dir; Python then saw no file and exited 1
+  despite `Everything is Ok` / rc 0. Dest is now resolved first.
+
 ## 2026-09-19 — keep Blender CJK fonts; runnable is 7z not zip
 
 - `5.0/datafiles/fonts` stays in the stripped player (Noto CJK + Inter +

@@ -145,12 +145,12 @@ def _readme(platform: str, version: str, bundled: bool) -> str:
                 "\n"
                 "If a GUI unzipper turns .so symlinks into tiny files, play.sh\n"
                 "repairs them (or deletes a stub so the system library loads).\n"
-                f"Prefer extracting with:  unzip {zipname}\n"
+                f"Prefer extracting with:  7z x {zipname}\n"
             )
         return (
             f"UPVN runnable game v{version} ({slug})\n"
             "======================================================\n"
-            "Self-contained: unzip and run. No extra download.\n"
+            "Self-contained: extract and run. No extra download.\n"
             "\n"
             f"{how}"
             "  blend/UPVN_Template.blend   — pre-wired scene\n"
@@ -681,9 +681,11 @@ def _7z_dir(src: pathlib.Path, dest: pathlib.Path) -> pathlib.Path:
             "7z is required for runnable archives (Debian/Ubuntu: "
             "sudo apt install p7zip-full)"
         )
+    dest = pathlib.Path(dest).resolve()
     dest.parent.mkdir(parents=True, exist_ok=True)
     if dest.exists():
         dest.unlink()
+    # dest MUST be absolute: 7z is run with cwd=src (the staging tree).
     proc = subprocess.run(
         [exe, "a", "-t7z", "-mx=7", "-ms=on", "-snl", str(dest), TOP],
         cwd=src, capture_output=True, text=True, timeout=1800,
@@ -769,7 +771,7 @@ def build_platform_zip(out_dir: pathlib.Path, platform: str,
                 f"{'.exe' if kind == 'windows' else ''}), not {platform}"
             )
     version = version or addon_version(ADDON_SRC)
-    out_dir = pathlib.Path(out_dir)
+    out_dir = pathlib.Path(out_dir).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
     bundled = player_src is not None
     name = (f"upvn-runnable-{PLATFORM_SLUG[platform]}.7z" if bundled
