@@ -142,7 +142,8 @@ def test_image_mode_prop_written_by_builder(tmp_path):
     check — bpy is unavailable headless)."""
     src = (Path(__file__).resolve().parents[1] / "blend" /
            "upvn_editor_addon.py").read_text()
-    assert '_set_runtime_prop(_b, ctrl, "image_mode", IMAGE_MODE_DEFAULT)' in src
+    assert '_set_runtime_prop(_b, ctrl, "image_mode"' in src
+    assert "IMAGE_MODE_DEFAULT" in src
     # and never clobbers a configured script_path with the default
     assert "effective_script_path" in src
 

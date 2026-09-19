@@ -86,7 +86,7 @@ def test_bake_tool_exists_and_excludes_cameras():
     assert os.path.exists(p)
     src = open(p).read()
     assert "EXCLUDE_SUFFIX" in src and '"Camera"' in src
-    assert "30.0, -3.0, -30.0" in src, "template parking position"
+    assert "STAGE_TEMPLATE_PARK" in src, "parking position comes from scene_settings"
 
 
 def test_sample_stage_blend_shipped():

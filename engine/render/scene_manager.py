@@ -24,6 +24,7 @@ from .contract import (BG_PLANE, BG_MATERIAL, ASSET_BACKGROUNDS,
                        image_mode_from, stage_color, apply_object_color,
                        plane_material, apply_material_image,
                        reset_material_palette)
+from .scene_settings import BACKGROUND_LAYER, TRANSITIONS, BG_FIT_COVER_MARGIN
 import time
 
 # Relative search prefixes for background images, relative to the .blend.
@@ -36,13 +37,6 @@ def _dbg(msg: str):
     """Asset decisions are rare — print unconditionally so a debug tee
     (UPVN_DEBUG_TEE) or a console captures them."""
     print(f"[SceneManager] {msg}")
-
-# The backdrop lives 10 units behind the stage: the player camera sits at
-# y=-10, sprites/stage around y=-1..0 and the UI at y=-2..-9, so y=+6 keeps
-# the background clear of everything that has to move in front of it (3D
-# characters, camera pushes). Ortho projection: distance costs nothing.
-BACKGROUND_LAYER = 0.0
-TRANSITIONS = {"fade": 0.6, "dissolve": 0.45, None: 0.0}
 
 def _fit_bg_to_view(plane) -> None:
     """Scale/center a backdrop plane so it **covers** the ortho viewport.
@@ -70,8 +64,13 @@ def _fit_bg_to_view(plane) -> None:
         ortho = float(getattr(cam, "ortho_scale", 0.0) or 0.0)
         if ortho <= 0.0:
             return
-        w = float(bge.render.getWindowWidth() or 1280)
-        h = float(bge.render.getWindowHeight() or 720)
+        try:
+            from .scene_settings import RENDER_RESOLUTION_X, RENDER_RESOLUTION_Y
+            _fw, _fh = float(RENDER_RESOLUTION_X), float(RENDER_RESOLUTION_Y)
+        except Exception:
+            _fw, _fh = 1920.0, 1080.0
+        w = float(bge.render.getWindowWidth() or _fw)
+        h = float(bge.render.getWindowHeight() or _fh)
         # KX_GameObject has no .dimensions — ask the bpy datablock.
         bo = getattr(plane, "blenderObject", None)
         dims = getattr(bo, "dimensions", None) if bo is not None else None
@@ -79,7 +78,7 @@ def _fit_bg_to_view(plane) -> None:
             return
         view_w = ortho * (w / h)      # frame width in world units
         view_h = ortho                # frame height in world units
-        k = max(view_w / dims.x, view_h / dims.y) * 1.02   # cover + 2% margin
+        k = max(view_w / dims.x, view_h / dims.y) * BG_FIT_COVER_MARGIN
         if abs(k - 1.0) < 0.02:
             return
         try:
@@ -108,10 +107,10 @@ def _fit_bg_to_view(plane) -> None:
 
 
 def _hide_template_stage(scene) -> None:
-    """Hide the template's demo 3D classroom once a real background applies.
+    """Hide VN_3DStage meshes once a 2D background applies.
 
-    Converted Ren'Py projects ship their own backgrounds; leaving the demo
-    stage meshes visible drew desks/boards over them (M29 parity fix).
+    Converted Ren'Py projects ship their own backgrounds; leftover 3D stage
+    meshes would draw over them.
     """
     try:
         import bpy

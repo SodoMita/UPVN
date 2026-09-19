@@ -39,6 +39,16 @@ import os
 import sys
 import time
 
+try:
+    from engine.render.scene_settings import (
+        CAMERA_UI_ORTHO_SCALE, RENDER_RESOLUTION_X, RENDER_RESOLUTION_Y,
+        SCRIPT_PATH_DEFAULT,
+    )
+except Exception:
+    CAMERA_UI_ORTHO_SCALE = 15.0
+    RENDER_RESOLUTION_X, RENDER_RESOLUTION_Y = 1920, 1080
+    SCRIPT_PATH_DEFAULT = "//game/script.rpy"
+
 _last_time: float = 0.0
 
 # relative candidates, tried from the .blend directory and up to 2 parent
@@ -282,13 +292,13 @@ def _apply_gui_par():
                 except Exception:
                     pass
         sizes = cfg.get("sizes") or {}
-        ortho = 15.0
+        ortho = CAMERA_UI_ORTHO_SCALE
         cam = (getattr(sc, "active_camera", None)
                or getattr(sc, "camera", None))
         if cam is not None:
-            ortho = float(getattr(cam, "ortho_scale", 15.0) or 15.0)
-        w = float(_bge.render.getWindowWidth() or 1280)
-        h = float(_bge.render.getWindowHeight() or 720)
+            ortho = float(getattr(cam, "ortho_scale", CAMERA_UI_ORTHO_SCALE) or CAMERA_UI_ORTHO_SCALE)
+        w = float(_bge.render.getWindowWidth() or RENDER_RESOLUTION_X)
+        h = float(_bge.render.getWindowHeight() or RENDER_RESOLUTION_Y)
         world_h = ortho * h / w
         px2wu = world_h / h
         for obj_name, key in (("Speaker_Text", "name"),
@@ -434,7 +444,6 @@ def _sync_world_ui(ctrl, hovered=None):
         return
     try:
         from engine.ui.world_ui import build_world_ui, apply_world_ui
-        from engine.render.contract import CAMERA_UI_ORTHO_SCALE
         _sm = getattr(ctrl, "screen_mgr", None)
         history_open = False
         history_entries = None
@@ -479,7 +488,7 @@ def _sync_world_ui(ctrl, hovered=None):
             ortho_raw = float(getattr(cam, "ortho_scale", ortho) or ortho)
             # Perspective fix: if ortho is 0 (perspective camera), use 15 for layout so buttons not tiny
             # User reports perspective triggers outside, ortho OK — tiny buttons in perspective caused mismatch
-            ortho = ortho_raw if ortho_raw > 0.001 else 15.0
+            ortho = ortho_raw if ortho_raw > 0.001 else CAMERA_UI_ORTHO_SCALE
         except Exception:
             pass
         status = apply_world_ui(_get_obj, payload, ortho=ortho, hovered=hovered)
@@ -625,10 +634,10 @@ def _debug_draw_ray(origin, target, hit_point=None, hit_name=None, color_hit=(0,
             # Draw visible frame bounds at y=0 plane
             try:
                 cam = sc.active_camera
-                ortho = float(getattr(cam, "ortho_scale", 15.0) or 15.0)
+                ortho = float(getattr(cam, "ortho_scale", CAMERA_UI_ORTHO_SCALE) or CAMERA_UI_ORTHO_SCALE)
                 if ortho > 0.001:
-                    w = float(_bge.render.getWindowWidth() or 1280.0)
-                    h = float(_bge.render.getWindowHeight() or 720.0)
+                    w = float(_bge.render.getWindowWidth() or float(RENDER_RESOLUTION_X))
+                    h = float(_bge.render.getWindowHeight() or float(RENDER_RESOLUTION_Y))
                     half = ortho / 2.0
                     half_v = half * h / w if w > 0 else half * 9.0/16.0
                     # Draw boundary box at y=0
@@ -748,10 +757,10 @@ def _object_under_cursor():
         # Now uses getAxisVect for X and Y to be generic for any camera rotation
         if is_ortho:
             try:
-                w = float(_bge.render.getWindowWidth() or 1280.0)
-                h = float(_bge.render.getWindowHeight() or 720.0)
+                w = float(_bge.render.getWindowWidth() or float(RENDER_RESOLUTION_X))
+                h = float(_bge.render.getWindowHeight() or float(RENDER_RESOLUTION_Y))
             except Exception:
-                w, h = 1280.0, 720.0
+                w, h = float(RENDER_RESOLUTION_X), float(RENDER_RESOLUTION_Y)
             nx = float(mx) - 0.5
             ny = 0.5 - float(my)
             # Generic: use camera's local X and Y axes for ray origin offset

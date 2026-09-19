@@ -16,10 +16,17 @@ Idempotent.
 import json
 import os
 import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 import bpy
 
-ORTHO = 15.0
+from engine.render import scene_settings as ss
+
+ORTHO = ss.CAMERA_UI_ORTHO_SCALE
 
 
 def main() -> None:
@@ -40,12 +47,14 @@ def main() -> None:
     # and dims emission (white text -> 197, green name -> gray-green).
     # Standard view transform restores 1:1 color parity.
     try:
-        scene.view_settings.view_transform = "Standard"
-        scene.view_settings.look = "None"
+        scene.view_settings.view_transform = ss.VIEW_TRANSFORM
+        scene.view_settings.look = ss.VIEW_LOOK
+        scene.view_settings.exposure = ss.VIEW_EXPOSURE
+        scene.view_settings.gamma = ss.VIEW_GAMMA
     except Exception as e:
         print(f"[apply_gui] view transform failed: {e}")
-    w = float(scene.render.resolution_x or 1280)
-    h = float(scene.render.resolution_y or 720)
+    w = float(scene.render.resolution_x or ss.RENDER_RESOLUTION_X)
+    h = float(scene.render.resolution_y or ss.RENDER_RESOLUTION_Y)
     # vertical overscan + drop: the player's view centre for these banks sits
     # ~1.1 world units above the plane origin (measured on sway, M29), so a
     # bare viewport-height plane leaves a band of world colour at the bottom.
