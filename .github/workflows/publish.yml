@@ -78,6 +78,26 @@ jobs:
           python tools/package_template.py dist
           ls -lh dist/upvn-game-template-*.zip
 
+      - name: Cache UPBGE 0.50 tarball
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/upbge-cache
+          key: upbge-0.50-linux-x64
+
+      - name: Build runnable linux zip (bundled blenderplayer)
+        run: |
+          mkdir -p "${{ runner.temp }}/upbge-cache" "${{ runner.temp }}/upbge"
+          TAR="${{ runner.temp }}/upbge-cache/upbge-0.50-linux-x64.tar.xz"
+          if [ ! -f "$TAR" ]; then
+            curl -L --retry 5 -o "$TAR.partial" \
+              https://github.com/UPBGE/upbge/releases/download/v0.50/upbge-0.50-linux-x64.tar.xz
+            mv "$TAR.partial" "$TAR"
+          fi
+          tar -xJf "$TAR" -C "${{ runner.temp }}/upbge"
+          python tools/package_template.py dist --platforms linux \
+            --with-player "${{ runner.temp }}/upbge/upbge-0.50-linux-x64"
+          ls -lh dist/upvn-runnable-linux-x64.zip
+
       - name: Build sample game package (optional, non-blocking)
         continue-on-error: true
         run: |

@@ -1,27 +1,26 @@
 #!/usr/bin/env python3
-"""Build per-OS UPVN *game template* zips (Linux / Windows / macOS).
+"""Build per-OS UPVN game-template zips, optionally with a bundled player.
 
-These are playable project skeletons — blend + engine + frontend + a starter
-``game/script.rpy`` + an OS launcher. They do **not** redistributable-bundle
-UPBGE (GPL, 300–650 MB); each README points at the matching official
-UPBGE 0.50 download. Launchers look for ``blenderplayer`` on PATH /
-``UPBGE_DIR`` / common install locations.
+Default (no player): small zips that need an UPBGE 0.50 install on PATH.
+
+``--with-player /path/to/upbge-0.50-linux-x64`` copies a *stripped*
+blenderplayer runtime into the linux zip so unzip + ``./play.sh`` runs
+with nothing else to download. The editor binary, Cycles add-on, locales
+and other editor-only files are left out.
 
 Usage:
-    python tools/package_template.py [out_dir]
-    python tools/package_template.py dist --platforms linux,windows,macos
-
-Output (default ``dist/``):
-    upvn-game-template-linux-x64.zip
-    upvn-game-template-windows-x64.zip
-    upvn-game-template-macos-arm64.zip
+    python tools/package_template.py dist
+    python tools/package_template.py dist --platforms linux \\
+        --with-player /var/tmp/upbge/upbge-0.50-linux-x64
 """
 from __future__ import annotations
 
 import argparse
+import os
 import pathlib
 import shutil
 import stat
+import subprocess
 import sys
 import tempfile
 import zipfile
@@ -58,6 +57,25 @@ PLATFORM_SLUG = {
 
 TOP = "upvn-game-template"
 
+# Editor-only / optional GPU denoise — blenderplayer does not need these.
+_PLAYER_DROP_TOP = {
+    "blender", "blender-launcher", "blender-softwaregl",
+    "blender-system-info.sh", "blender-thumbnailer",
+    "org.upbge.UPBGE.desktop", "org.upbge.UPBGE.metainfo.xml",
+    "org.upbge.UPBGE.svg", "org.upbge.UPBGE-symbolic.svg",
+    "readme.html",
+}
+_PLAYER_DROP_DIR_PARTS = {
+    "addons_core", "addons", "locale", "studiolights", "assets",
+    "icons", "ensurepip", "idlelib", "turtledemo", "pip", "setuptools",
+    "Cython", "mesa",
+}
+_PLAYER_DROP_NAME_PREFIX = (
+    "libhiprt", "libOpenImageDenoise_device_",
+)
+_PLAYER_DROP_SUFFIX = (".a",)
+_PLAYER_DROP_NAME_CONTAINS = ("config-3.",)
+
 
 def _inject_init(base: pathlib.Path) -> None:
     dirs = [base] + sorted(p for p in base.rglob("*") if p.is_dir())
@@ -67,7 +85,6 @@ def _inject_init(base: pathlib.Path) -> None:
 
 
 def _write_starter(dest: pathlib.Path) -> None:
-    """Write a short declarative starter (no bpy)."""
     from blend.upvn_editor_addon import UPVN_GameBuilder
 
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -79,8 +96,35 @@ def _write_starter(dest: pathlib.Path) -> None:
         raise SystemExit(f"starter script failed to validate: {msg}")
 
 
-def _readme(platform: str, version: str) -> str:
+def _readme(platform: str, version: str, bundled: bool) -> str:
     url = UPBGE_URLS[platform]
+    if bundled:
+        return (
+            f"UPVN runnable game v{version} ({PLATFORM_SLUG[platform]})\n"
+            "======================================================\n"
+            "Self-contained: unzip and run. No extra download.\n"
+            "\n"
+            "  unzip upvn-runnable-linux-x64.zip\n"
+            "  cd upvn-game-template\n"
+            "  ./play.sh\n"
+            "\n"
+            "Contents:\n"
+            "  play.sh                     — launcher\n"
+            "  player/blenderplayer        — stripped UPBGE 0.50 player\n"
+            "  blend/UPVN_Template.blend   — pre-wired scene\n"
+            "  engine/  bge_frontend/      — UPVN runtime\n"
+            "  game/script.rpy             — starter story (edit this)\n"
+            "\n"
+            "The editor binary is not included (this is a player-only build).\n"
+            "UPBGE is GPL; its licenses are in player/license/.\n"
+            "UPVN is MIT (see LICENSE).\n"
+            "\n"
+            "System libraries the player still expects from the OS:\n"
+            "  libX11, libGL (or Mesa llvmpipe), libpulse0 (audio; we set\n"
+            "  audio=None in the bundled userpref so a missing Pulse server\n"
+            "  should not crash).\n"
+            f"Full UPBGE (if you want the editor): {url}\n"
+        )
     if platform == "linux":
         play = "  ./play.sh"
         extra = (
@@ -129,10 +173,14 @@ def _readme(platform: str, version: str) -> str:
 
 def _play_sh() -> str:
     return """#!/usr/bin/env bash
-# UPVN game-template launcher (Linux).
+# UPVN launcher — prefers a bundled player/ tree (no extra download).
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 pick() {
+  if [ -x "$HERE/player/blenderplayer" ]; then
+    echo "$HERE/player/blenderplayer"
+    return 0
+  fi
   local c
   for c in \\
       "${UPBGE_DIR:-}/blenderplayer" \\
@@ -146,14 +194,15 @@ pick() {
 }
 PLAYER="$(pick)" || {
   echo "FATAL: blenderplayer not found." >&2
-  echo "Install UPBGE 0.50 and set UPBGE_DIR, or put blenderplayer on PATH." >&2
-  echo "Download: ${UPBGE_URL:-see README.txt}" >&2
+  echo "This zip has no bundled player — install UPBGE 0.50 or rebuild with --with-player." >&2
   exit 2
 }
+if [ -d "$HERE/player/lib" ]; then
+  export LD_LIBRARY_PATH="$HERE/player/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+fi
 cd "$HERE"
-# UPBGE 0.53+ native Wayland can SIGSEGV headless; X11/XWayland is the
-# supported player path. Harmless on a normal desktop.
 unset WAYLAND_DISPLAY WAYLAND_SOCKET || true
+export SDL_AUDIODRIVER="${SDL_AUDIODRIVER:-dummy}"
 exec "$PLAYER" -w 1280 720 0 0 "$HERE/blend/UPVN_Template.blend"
 """
 
@@ -164,7 +213,8 @@ def _play_bat() -> str:
         "setlocal\r\n"
         "set HERE=%~dp0\r\n"
         "set PLAYER=\r\n"
-        "if defined UPBGE_DIR if exist \"%UPBGE_DIR%\\blenderplayer.exe\" "
+        "if exist \"%HERE%player\\blenderplayer.exe\" set PLAYER=%HERE%player\\blenderplayer.exe\r\n"
+        "if not defined PLAYER if defined UPBGE_DIR if exist \"%UPBGE_DIR%\\blenderplayer.exe\" "
         "set PLAYER=%UPBGE_DIR%\\blenderplayer.exe\r\n"
         "if not defined PLAYER if exist \"%UPBGE_DIR%\\upbge-0.50-windows-x64\\"
         "blenderplayer.exe\" set PLAYER=%UPBGE_DIR%\\upbge-0.50-windows-x64\\"
@@ -188,6 +238,10 @@ def _play_command() -> str:
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 pick() {
+  if [ -x "$HERE/player/blenderplayer" ]; then
+    echo "$HERE/player/blenderplayer"
+    return 0
+  fi
   local c
   for c in \\
       "${UPBGE_DIR:-}/blenderplayer" \\
@@ -215,6 +269,102 @@ def _chmod_exec(path: pathlib.Path) -> None:
     path.chmod(mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
 
+def _drop_player_path(rel: pathlib.Path) -> bool:
+    parts = set(rel.parts)
+    if parts & _PLAYER_DROP_DIR_PARTS:
+        return True
+    name = rel.name
+    if name in _PLAYER_DROP_TOP:
+        return True
+    if name.startswith(_PLAYER_DROP_NAME_PREFIX):
+        return True
+    if name.endswith(_PLAYER_DROP_SUFFIX):
+        return True
+    if any(s in name for s in _PLAYER_DROP_NAME_CONTAINS):
+        return True
+    return False
+
+
+def copy_stripped_player(src: pathlib.Path, dest: pathlib.Path) -> pathlib.Path:
+    """Copy a playable blenderplayer tree, dropping editor-only files."""
+    src = pathlib.Path(src)
+    dest = pathlib.Path(dest)
+    player_bin = src / "blenderplayer"
+    if not player_bin.is_file():
+        raise SystemExit(f"no blenderplayer in {src}")
+    if dest.exists():
+        shutil.rmtree(dest)
+    dest.mkdir(parents=True)
+    n_keep = 0
+    for p in src.rglob("*"):
+        if not p.is_file():
+            continue
+        rel = p.relative_to(src)
+        if _drop_player_path(rel):
+            continue
+        if "__pycache__" in rel.parts:
+            continue
+        out = dest / rel
+        out.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(p, out)
+        n_keep += 1
+    if not (dest / "blenderplayer").is_file():
+        raise SystemExit("strip dropped blenderplayer — refuse to ship")
+    _chmod_exec(dest / "blenderplayer")
+    # Pulse is DT_NEEDED; copy the system .so if present so a Pulse-less
+    # host still *loads* (userpref audio=None avoids talking to a server).
+    libdir = dest / "lib"
+    libdir.mkdir(exist_ok=True)
+    for cand in (
+        "/usr/lib/x86_64-linux-gnu/libpulse.so.0",
+        "/lib/x86_64-linux-gnu/libpulse.so.0",
+    ):
+        if os.path.isfile(cand):
+            shutil.copy2(cand, libdir / "libpulse.so.0")
+            # companions
+            parent = pathlib.Path(cand).parent
+            for extra in parent.glob("libpulsecommon-*.so"):
+                shutil.copy2(extra, libdir / extra.name)
+            for extra in parent.glob("libpulse.so.0.*"):
+                shutil.copy2(extra, libdir / extra.name)
+            break
+    print(f"[package_template] stripped player: {n_keep} files → {dest}")
+    return dest
+
+
+def write_portable_userpref(upbge_dir: pathlib.Path, dest_player: pathlib.Path) -> bool:
+    """Bake audio_device=None into player/portable so the zip is crash-free."""
+    blender = pathlib.Path(upbge_dir) / "blender"
+    if not blender.is_file():
+        return False
+    cfg = dest_player / "portable" / "config"
+    cfg.mkdir(parents=True, exist_ok=True)
+    expr = (
+        "import bpy; bpy.context.preferences.system.audio_device='None'; "
+        "bpy.context.preferences.filepaths.use_scripts_auto_execute=True; "
+        "bpy.ops.wm.save_userpref()"
+    )
+    env = dict(os.environ)
+    env["BLENDER_USER_CONFIG"] = str(cfg)
+    env["LIBGL_ALWAYS_SOFTWARE"] = "1"
+    env["SDL_AUDIODRIVER"] = "dummy"
+    try:
+        proc = subprocess.run(
+            [str(blender), "--background", "--python-expr", expr],
+            capture_output=True, text=True, timeout=180, env=env,
+        )
+    except Exception as exc:
+        print(f"[package_template] userpref bake skipped: {exc}")
+        return False
+    pref = cfg / "userpref.blend"
+    if pref.is_file():
+        print(f"[package_template] portable userpref → {pref}")
+        return True
+    print("[package_template] userpref bake produced no file; "
+          f"stdout={proc.stdout[-200:]!r} stderr={proc.stderr[-200:]!r}")
+    return False
+
+
 def _stage_common(staging: pathlib.Path) -> None:
     root = staging / TOP
     root.mkdir(parents=True)
@@ -239,11 +389,15 @@ def _stage_common(staging: pathlib.Path) -> None:
     _write_starter(root / "game" / "script.rpy")
 
 
-def _add_platform_files(root: pathlib.Path, platform: str, version: str) -> None:
-    (root / "README.txt").write_text(_readme(platform, version), encoding="utf-8")
-    (root / "UPBGE_DOWNLOAD.txt").write_text(
-        UPBGE_URLS[platform] + "\n", encoding="utf-8"
+def _add_platform_files(root: pathlib.Path, platform: str, version: str,
+                        bundled: bool) -> None:
+    (root / "README.txt").write_text(
+        _readme(platform, version, bundled), encoding="utf-8"
     )
+    if not bundled:
+        (root / "UPBGE_DOWNLOAD.txt").write_text(
+            UPBGE_URLS[platform] + "\n", encoding="utf-8"
+        )
     if platform == "linux":
         p = root / "play.sh"
         p.write_text(_play_sh(), encoding="utf-8")
@@ -256,42 +410,62 @@ def _add_platform_files(root: pathlib.Path, platform: str, version: str) -> None
         _chmod_exec(p)
 
 
+def _zip_exec_mode(path: pathlib.Path) -> int:
+    name = path.name
+    if name in {"play.sh", "play.command", "blenderplayer", "blenderplayer.exe"}:
+        return 0o755
+    if path.suffix in {".sh", ".command", ".so"} or ".so." in name:
+        return 0o755
+    try:
+        if path.stat().st_mode & stat.S_IXUSR:
+            return 0o755
+    except Exception:
+        pass
+    return 0o644
+
+
 def _zip_dir(src: pathlib.Path, dest: pathlib.Path) -> pathlib.Path:
     dest.parent.mkdir(parents=True, exist_ok=True)
     if dest.exists():
         dest.unlink()
-    with zipfile.ZipFile(dest, "w", zipfile.ZIP_DEFLATED) as zf:
+    with zipfile.ZipFile(dest, "w", zipfile.ZIP_DEFLATED, allowZip64=True) as zf:
         for p in sorted(src.rglob("*")):
             if not p.is_file():
                 continue
             if "__pycache__" in p.parts or p.suffix in {".pyc", ".pyo"}:
                 continue
             arc = p.relative_to(src).as_posix()
-            # Preserve +x on launchers inside the zip (Unix unzip).
-            info = zipfile.ZipInfo(arc)
-            info.compress_type = zipfile.ZIP_DEFLATED
-            mode = 0o755 if p.suffix in {".sh", ".command"} or p.name in {
-                "play.sh", "play.command",
-            } else 0o644
-            info.external_attr = (stat.S_IFREG | mode) << 16
-            info.date_time = (2026, 1, 1, 0, 0, 0)
-            zf.writestr(info, p.read_bytes())
+            # zf.write streams from disk — do not slurp blenderplayer (228 MB)
+            # into RAM on a 2 GB sandbox.
+            zf.write(p, arc)
+            info = zf.getinfo(arc)
+            info.external_attr = (stat.S_IFREG | _zip_exec_mode(p)) << 16
     return dest
 
 
 def build_platform_zip(out_dir: pathlib.Path, platform: str,
-                       version: str | None = None) -> pathlib.Path:
+                       version: str | None = None,
+                       player_src: pathlib.Path | None = None) -> pathlib.Path:
     if platform not in PLATFORM_SLUG:
         raise SystemExit(f"unknown platform {platform!r}")
+    if player_src is not None and platform != "linux":
+        raise SystemExit("--with-player is implemented for linux only "
+                         "(this is the smallest runnable experiment)")
     version = version or addon_version(ADDON_SRC)
     out_dir = pathlib.Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    name = f"upvn-game-template-{PLATFORM_SLUG[platform]}.zip"
+    bundled = player_src is not None
+    name = (f"upvn-runnable-{PLATFORM_SLUG[platform]}.zip" if bundled
+            else f"upvn-game-template-{PLATFORM_SLUG[platform]}.zip")
     dest = out_dir / name
     with tempfile.TemporaryDirectory(prefix="upvn_tmpl_") as tmp:
         staging = pathlib.Path(tmp)
         _stage_common(staging)
-        _add_platform_files(staging / TOP, platform, version)
+        root = staging / TOP
+        _add_platform_files(root, platform, version, bundled=bundled)
+        if bundled:
+            copy_stripped_player(pathlib.Path(player_src), root / "player")
+            write_portable_userpref(pathlib.Path(player_src), root / "player")
         _zip_dir(staging, dest)
     n = len(zipfile.ZipFile(dest).namelist())
     print(f"[package_template] {dest} — {n} entries, "
@@ -299,9 +473,14 @@ def build_platform_zip(out_dir: pathlib.Path, platform: str,
     return dest
 
 
-def build_all(out_dir: pathlib.Path, platforms: list[str]) -> list[pathlib.Path]:
+def build_all(out_dir: pathlib.Path, platforms: list[str],
+              player_src: pathlib.Path | None = None) -> list[pathlib.Path]:
     version = addon_version(ADDON_SRC)
-    return [build_platform_zip(out_dir, p, version=version) for p in platforms]
+    out = []
+    for p in platforms:
+        src = player_src if p == "linux" else None
+        out.append(build_platform_zip(out_dir, p, version=version, player_src=src))
+    return out
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -312,9 +491,15 @@ def main(argv: list[str] | None = None) -> int:
         default="linux,windows,macos",
         help="comma-separated: linux,windows,macos",
     )
+    ap.add_argument(
+        "--with-player",
+        default=None,
+        help="path to extracted UPBGE 0.50 linux tree (bundles blenderplayer)",
+    )
     args = ap.parse_args(argv)
     platforms = [p.strip() for p in args.platforms.split(",") if p.strip()]
-    built = build_all(pathlib.Path(args.out_dir), platforms)
+    player = pathlib.Path(args.with_player) if args.with_player else None
+    built = build_all(pathlib.Path(args.out_dir), platforms, player_src=player)
     for p in built:
         print(f"[package_template] OK -> {p}")
     return 0

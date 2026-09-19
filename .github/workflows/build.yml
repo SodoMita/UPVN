@@ -68,3 +68,48 @@ jobs:
           name: upvn-game-templates
           path: dist/upvn-game-template-*.zip
           if-no-files-found: error
+
+  runnable-linux:
+    name: Runnable linux zip (bundled blenderplayer)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Cache UPBGE 0.50 tarball
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/upbge-cache
+          key: upbge-0.50-linux-x64
+
+      - name: Download + extract UPBGE
+        env:
+          CACHE: ${{ runner.temp }}/upbge-cache
+        run: |
+          mkdir -p "$CACHE" "$RUNNER_TEMP/upbge"
+          TAR="$CACHE/upbge-0.50-linux-x64.tar.xz"
+          if [ ! -f "$TAR" ]; then
+            curl -L --retry 5 -o "$TAR.partial" \
+              https://github.com/UPBGE/upbge/releases/download/v0.50/upbge-0.50-linux-x64.tar.xz
+            mv "$TAR.partial" "$TAR"
+          fi
+          tar -xJf "$TAR" -C "$RUNNER_TEMP/upbge"
+          test -x "$RUNNER_TEMP/upbge/upbge-0.50-linux-x64/blenderplayer"
+
+      - name: Build self-contained linux zip
+        run: |
+          python tools/package_template.py dist --platforms linux \
+            --with-player "$RUNNER_TEMP/upbge/upbge-0.50-linux-x64"
+          ls -lh dist/upvn-runnable-linux-x64.zip
+          unzip -l dist/upvn-runnable-linux-x64.zip | head -n 30
+
+      - name: Upload runnable linux zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: upvn-runnable-linux
+          path: dist/upvn-runnable-linux-x64.zip
+          if-no-files-found: error

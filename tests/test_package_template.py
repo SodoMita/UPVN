@@ -80,3 +80,63 @@ def test_macos_has_play_command(tmp_path):
 def test_unknown_platform_exits():
     with pytest.raises(SystemExit):
         pkg.build_platform_zip(Path("/tmp"), "amiga")
+
+
+def _fake_upbge(root: Path) -> Path:
+    """Minimal UPBGE-shaped tree for strip tests (no real binary)."""
+    root.mkdir(parents=True)
+    (root / "lib").mkdir()
+    (root / "lib" / "mesa").mkdir()
+    (root / "license").mkdir()
+    (root / "5.0" / "scripts" / "addons_core" / "cycles").mkdir(parents=True)
+    (root / "5.0" / "scripts" / "modules").mkdir(parents=True)
+    (root / "5.0" / "datafiles" / "locale").mkdir(parents=True)
+    (root / "5.0" / "datafiles" / "colormanagement").mkdir(parents=True)
+    (root / "5.0" / "python" / "lib").mkdir(parents=True)
+    (root / "blenderplayer").write_text("#!/bin/sh\necho fake\n", encoding="utf-8")
+    (root / "blenderplayer").chmod(0o755)
+    (root / "blender").write_text("#!/bin/sh\necho editor\n", encoding="utf-8")
+    (root / "lib" / "libtbb.so.12").write_bytes(b"so")
+    (root / "lib" / "mesa" / "libGL.so").write_bytes(b"mesa")
+    (root / "lib" / "libhiprt64.so").write_bytes(b"hip")
+    (root / "license" / "gpl.txt").write_text("GPL\n", encoding="utf-8")
+    (root / "5.0" / "scripts" / "addons_core" / "cycles" / "x.py").write_text("x\n")
+    (root / "5.0" / "scripts" / "modules" / "bge.py").write_text("# bge\n")
+    (root / "5.0" / "datafiles" / "locale" / "x.mo").write_bytes(b"mo")
+    (root / "5.0" / "datafiles" / "colormanagement" / "config.ocio").write_text("ocio\n")
+    (root / "5.0" / "python" / "lib" / "libpython3.11.a").write_bytes(b"ar")
+    return root
+
+
+def test_copy_stripped_player_drops_editor_and_cycles(tmp_path):
+    src = _fake_upbge(tmp_path / "upbge")
+    dest = tmp_path / "player"
+    pkg.copy_stripped_player(src, dest)
+    assert (dest / "blenderplayer").is_file()
+    assert not (dest / "blender").exists()
+    assert (dest / "lib" / "libtbb.so.12").is_file()
+    assert not (dest / "lib" / "mesa" / "libGL.so").exists()
+    assert not (dest / "lib" / "libhiprt64.so").exists()
+    assert not (dest / "5.0" / "scripts" / "addons_core").exists()
+    assert (dest / "5.0" / "scripts" / "modules" / "bge.py").is_file()
+    assert not (dest / "5.0" / "datafiles" / "locale" / "x.mo").exists()
+    assert (dest / "5.0" / "datafiles" / "colormanagement" / "config.ocio").is_file()
+    assert not (dest / "5.0" / "python" / "lib" / "libpython3.11.a").exists()
+    assert (dest / "license" / "gpl.txt").is_file()
+
+
+def test_runnable_linux_zip_embeds_player(tmp_path):
+    src = _fake_upbge(tmp_path / "upbge")
+    zpath = pkg.build_platform_zip(tmp_path / "out", "linux", player_src=src)
+    assert zpath.name == "upvn-runnable-linux-x64.zip"
+    with zipfile.ZipFile(zpath) as zf:
+        names = set(zf.namelist())
+        play = zf.read("upvn-game-template/play.sh").decode("utf-8")
+        readme = zf.read("upvn-game-template/README.txt").decode("utf-8")
+    assert "upvn-game-template/player/blenderplayer" in names
+    assert "upvn-game-template/player/lib/libtbb.so.12" in names
+    assert not any("addons_core" in n for n in names)
+    assert not any(n.endswith("/blender") for n in names)
+    assert "player/blenderplayer" in play
+    assert "No extra download" in readme
+    assert "upvn-game-template/game/script.rpy" in names

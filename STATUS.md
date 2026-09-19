@@ -1,6 +1,9 @@
 # Current Status — 2026-09-19 (GitHub CI: plugin + OS templates + sway smoke)
 
 ## Last completed
+- **Self-contained linux runnable zip** (`upvn-runnable-linux-x64.zip`):
+  stripped `blenderplayer` + engine + starter. `./play.sh` needs no extra
+  download. Built with `--with-player`. Live-run here: heartbeat start/say.
 - **GitHub CI ships the editor plugin, three OS game templates, and a live
   player smoke.** `tools/package_addon.py` (existing) + `tools/package_template.py`
   (linux/windows/macos zips, launchers, no UPBGE binary). Tag publishes attach

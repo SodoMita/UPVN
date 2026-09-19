@@ -1,3 +1,14 @@
+## 2026-09-19 — self-contained linux runnable zip (bundled blenderplayer)
+
+- `python tools/package_template.py dist --platforms linux --with-player <upbge>`
+  writes `upvn-runnable-linux-x64.zip`: stripped UPBGE 0.50 `blenderplayer` +
+  game data. Unzip and `./play.sh` — no extra download. Editor binary, Cycles
+  add-on, locales and GPU denoise devices are dropped. Portable userpref sets
+  `audio_device=None` (BUG-016). GitHub `build.yml` job `runnable-linux`
+  produces the artifact; `publish.yml` attaches it on tags.
+- Verified in-sandbox: heartbeat `label=start event=say` from the bundled
+  starter script under headless sway, scan clean, player killed by timeout.
+
 ## 2026-09-19 — GitHub CI: add-on zip, OS game templates, sway player smoke
 
 - `tools/package_template.py` builds three game-template zips (Linux x64,

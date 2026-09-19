@@ -367,6 +367,10 @@ they do not bundle UPBGE (download 0.50 from the URL in each zip's README).
 ```bash
 python tools/package_addon.py dist
 python tools/package_template.py dist
+# self-contained linux player (needs an extracted UPBGE 0.50 tree once, at pack time):
+python tools/package_template.py dist --platforms linux \
+  --with-player /path/to/upbge-0.50-linux-x64
+# → dist/upvn-runnable-linux-x64.zip  (unzip, ./play.sh, nothing else to fetch)
 ```
 
 ## Legal
