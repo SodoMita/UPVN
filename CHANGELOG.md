@@ -1,3 +1,12 @@
+## 2026-09-19 — runnable windows zip (bundled blenderplayer.exe)
+
+- `python tools/package_template.py dist --platforms windows --with-player <upbge-win>`
+  writes `upvn-runnable-windows-x64.zip`. Unzip and `play.bat` — no extra
+  download. Same strip as linux (drop editor, Cycles, locales, HIP RT,
+  OIDN devices, python/bin). DLLs stay next to `blenderplayer.exe`.
+  GitHub `build.yml` job `runnable-windows` (Ubuntu extracts the official
+  `.7z`); `publish.yml` attaches linux + windows runnable zips on tags.
+
 ## 2026-09-19 — use the host Vulkan loader (file too short)
 
 - GUI unzippers / `zipfile.extract` turn soname zip-symlinks into 20-byte

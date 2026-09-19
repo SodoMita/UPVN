@@ -3,15 +3,18 @@
 
 Default (no player): small zips that need an UPBGE 0.50 install on PATH.
 
-``--with-player /path/to/upbge-0.50-linux-x64`` copies a *stripped*
-blenderplayer runtime into the linux zip so unzip + ``./play.sh`` runs
-with nothing else to download. The editor binary, Cycles add-on, locales
-and other editor-only files are left out.
+``--with-player /path/to/upbge-0.50-{linux,windows}-x64`` copies a
+*stripped* blenderplayer runtime into the matching zip so unzip +
+``./play.sh`` / ``play.bat`` runs with nothing else to download. The
+editor binary, Cycles add-on, locales and other editor-only files are
+left out.
 
 Usage:
     python tools/package_template.py dist
     python tools/package_template.py dist --platforms linux \\
         --with-player /var/tmp/upbge/upbge-0.50-linux-x64
+    python tools/package_template.py dist --platforms windows \\
+        --with-player /var/tmp/upbge/upbge-0.50-windows-x64
 """
 from __future__ import annotations
 
@@ -59,8 +62,10 @@ TOP = "upvn-game-template"
 
 # Editor-only / optional GPU denoise — blenderplayer does not need these.
 _PLAYER_DROP_TOP = {
-    "blender", "blender-launcher", "blender-softwaregl",
-    "blender-system-info.sh", "blender-thumbnailer",
+    "blender", "blender.exe", "blender-launcher", "blender-launcher.exe",
+    "blender-softwaregl", "blender-softwaregl.exe",
+    "blender-system-info.sh", "blender-thumbnailer", "blender-thumbnailer.exe",
+    "blender.pdb", "blenderplayer.pdb",
     "org.upbge.UPBGE.desktop", "org.upbge.UPBGE.metainfo.xml",
     "org.upbge.UPBGE.svg", "org.upbge.UPBGE-symbolic.svg",
     "readme.html",
@@ -73,13 +78,13 @@ _PLAYER_DROP_DIR_PARTS = {
     "pxr", "MaterialX", "usd", "materialx",
 }
 _PLAYER_DROP_NAME_PREFIX = (
-    "libhiprt", "libOpenImageDenoise_device_",
-    # Host Vulkan loader + ICD — a bundled loader is a 20-byte zip-symlink
-    # stub after many GUI extractors, and ld.so then says "file too short"
-    # instead of using the system libvulkan.so.1.
+    "libhiprt", "hiprt",
+    "libOpenImageDenoise_device_", "OpenImageDenoise_device_",
+    # Host Vulkan loader on Linux. Windows keeps vulkan-1.dll (no soname
+    # stub problem; many PCs have no Vulkan runtime in System32).
     "libvulkan",
 )
-_PLAYER_DROP_SUFFIX = (".a",)
+_PLAYER_DROP_SUFFIX = (".a", ".lib", ".pdb")
 _PLAYER_DROP_NAME_CONTAINS = ("config-3.",)
 
 
@@ -105,18 +110,49 @@ def _write_starter(dest: pathlib.Path) -> None:
 def _readme(platform: str, version: str, bundled: bool) -> str:
     url = UPBGE_URLS[platform]
     if bundled:
+        slug = PLATFORM_SLUG[platform]
+        zipname = f"upvn-runnable-{slug}.zip"
+        if platform == "windows":
+            how = (
+                f"  unzip {zipname}\n"
+                "  cd upvn-game-template\n"
+                "  play.bat\n"
+                "\n"
+                "Contents:\n"
+                "  play.bat                    — launcher\n"
+                "  player/blenderplayer.exe    — stripped UPBGE 0.50 player\n"
+            )
+            syslibs = (
+                "DLLs next to blenderplayer.exe are UPBGE's private stack\n"
+                "(USD/OSL/Embree/…). OS libraries (kernel32, user32, D3D,\n"
+                "Vulkan runtime if installed) stay on Windows.\n"
+            )
+        else:
+            how = (
+                f"  unzip {zipname}\n"
+                "  cd upvn-game-template\n"
+                "  ./play.sh\n"
+                "\n"
+                "Contents:\n"
+                "  play.sh                     — launcher\n"
+                "  player/blenderplayer        — stripped UPBGE 0.50 player\n"
+            )
+            syslibs = (
+                "System libraries (not bundled — the host copy is used):\n"
+                "  libvulkan1, libX11, libGL (or Mesa), libpulse0.\n"
+                "  audio=None in the bundled userpref so a missing Pulse server\n"
+                "  should not crash.\n"
+                "\n"
+                "If a GUI unzipper turns .so symlinks into tiny files, play.sh\n"
+                "repairs them (or deletes a stub so the system library loads).\n"
+                f"Prefer extracting with:  unzip {zipname}\n"
+            )
         return (
-            f"UPVN runnable game v{version} ({PLATFORM_SLUG[platform]})\n"
+            f"UPVN runnable game v{version} ({slug})\n"
             "======================================================\n"
             "Self-contained: unzip and run. No extra download.\n"
             "\n"
-            "  unzip upvn-runnable-linux-x64.zip\n"
-            "  cd upvn-game-template\n"
-            "  ./play.sh\n"
-            "\n"
-            "Contents:\n"
-            "  play.sh                     — launcher\n"
-            "  player/blenderplayer        — stripped UPBGE 0.50 player\n"
+            f"{how}"
             "  blend/UPVN_Template.blend   — pre-wired scene\n"
             "  engine/  bge_frontend/      — UPVN runtime\n"
             "  game/script.rpy             — starter story (edit this)\n"
@@ -125,14 +161,7 @@ def _readme(platform: str, version: str, bundled: bool) -> str:
             "UPBGE is GPL; its licenses are in player/license/.\n"
             "UPVN is MIT (see LICENSE).\n"
             "\n"
-            "System libraries (not bundled — the host copy is used):\n"
-            "  libvulkan1, libX11, libGL (or Mesa), libpulse0.\n"
-            "  audio=None in the bundled userpref so a missing Pulse server\n"
-            "  should not crash.\n"
-            "\n"
-            "If a GUI unzipper turns .so symlinks into tiny files, play.sh\n"
-            "repairs them (or deletes a stub so the system library loads).\n"
-            "Prefer extracting with:  unzip upvn-runnable-linux-x64.zip\n"
+            f"{syslibs}"
             f"Full UPBGE (if you want the editor): {url}\n"
         )
     if platform == "linux":
@@ -275,6 +304,7 @@ exec "$PLAYER" -w 1280 720 0 0 "$HERE/blend/UPVN_Template.blend"
 
 
 def _play_bat() -> str:
+    # CRLF batch file. Doubled backslashes are for the .bat, not Python.
     return (
         "@echo off\r\n"
         "setlocal\r\n"
@@ -294,6 +324,7 @@ def _play_bat() -> str:
         "  echo See README.txt for the download URL.\r\n"
         "  exit /b 2\r\n"
         ")\r\n"
+        "if exist \"%HERE%player\\blenderplayer.exe\" set PATH=%HERE%player;%PATH%\r\n"
         "cd /d \"%HERE%\"\r\n"
         "\"%PLAYER%\" -w 1280 720 0 0 \"%HERE%blend\\UPVN_Template.blend\"\r\n"
     )
@@ -380,17 +411,49 @@ def _strip_elf(path: pathlib.Path) -> None:
         pass
 
 
+def _player_bin(src: pathlib.Path) -> pathlib.Path | None:
+    for name in ("blenderplayer.exe", "blenderplayer"):
+        p = src / name
+        if p.is_file():
+            return p
+    return None
+
+
+def detect_upbge_root(src: pathlib.Path) -> pathlib.Path:
+    """Return the folder that actually contains blenderplayer[.exe].
+
+    Official Windows 7z often wraps one extra directory.
+    """
+    src = pathlib.Path(src)
+    if _player_bin(src):
+        return src
+    if src.is_dir():
+        for child in sorted(src.iterdir()):
+            if child.is_dir() and _player_bin(child):
+                return child
+    raise SystemExit(f"no blenderplayer in {src}")
+
+
+def player_tree_platform(src: pathlib.Path) -> str:
+    root = detect_upbge_root(src)
+    if (root / "blenderplayer.exe").is_file():
+        return "windows"
+    return "linux"
+
+
 def copy_stripped_player(src: pathlib.Path, dest: pathlib.Path) -> pathlib.Path:
     """Copy a playable blenderplayer tree, dropping editor-only files.
 
-    Soname symlinks are preserved (copy2 used to duplicate every .so three
-    times and inflate lib/ from ~360 MB to ~780 MB).
+    Linux: soname symlinks are preserved (copy2 used to duplicate every .so
+    three times and inflate lib/ from ~360 MB to ~780 MB). Windows: DLLs sit
+    next to blenderplayer.exe (no soname links).
     """
-    src = pathlib.Path(src)
+    src = detect_upbge_root(src)
     dest = pathlib.Path(dest)
-    player_bin = src / "blenderplayer"
-    if not player_bin.is_file():
+    exe = _player_bin(src)
+    if exe is None:
         raise SystemExit(f"no blenderplayer in {src}")
+    windows = exe.name.endswith(".exe")
     if dest.exists():
         shutil.rmtree(dest)
     dest.mkdir(parents=True)
@@ -408,7 +471,8 @@ def copy_stripped_player(src: pathlib.Path, dest: pathlib.Path) -> pathlib.Path:
     for p, out in files:
         out.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(p, out)
-        _strip_elf(out)
+        if not windows:
+            _strip_elf(out)
         n_keep += 1
     for p, out in links:
         out.parent.mkdir(parents=True, exist_ok=True)
@@ -416,37 +480,38 @@ def copy_stripped_player(src: pathlib.Path, dest: pathlib.Path) -> pathlib.Path:
             out.unlink()
         os.symlink(os.readlink(p), out)
         n_keep += 1
-    if not (dest / "blenderplayer").is_file():
+    out_exe = _player_bin(dest)
+    if out_exe is None:
         raise SystemExit("strip dropped blenderplayer — refuse to ship")
-    _chmod_exec(dest / "blenderplayer")
-    # Pulse is DT_NEEDED; copy the system .so if present so a Pulse-less
-    # host still *loads* (userpref audio=None avoids talking to a server).
-    libdir = dest / "lib"
-    libdir.mkdir(exist_ok=True)
-    for cand in (
-        "/usr/lib/x86_64-linux-gnu/libpulse.so.0",
-        "/lib/x86_64-linux-gnu/libpulse.so.0",
-    ):
-        if os.path.isfile(cand) and not os.path.islink(cand):
-            shutil.copy2(cand, libdir / "libpulse.so.0")
-            parent = pathlib.Path(cand).parent
-            for extra in parent.glob("libpulsecommon-*.so*"):
-                shutil.copy2(extra, libdir / extra.name)
-            break
-        if os.path.islink(cand):
-            # copy real file + keep the soname
-            real = pathlib.Path(os.path.realpath(cand))
-            if real.is_file():
-                shutil.copy2(real, libdir / real.name)
-                link = libdir / "libpulse.so.0"
-                if link.exists() or link.is_symlink():
-                    link.unlink()
-                os.symlink(real.name, link)
-            parent = pathlib.Path(cand).parent
-            for extra in parent.glob("libpulsecommon-*.so*"):
-                if extra.is_file() and not extra.is_symlink():
+    _chmod_exec(out_exe)
+    if not windows:
+        # Pulse is DT_NEEDED; copy the system .so if present so a Pulse-less
+        # host still *loads* (userpref audio=None avoids talking to a server).
+        libdir = dest / "lib"
+        libdir.mkdir(exist_ok=True)
+        for cand in (
+            "/usr/lib/x86_64-linux-gnu/libpulse.so.0",
+            "/lib/x86_64-linux-gnu/libpulse.so.0",
+        ):
+            if os.path.isfile(cand) and not os.path.islink(cand):
+                shutil.copy2(cand, libdir / "libpulse.so.0")
+                parent = pathlib.Path(cand).parent
+                for extra in parent.glob("libpulsecommon-*.so*"):
                     shutil.copy2(extra, libdir / extra.name)
-            break
+                break
+            if os.path.islink(cand):
+                real = pathlib.Path(os.path.realpath(cand))
+                if real.is_file():
+                    shutil.copy2(real, libdir / real.name)
+                    link = libdir / "libpulse.so.0"
+                    if link.exists() or link.is_symlink():
+                        link.unlink()
+                    os.symlink(real.name, link)
+                parent = pathlib.Path(cand).parent
+                for extra in parent.glob("libpulsecommon-*.so*"):
+                    if extra.is_file() and not extra.is_symlink():
+                        shutil.copy2(extra, libdir / extra.name)
+                break
     print(f"[package_template] stripped player: {n_keep} files → {dest}")
     return dest
 
@@ -636,9 +701,16 @@ def build_platform_zip(out_dir: pathlib.Path, platform: str,
                        player_src: pathlib.Path | None = None) -> pathlib.Path:
     if platform not in PLATFORM_SLUG:
         raise SystemExit(f"unknown platform {platform!r}")
-    if player_src is not None and platform != "linux":
-        raise SystemExit("--with-player is implemented for linux only "
-                         "(this is the smallest runnable experiment)")
+    if player_src is not None and platform not in ("linux", "windows"):
+        raise SystemExit("--with-player is implemented for linux and windows")
+    if player_src is not None:
+        player_src = detect_upbge_root(player_src)
+        kind = player_tree_platform(player_src)
+        if kind != platform:
+            raise SystemExit(
+                f"--with-player tree is {kind} (blenderplayer"
+                f"{'.exe' if kind == 'windows' else ''}), not {platform}"
+            )
     version = version or addon_version(ADDON_SRC)
     out_dir = pathlib.Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -653,9 +725,11 @@ def build_platform_zip(out_dir: pathlib.Path, platform: str,
         _add_platform_files(root, platform, version, bundled=bundled)
         blender_bin = None
         if player_src is not None:
-            cand = pathlib.Path(player_src) / "blender"
-            if cand.is_file():
-                blender_bin = cand
+            for name in ("blender", "blender.exe"):
+                cand = pathlib.Path(player_src) / name
+                if cand.is_file() and not cand.name.endswith(".exe"):
+                    blender_bin = cand
+                    break
         pack_fonts_into_blend(
             root / "blend" / "UPVN_Template.blend",
             root / "blend" / "fonts",
@@ -663,7 +737,8 @@ def build_platform_zip(out_dir: pathlib.Path, platform: str,
         )
         if bundled:
             copy_stripped_player(pathlib.Path(player_src), root / "player")
-            write_portable_userpref(pathlib.Path(player_src), root / "player")
+            if platform == "linux":
+                write_portable_userpref(pathlib.Path(player_src), root / "player")
         _zip_dir(staging, dest)
     n = len(zipfile.ZipFile(dest).namelist())
     print(f"[package_template] {dest} — {n} entries, "
@@ -675,8 +750,9 @@ def build_all(out_dir: pathlib.Path, platforms: list[str],
               player_src: pathlib.Path | None = None) -> list[pathlib.Path]:
     version = addon_version(ADDON_SRC)
     out = []
+    kind = player_tree_platform(player_src) if player_src is not None else None
     for p in platforms:
-        src = player_src if p == "linux" else None
+        src = player_src if (kind is not None and p == kind) else None
         out.append(build_platform_zip(out_dir, p, version=version, player_src=src))
     return out
 
@@ -692,7 +768,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument(
         "--with-player",
         default=None,
-        help="path to extracted UPBGE 0.50 linux tree (bundles blenderplayer)",
+        help="extracted UPBGE 0.50 linux or windows tree (bundles blenderplayer)",
     )
     args = ap.parse_args(argv)
     platforms = [p.strip() for p in args.platforms.split(",") if p.strip()]

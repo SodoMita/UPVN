@@ -1,6 +1,8 @@
 # Current Status — 2026-09-19 (GitHub CI: plugin + OS templates + sway smoke)
 
 ## Last completed
+- **Runnable windows zip** (`upvn-runnable-windows-x64.zip`): bundled
+  `blenderplayer.exe` + DLLs. Unzip, `play.bat`. CI job `runnable-windows`.
 - **Host Vulkan / zip-symlink stubs**: `play.sh` repairs flattened `.so`
   symlinks (or drops them so `ld.so` uses the system lib). `libvulkan*` is
   not bundled.

@@ -78,11 +78,17 @@ jobs:
           python tools/package_template.py dist
           ls -lh dist/upvn-game-template-*.zip
 
-      - name: Cache UPBGE 0.50 tarball
+      - name: Cache UPBGE 0.50 linux tarball
         uses: actions/cache@v4
         with:
           path: ${{ runner.temp }}/upbge-cache
           key: upbge-0.50-linux-x64
+
+      - name: Cache UPBGE 0.50 windows 7z
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/upbge-cache-win
+          key: upbge-0.50-windows-x64
 
       - name: Build runnable linux zip (bundled blenderplayer)
         run: |
@@ -97,6 +103,21 @@ jobs:
           python tools/package_template.py dist --platforms linux \
             --with-player "${{ runner.temp }}/upbge/upbge-0.50-linux-x64"
           ls -lh dist/upvn-runnable-linux-x64.zip
+
+      - name: Build runnable windows zip (bundled blenderplayer.exe)
+        run: |
+          sudo apt-get update -y && sudo apt-get install -y p7zip-full
+          mkdir -p "${{ runner.temp }}/upbge-cache-win" "${{ runner.temp }}/upbge-win"
+          ARC="${{ runner.temp }}/upbge-cache-win/upbge-0.50-windows-x64.7z"
+          if [ ! -f "$ARC" ]; then
+            curl -L --retry 5 -o "$ARC.partial" \
+              https://github.com/UPBGE/upbge/releases/download/v0.50/upbge-0.50-windows-x64.7z
+            mv "$ARC.partial" "$ARC"
+          fi
+          7z x -y -o"${{ runner.temp }}/upbge-win" "$ARC"
+          python tools/package_template.py dist --platforms windows \
+            --with-player "${{ runner.temp }}/upbge-win"
+          ls -lh dist/upvn-runnable-windows-x64.zip
 
       - name: Build sample game package (optional, non-blocking)
         continue-on-error: true
@@ -154,6 +175,8 @@ jobs:
             dist/upvn-game-template-linux-x64.zip
             dist/upvn-game-template-windows-x64.zip
             dist/upvn-game-template-macos-arm64.zip
+            dist/upvn-runnable-linux-x64.zip
+            dist/upvn-runnable-windows-x64.zip
           fail_on_unmatched_files: true
           generate_release_notes: true
 

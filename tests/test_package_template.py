@@ -170,6 +170,71 @@ def test_runnable_linux_zip_embeds_player(tmp_path):
         assert zf.read(info) == b"liboslexec.so.1.13"
 
 
+def _fake_upbge_windows(root: Path) -> Path:
+    """Minimal Windows UPBGE tree (blenderplayer.exe + DLLs in the root)."""
+    inner = root / "upbge-0.50-windows-x64"
+    inner.mkdir(parents=True)
+    (inner / "blenderplayer.exe").write_bytes(b"MZ-fake-player")
+    (inner / "blender.exe").write_bytes(b"MZ-fake-editor")
+    (inner / "tbb.dll").write_bytes(b"dll")
+    (inner / "hiprt64.dll").write_bytes(b"hip")
+    (inner / "OpenImageDenoise_device_cpu.dll").write_bytes(b"oidn")
+    (inner / "vulkan-1.dll").write_bytes(b"vk")
+    (inner / "5.0" / "scripts" / "addons_core" / "cycles").mkdir(parents=True)
+    (inner / "5.0" / "scripts" / "modules").mkdir(parents=True)
+    (inner / "5.0" / "datafiles" / "locale").mkdir(parents=True)
+    (inner / "5.0" / "python" / "bin").mkdir(parents=True)
+    (inner / "5.0" / "scripts" / "addons_core" / "cycles" / "x.py").write_text("x\n")
+    (inner / "5.0" / "scripts" / "modules" / "bge.py").write_text("# bge\n")
+    (inner / "5.0" / "datafiles" / "locale" / "x.mo").write_bytes(b"mo")
+    (inner / "5.0" / "python" / "bin" / "python.exe").write_bytes(b"MZ")
+    (inner / "license").mkdir()
+    (inner / "license" / "gpl.txt").write_text("GPL\n")
+    return root
+
+
+def test_copy_stripped_player_windows_drops_editor(tmp_path):
+    src = _fake_upbge_windows(tmp_path / "upbge")
+    dest = tmp_path / "player"
+    pkg.copy_stripped_player(src, dest)
+    assert (dest / "blenderplayer.exe").is_file()
+    assert not (dest / "blender.exe").exists()
+    assert (dest / "tbb.dll").is_file()
+    assert (dest / "vulkan-1.dll").is_file()
+    assert not (dest / "hiprt64.dll").exists()
+    assert not (dest / "OpenImageDenoise_device_cpu.dll").exists()
+    assert not (dest / "5.0" / "scripts" / "addons_core").exists()
+    assert (dest / "5.0" / "scripts" / "modules" / "bge.py").is_file()
+    assert not (dest / "5.0" / "python" / "bin").exists()
+    assert pkg.player_tree_platform(src) == "windows"
+
+
+def test_runnable_windows_zip_embeds_player(tmp_path):
+    src = _fake_upbge_windows(tmp_path / "upbge")
+    zpath = pkg.build_platform_zip(tmp_path / "out", "windows", player_src=src)
+    assert zpath.name == "upvn-runnable-windows-x64.zip"
+    with zipfile.ZipFile(zpath) as zf:
+        names = set(zf.namelist())
+        play = zf.read("upvn-game-template/play.bat")
+        readme = zf.read("upvn-game-template/README.txt").decode("utf-8")
+    assert "upvn-game-template/player/blenderplayer.exe" in names
+    assert "upvn-game-template/player/tbb.dll" in names
+    assert "upvn-game-template/blend/fonts/DejaVuSans.ttf" in names
+    assert not any(n.endswith("/blender.exe") for n in names)
+    assert not any("addons_core" in n for n in names)
+    assert not any(n.endswith("play.sh") for n in names)
+    assert b"player\\blenderplayer.exe" in play
+    assert b"\r\n" in play
+    assert "No extra download" in readme
+    assert "play.bat" in readme
+
+
+def test_with_player_rejects_os_mismatch(tmp_path):
+    linux = _fake_upbge(tmp_path / "linux")
+    with pytest.raises(SystemExit):
+        pkg.build_platform_zip(tmp_path / "out", "windows", player_src=linux)
+
+
 def test_repair_flattened_zip_sonames(tmp_path):
     lib = tmp_path / "lib"
     lib.mkdir()

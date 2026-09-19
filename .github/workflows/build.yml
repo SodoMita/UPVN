@@ -113,3 +113,51 @@ jobs:
           name: upvn-runnable-linux
           path: dist/upvn-runnable-linux-x64.zip
           if-no-files-found: error
+
+  runnable-windows:
+    name: Runnable windows zip (bundled blenderplayer.exe)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install 7-Zip
+        run: sudo apt-get update -y && sudo apt-get install -y p7zip-full
+
+      - name: Cache UPBGE 0.50 windows 7z
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/upbge-cache
+          key: upbge-0.50-windows-x64
+
+      - name: Download + extract UPBGE windows
+        env:
+          CACHE: ${{ runner.temp }}/upbge-cache
+        run: |
+          mkdir -p "$CACHE" "$RUNNER_TEMP/upbge-win"
+          ARC="$CACHE/upbge-0.50-windows-x64.7z"
+          if [ ! -f "$ARC" ]; then
+            curl -L --retry 5 -o "$ARC.partial" \
+              https://github.com/UPBGE/upbge/releases/download/v0.50/upbge-0.50-windows-x64.7z
+            mv "$ARC.partial" "$ARC"
+          fi
+          7z x -y -o"$RUNNER_TEMP/upbge-win" "$ARC"
+          test -n "$(find "$RUNNER_TEMP/upbge-win" -name blenderplayer.exe | head -1)"
+
+      - name: Build self-contained windows zip
+        run: |
+          python tools/package_template.py dist --platforms windows \
+            --with-player "$RUNNER_TEMP/upbge-win"
+          ls -lh dist/upvn-runnable-windows-x64.zip
+          unzip -l dist/upvn-runnable-windows-x64.zip | head -n 40
+
+      - name: Upload runnable windows zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: upvn-runnable-windows
+          path: dist/upvn-runnable-windows-x64.zip
+          if-no-files-found: error

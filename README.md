@@ -357,24 +357,24 @@ On every push/PR:
   traceback, a UPVN error/warning, or a missing heartbeat. Host noise
   (ALSA / Mesa / Blender RNA) is ignored. See `tools/ci_player_smoke.sh`.
 - **Dist artifacts** — `.github/workflows/build.yml` builds
-  `upvn_editor_addon_v*.zip` and three game-template zips
-  (`upvn-game-template-{linux-x64,windows-x64,macos-arm64}.zip`).
+  `upvn_editor_addon_v*.zip`, three game-template zips
+  (`upvn-game-template-{linux-x64,windows-x64,macos-arm64}.zip`), and
+  self-contained `upvn-runnable-{linux,windows}-x64.zip` (bundled player).
 
-Pushing a `v*` tag (or running **Publish Release**) attaches those four zips
-to a GitHub Release. The templates are playable skeletons + OS launchers;
-they do not bundle UPBGE (download 0.50 from the URL in each zip's README).
+Pushing a `v*` tag (or running **Publish Release**) attaches those zips
+to a GitHub Release. The *template* zips do not bundle UPBGE (download 0.50
+from the URL in each zip's README). The *runnable* zips do.
 
 ```bash
 python tools/package_addon.py dist
 python tools/package_template.py dist
-# self-contained linux player (needs an extracted UPBGE 0.50 tree once, at pack time):
+# self-contained players (need an extracted UPBGE 0.50 tree once, at pack time):
 python tools/package_template.py dist --platforms linux \
   --with-player /path/to/upbge-0.50-linux-x64
-# → dist/upvn-runnable-linux-x64.zip  (unzip, ./play.sh, nothing else to fetch)
-#    player/lib keeps soname symlinks; blenderplayer is stripped; DejaVu is
-#    next to the .blend so dialogue is real type, not tofu squares.
-#    libvulkan/libX11/libGL come from the OS. If a GUI unzipper turns .so
-#    symlinks into tiny files ("file too short"), play.sh repairs them.
+# → dist/upvn-runnable-linux-x64.zip  (unzip, ./play.sh)
+python tools/package_template.py dist --platforms windows \
+  --with-player /path/to/upbge-0.50-windows-x64
+# → dist/upvn-runnable-windows-x64.zip  (unzip, play.bat)
 ```
 
 ## Legal
