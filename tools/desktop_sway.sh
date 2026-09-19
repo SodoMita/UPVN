@@ -141,7 +141,8 @@ if ! timeout 5 env DISPLAY="$DISPLAY_NO" xdpyinfo >/dev/null 2>&1; then
 fi
 
 # 4) userpref prep (BUG-016: audio device — without it the player segfaults)
-if [ ! -f "$HOME/.config/upbge/5.0/config/userpref.blend" ]; then
+# Slim player has no editor; portable/userpref may already be in the tree.
+if [ ! -f "$HOME/.config/upbge/5.0/config/userpref.blend" ] && [ -x "$UPBGE/blender" ]; then
     LIBGL_ALWAYS_SOFTWARE=1 "$UPBGE/blender" --background --python-expr \
         "import bpy; bpy.context.preferences.system.audio_device='None'; \
          bpy.context.preferences.filepaths.use_scripts_auto_execute=True; \

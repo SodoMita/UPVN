@@ -1,3 +1,11 @@
+## 2026-09-19 — slim UPBGE player for CI and agents
+
+- `python tools/package_template.py dist --player-only --with-player <upbge>`
+  writes `upvn-upbge-player-0.50-{linux,windows}-x64.7z` (same folder name
+  as official UPBGE, no editor). Branch `build` publishes tag
+  `upbge-player-0.50`. `tools/fetch_upbge.sh` uses it (fallback: official
+  tar.xz). Player-smoke and `desktop_sway.sh` call the fetcher.
+
 ## 2026-09-19 — broader .gitignore
 
 - Editor backups (`*~`, vim/emacs swap), OS junk (`.DS_Store`, `Thumbs.db`),

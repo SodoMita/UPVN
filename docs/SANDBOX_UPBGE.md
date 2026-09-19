@@ -107,9 +107,15 @@ quits on Esc at engine level, modal or not (BUG-011).
 ## Housekeeping
 - Kill strays with `pkill -9 -x blenderplayer` / `-x blender` — never `pkill -f`.
 - `timeout -s KILL` for bounded runs; the player ignores TERM.
-- Keep the UPBGE tarball mirror inside the workspace (`tmp/upbge.tar.xz`):
-  sandbox reprovisions wipe installed packages and big binaries between
-  sessions; the 408 MB download is the slowest recovery step.
+- Prefer the slim player (no editor) instead of the 408 MB official tarball:
+  ```bash
+  bash tools/fetch_upbge.sh /opt/upbge
+  # → /opt/upbge/upbge-0.50-linux-x64/blenderplayer
+  ```
+  That downloads `upbge-player-0.50` from this repo (~170 MB 7z) when the
+  tag exists, else the official tarball. Recreate the slim archive on
+  branch `build` after an UPBGE version bump. Authoring (`blender`
+  `--background`) still needs the official tree.
 
 ## UPBGE 0.50 runtime API findings (M26, all verified live)
 

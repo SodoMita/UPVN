@@ -4,10 +4,14 @@ name: Runnable players
 # Not on main or agent/* — those stay small (addon + templates).
 # Push or merge to `build` for CI artifacts; `v*` tags attach them
 # to a GitHub Release via publish.yml.
+# Also publishes a player-only tree as tag upbge-player-0.50 for CI/agents.
 on:
   push:
     branches: [build]
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 concurrency:
   group: runnable-${{ github.ref }}
@@ -48,12 +52,14 @@ jobs:
           tar -xJf "$TAR" -C "$RUNNER_TEMP/upbge"
           test -x "$RUNNER_TEMP/upbge/upbge-0.50-linux-x64/blenderplayer"
 
-      - name: Build self-contained linux 7z
+      - name: Build self-contained linux 7z + player-only
         run: |
           python tools/package_template.py dist --platforms linux \
             --with-player "$RUNNER_TEMP/upbge/upbge-0.50-linux-x64"
-          ls -lh dist/upvn-runnable-linux-x64.7z
-          7z l dist/upvn-runnable-linux-x64.7z | head -n 30
+          python tools/package_template.py dist --player-only --platforms linux \
+            --with-player "$RUNNER_TEMP/upbge/upbge-0.50-linux-x64"
+          ls -lh dist/upvn-runnable-linux-x64.7z dist/upvn-upbge-player-0.50-linux-x64.7z
+          7z l dist/upvn-runnable-linux-x64.7z | head -n 20
 
       - name: Upload runnable linux 7z
         uses: actions/upload-artifact@v4
@@ -61,6 +67,27 @@ jobs:
           name: upvn-runnable-linux
           path: dist/upvn-runnable-linux-x64.7z
           if-no-files-found: error
+
+      - name: Upload slim UPBGE player (linux)
+        uses: actions/upload-artifact@v4
+        with:
+          name: upvn-upbge-player-linux
+          path: dist/upvn-upbge-player-0.50-linux-x64.7z
+          if-no-files-found: error
+
+      - name: Publish slim player tag upbge-player-0.50 (linux)
+        if: github.ref == 'refs/heads/build'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: upbge-player-0.50
+          name: UPBGE 0.50 stripped player (UPVN)
+          body: |
+            Player-only blenderplayer tree for CI smoke and agents.
+            No editor. Recreate when UPBGE_VERSION changes: bump it in
+            tools/package_template.py and merge to `build`.
+          files: dist/upvn-upbge-player-0.50-linux-x64.7z
+          fail_on_unmatched_files: true
+          make_latest: false
 
   runnable-windows:
     name: Runnable windows 7z (bundled blenderplayer.exe)
@@ -96,12 +123,14 @@ jobs:
           7z x -y -o"$RUNNER_TEMP/upbge-win" "$ARC"
           test -n "$(find "$RUNNER_TEMP/upbge-win" -name blenderplayer.exe | head -1)"
 
-      - name: Build self-contained windows 7z
+      - name: Build self-contained windows 7z + player-only
         run: |
           python tools/package_template.py dist --platforms windows \
             --with-player "$RUNNER_TEMP/upbge-win"
-          ls -lh dist/upvn-runnable-windows-x64.7z
-          7z l dist/upvn-runnable-windows-x64.7z | head -n 40
+          python tools/package_template.py dist --player-only --platforms windows \
+            --with-player "$RUNNER_TEMP/upbge-win"
+          ls -lh dist/upvn-runnable-windows-x64.7z dist/upvn-upbge-player-0.50-windows-x64.7z
+          7z l dist/upvn-runnable-windows-x64.7z | head -n 20
 
       - name: Upload runnable windows 7z
         uses: actions/upload-artifact@v4
@@ -109,3 +138,24 @@ jobs:
           name: upvn-runnable-windows
           path: dist/upvn-runnable-windows-x64.7z
           if-no-files-found: error
+
+      - name: Upload slim UPBGE player (windows)
+        uses: actions/upload-artifact@v4
+        with:
+          name: upvn-upbge-player-windows
+          path: dist/upvn-upbge-player-0.50-windows-x64.7z
+          if-no-files-found: error
+
+      - name: Publish slim player tag upbge-player-0.50 (windows)
+        if: github.ref == 'refs/heads/build'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: upbge-player-0.50
+          name: UPBGE 0.50 stripped player (UPVN)
+          body: |
+            Player-only blenderplayer tree for CI smoke and agents.
+            No editor. Recreate when UPBGE_VERSION changes: bump it in
+            tools/package_template.py and merge to `build`.
+          files: dist/upvn-upbge-player-0.50-windows-x64.7z
+          fail_on_unmatched_files: true
+          make_latest: false
