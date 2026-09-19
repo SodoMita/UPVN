@@ -373,6 +373,8 @@ python tools/package_template.py dist --platforms linux \
 # → dist/upvn-runnable-linux-x64.zip  (unzip, ./play.sh, nothing else to fetch)
 #    player/lib keeps soname symlinks; blenderplayer is stripped; DejaVu is
 #    next to the .blend so dialogue is real type, not tofu squares.
+#    libvulkan/libX11/libGL come from the OS. If a GUI unzipper turns .so
+#    symlinks into tiny files ("file too short"), play.sh repairs them.
 ```
 
 ## Legal
