@@ -1,6 +1,9 @@
 # Current Status — 2026-09-19 (GitHub CI: plugin + OS templates + sway smoke)
 
 ## Last completed
+- **Smaller linux runner + readable type**: player zip no longer copies
+  soname `.so` three times; `blenderplayer` is stripped; tofu fonts fixed by
+  shipping/binding `blend/fonts/DejaVuSans.ttf`.
 - **Self-contained linux runnable zip** (`upvn-runnable-linux-x64.zip`):
   stripped `blenderplayer` + engine + starter. `./play.sh` needs no extra
   download. Built with `--with-player`. Live-run here: heartbeat start/say.

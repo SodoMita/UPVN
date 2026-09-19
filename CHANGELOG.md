@@ -1,3 +1,14 @@
+## 2026-09-19 — smaller linux runner + readable type
+
+- `copy_stripped_player` now keeps soname **symlinks** (copy2 had duplicated
+  every `.so` and inflated `player/lib` ~443 MB → ~779 MB) and `strip`s
+  `blenderplayer` (~228 MB → ~158 MB). USD Python (`pxr`), Blender CJK faces
+  and `5.0/python/bin` are dropped. Zip stores Unix symlinks.
+- FONT tofu: the template's DejaVu path pointed at a missing
+  `/home/melony/.config/upbge/…` file. Runtime `_ensure_ui_fonts()` binds
+  `blend/fonts/DejaVuSans.ttf` (shipped in the zip); packager also packs the
+  face into the staged `.blend` when a `blender` binary is next to the player.
+
 ## 2026-09-19 — self-contained linux runnable zip (bundled blenderplayer)
 
 - `python tools/package_template.py dist --platforms linux --with-player <upbge>`

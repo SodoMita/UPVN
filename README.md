@@ -371,6 +371,8 @@ python tools/package_template.py dist
 python tools/package_template.py dist --platforms linux \
   --with-player /path/to/upbge-0.50-linux-x64
 # → dist/upvn-runnable-linux-x64.zip  (unzip, ./play.sh, nothing else to fetch)
+#    player/lib keeps soname symlinks; blenderplayer is stripped; DejaVu is
+#    next to the .blend so dialogue is real type, not tofu squares.
 ```
 
 ## Legal

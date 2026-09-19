@@ -422,6 +422,73 @@ def _get_obj(name):
         return None
 
 
+def _ensure_ui_fonts():
+    """Load DejaVu onto every FONT object when the blend's vfont path is dead.
+
+    The uploaded template points at
+    ``//../../../home/melony/.config/upbge/…/DejaVuSans.ttf`` which is not
+    packed — the player then draws tofu squares. We bind ``blend/fonts/``
+    (shipped next to the .blend in the zip and the repo) once per process.
+    """
+    if not HAS_BGE:
+        return
+    try:
+        import bge as _bge
+        logic = _bge.logic
+        if getattr(logic, "_upvn_ui_fonts_ok", False):
+            return
+        import bpy as _bpy
+        bdir = ""
+        try:
+            bp = getattr(getattr(_bpy, "data", None), "filepath", "") or ""
+            bdir = os.path.dirname(os.path.abspath(bp)) if bp else ""
+        except Exception:
+            bdir = ""
+        cands = []
+        if bdir:
+            cands += [
+                os.path.join(bdir, "fonts", "DejaVuSans.ttf"),
+                os.path.join(os.path.dirname(bdir), "blend", "fonts", "DejaVuSans.ttf"),
+                os.path.join(os.path.dirname(bdir), "fonts", "DejaVuSans.ttf"),
+            ]
+        try:
+            from engine.render.contract import find_ui_font
+            fn = find_ui_font("DejaVuSans.ttf")
+            if fn:
+                cands.append(fn)
+        except Exception:
+            pass
+        path = next((p for p in cands if p and os.path.isfile(p)), None)
+        if not path:
+            print("[UPVN] ui fonts: DejaVuSans.ttf not found — text may be squares")
+            return
+        font = _bpy.data.fonts.load(path, check_existing=True)
+        try:
+            if not getattr(font, "packed_file", None):
+                font.pack()
+        except Exception:
+            pass
+        n = 0
+        sc = logic.getCurrentScene()
+        for ob in sc.objects:
+            for holder in (getattr(ob, "blenderObject", None), ob):
+                if holder is None:
+                    continue
+                cur = getattr(holder, "data", None)
+                if cur is None or not hasattr(cur, "font"):
+                    continue
+                try:
+                    cur.font = font
+                    n += 1
+                except Exception:
+                    pass
+                break
+        logic._upvn_ui_fonts_ok = True
+        print(f"[UPVN] ui fonts: {path} on {n} FONT object(s)")
+    except Exception as e:
+        print(f"[UPVN] ui fonts: {e}")
+
+
 def _show_mouse():
     if not HAS_BGE:
         return
@@ -1176,6 +1243,7 @@ def main(cont=None):
     except Exception:
         pass
     _install_debug_tee(logic)
+    _ensure_ui_fonts()
     _bind_camera()
     _show_mouse()
 
@@ -1372,6 +1440,13 @@ def main(cont=None):
                         if _bo is not None:
                             _hb_data[_k + "_scale"] = [round(float(v), 4) for v in _bo.scale]
                             _hb_data[_k + "_font"] = round(float(getattr(_d, "size", 1.0)), 4) if _d is not None else None
+                            try:
+                                _vf = getattr(_d, "font", None) if _d is not None else None
+                                _hb_data[_k + "_vfont"] = (
+                                    getattr(_vf, "filepath", None) or getattr(_vf, "name", None)
+                                )
+                            except Exception:
+                                pass
                             _hb_data[_k + "_wpos"] = [round(float(v), 3) for v in _bo.location]
                             # M26i: what the object is actually tinted with
                             # (colored speaker / dark shadows assertions).

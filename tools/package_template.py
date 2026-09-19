@@ -69,6 +69,8 @@ _PLAYER_DROP_DIR_PARTS = {
     "addons_core", "addons", "locale", "studiolights", "assets",
     "icons", "ensurepip", "idlelib", "turtledemo", "pip", "setuptools",
     "Cython", "mesa",
+    # USD Python bindings — blenderplayer does not import pxr for a VN.
+    "pxr", "MaterialX", "usd", "materialx",
 }
 _PLAYER_DROP_NAME_PREFIX = (
     "libhiprt", "libOpenImageDenoise_device_",
@@ -270,8 +272,14 @@ def _chmod_exec(path: pathlib.Path) -> None:
 
 
 def _drop_player_path(rel: pathlib.Path) -> bool:
-    parts = set(rel.parts)
-    if parts & _PLAYER_DROP_DIR_PARTS:
+    parts = rel.parts
+    if set(parts) & _PLAYER_DROP_DIR_PARTS:
+        return True
+    # 5.0/python/bin is a 28 MB interpreter the player does not exec.
+    if len(parts) >= 3 and parts[0] == "5.0" and parts[1] == "python" and parts[2] == "bin":
+        return True
+    # Blender's CJK UI faces — UPVN ships DejaVu next to the .blend.
+    if len(parts) >= 3 and parts[:3] == ("5.0", "datafiles", "fonts"):
         return True
     name = rel.name
     if name in _PLAYER_DROP_TOP:
@@ -285,8 +293,34 @@ def _drop_player_path(rel: pathlib.Path) -> bool:
     return False
 
 
+def _is_elf(path: pathlib.Path) -> bool:
+    try:
+        with open(path, "rb") as f:
+            return f.read(4) == b"\x7fELF"
+    except Exception:
+        return False
+
+
+def _strip_elf(path: pathlib.Path) -> None:
+    """Drop debug symbols (blenderplayer 228 MB → ~158 MB). .so files are
+    usually already stripped — strip is then a no-op."""
+    if not _is_elf(path):
+        return
+    try:
+        subprocess.run(
+            ["strip", "--strip-unneeded", str(path)],
+            check=False, capture_output=True, timeout=120,
+        )
+    except Exception:
+        pass
+
+
 def copy_stripped_player(src: pathlib.Path, dest: pathlib.Path) -> pathlib.Path:
-    """Copy a playable blenderplayer tree, dropping editor-only files."""
+    """Copy a playable blenderplayer tree, dropping editor-only files.
+
+    Soname symlinks are preserved (copy2 used to duplicate every .so three
+    times and inflate lib/ from ~360 MB to ~780 MB).
+    """
     src = pathlib.Path(src)
     dest = pathlib.Path(dest)
     player_bin = src / "blenderplayer"
@@ -295,18 +329,27 @@ def copy_stripped_player(src: pathlib.Path, dest: pathlib.Path) -> pathlib.Path:
     if dest.exists():
         shutil.rmtree(dest)
     dest.mkdir(parents=True)
-    n_keep = 0
+    files: list[tuple[pathlib.Path, pathlib.Path]] = []
+    links: list[tuple[pathlib.Path, pathlib.Path]] = []
     for p in src.rglob("*"):
-        if not p.is_file():
-            continue
         rel = p.relative_to(src)
-        if _drop_player_path(rel):
+        if "__pycache__" in rel.parts or _drop_player_path(rel):
             continue
-        if "__pycache__" in rel.parts:
-            continue
-        out = dest / rel
+        if p.is_symlink():
+            links.append((p, dest / rel))
+        elif p.is_file():
+            files.append((p, dest / rel))
+    n_keep = 0
+    for p, out in files:
         out.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(p, out)
+        _strip_elf(out)
+        n_keep += 1
+    for p, out in links:
+        out.parent.mkdir(parents=True, exist_ok=True)
+        if out.exists() or out.is_symlink():
+            out.unlink()
+        os.symlink(os.readlink(p), out)
         n_keep += 1
     if not (dest / "blenderplayer").is_file():
         raise SystemExit("strip dropped blenderplayer — refuse to ship")
@@ -319,17 +362,92 @@ def copy_stripped_player(src: pathlib.Path, dest: pathlib.Path) -> pathlib.Path:
         "/usr/lib/x86_64-linux-gnu/libpulse.so.0",
         "/lib/x86_64-linux-gnu/libpulse.so.0",
     ):
-        if os.path.isfile(cand):
+        if os.path.isfile(cand) and not os.path.islink(cand):
             shutil.copy2(cand, libdir / "libpulse.so.0")
-            # companions
             parent = pathlib.Path(cand).parent
-            for extra in parent.glob("libpulsecommon-*.so"):
+            for extra in parent.glob("libpulsecommon-*.so*"):
                 shutil.copy2(extra, libdir / extra.name)
-            for extra in parent.glob("libpulse.so.0.*"):
-                shutil.copy2(extra, libdir / extra.name)
+            break
+        if os.path.islink(cand):
+            # copy real file + keep the soname
+            real = pathlib.Path(os.path.realpath(cand))
+            if real.is_file():
+                shutil.copy2(real, libdir / real.name)
+                link = libdir / "libpulse.so.0"
+                if link.exists() or link.is_symlink():
+                    link.unlink()
+                os.symlink(real.name, link)
+            parent = pathlib.Path(cand).parent
+            for extra in parent.glob("libpulsecommon-*.so*"):
+                if extra.is_file() and not extra.is_symlink():
+                    shutil.copy2(extra, libdir / extra.name)
             break
     print(f"[package_template] stripped player: {n_keep} files → {dest}")
     return dest
+
+
+_PACK_FONTS_PY = r'''
+import bpy, os, sys
+blend = bpy.data.filepath
+bdir = os.path.dirname(os.path.abspath(blend))
+fonts_dir = sys.argv[sys.argv.index("--") + 1] if "--" in sys.argv else os.path.join(bdir, "fonts")
+regular = os.path.join(fonts_dir, "DejaVuSans.ttf")
+bold = os.path.join(fonts_dir, "DejaVuSans-Bold.ttf")
+if not os.path.isfile(regular):
+    raise SystemExit("no DejaVuSans.ttf in " + fonts_dir)
+reg = bpy.data.fonts.load(regular, check_existing=True)
+try:
+    reg.pack()
+except Exception:
+    pass
+boldf = None
+if os.path.isfile(bold):
+    boldf = bpy.data.fonts.load(bold, check_existing=True)
+    try:
+        boldf.pack()
+    except Exception:
+        pass
+n = 0
+for ob in bpy.data.objects:
+    if getattr(ob, "type", "") != "FONT" or ob.data is None:
+        continue
+    want = boldf if ("Speaker" in ob.name and boldf is not None) else reg
+    ob.data.font = want
+    n += 1
+print("PACKED_FONTS", n, "regular_packed", bool(reg.packed_file))
+bpy.ops.wm.save_mainfile()
+'''
+
+
+def pack_fonts_into_blend(blend: pathlib.Path, fonts_dir: pathlib.Path,
+                          blender: pathlib.Path | None) -> bool:
+    """Bake DejaVu into the .blend so FONT objects are not tofu squares."""
+    if blender is None or not pathlib.Path(blender).is_file():
+        return False
+    if not (fonts_dir / "DejaVuSans.ttf").is_file():
+        return False
+    script = pathlib.Path(tempfile.mkdtemp(prefix="upvn_fonts_")) / "pack.py"
+    script.write_text(_PACK_FONTS_PY, encoding="utf-8")
+    env = dict(os.environ)
+    env["LIBGL_ALWAYS_SOFTWARE"] = "1"
+    env["SDL_AUDIODRIVER"] = "dummy"
+    try:
+        proc = subprocess.run(
+            [str(blender), "--background", str(blend), "--python", str(script),
+             "--", str(fonts_dir)],
+            capture_output=True, text=True, timeout=180, env=env,
+        )
+    except Exception as exc:
+        print(f"[package_template] font pack skipped: {exc}")
+        return False
+    ok = "PACKED_FONTS" in (proc.stdout or "")
+    print("[package_template] font pack",
+          "OK" if ok else "FAILED",
+          (proc.stdout or "")[-300:].replace("\n", " "))
+    backup = blend.with_name(blend.name + "1")
+    if backup.exists():
+        backup.unlink()
+    return ok
 
 
 def write_portable_userpref(upbge_dir: pathlib.Path, dest_player: pathlib.Path) -> bool:
@@ -430,13 +548,18 @@ def _zip_dir(src: pathlib.Path, dest: pathlib.Path) -> pathlib.Path:
         dest.unlink()
     with zipfile.ZipFile(dest, "w", zipfile.ZIP_DEFLATED, allowZip64=True) as zf:
         for p in sorted(src.rglob("*")):
-            if not p.is_file():
-                continue
             if "__pycache__" in p.parts or p.suffix in {".pyc", ".pyo"}:
                 continue
             arc = p.relative_to(src).as_posix()
-            # zf.write streams from disk — do not slurp blenderplayer (228 MB)
-            # into RAM on a 2 GB sandbox.
+            if p.is_symlink():
+                info = zipfile.ZipInfo(arc)
+                info.create_system = 3
+                info.external_attr = (stat.S_IFLNK | 0o777) << 16
+                zf.writestr(info, os.readlink(p))
+                continue
+            if not p.is_file():
+                continue
+            # zf.write streams from disk — do not slurp blenderplayer into RAM.
             zf.write(p, arc)
             info = zf.getinfo(arc)
             info.external_attr = (stat.S_IFREG | _zip_exec_mode(p)) << 16
@@ -463,6 +586,16 @@ def build_platform_zip(out_dir: pathlib.Path, platform: str,
         _stage_common(staging)
         root = staging / TOP
         _add_platform_files(root, platform, version, bundled=bundled)
+        blender_bin = None
+        if player_src is not None:
+            cand = pathlib.Path(player_src) / "blender"
+            if cand.is_file():
+                blender_bin = cand
+        pack_fonts_into_blend(
+            root / "blend" / "UPVN_Template.blend",
+            root / "blend" / "fonts",
+            blender_bin,
+        )
         if bundled:
             copy_stripped_player(pathlib.Path(player_src), root / "player")
             write_portable_userpref(pathlib.Path(player_src), root / "player")
