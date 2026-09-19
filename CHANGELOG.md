@@ -1,3 +1,10 @@
+## 2026-09-19 — broader .gitignore
+
+- Editor backups (`*~`, vim/emacs swap), OS junk (`.DS_Store`, `Thumbs.db`),
+  Blender numbered saves (`*.blend1`…`*.blend9`, `/blend-*`, `quit.blend`),
+  Krita autosave (`*.kra~`, `*.kra-autosave`). `blend/` and `*.blend`
+  templates stay tracked. Local `/dist/` output is ignored.
+
 ## 2026-09-19 — runnable 7z only on branch `build` + tags
 
 - `main` / `agent/**` CI no longer downloads UPBGE or uploads ~170 MB
