@@ -1,3 +1,10 @@
+## 2026-09-19 — runnable 7z only on branch `build` + tags
+
+- `main` / `agent/**` CI no longer downloads UPBGE or uploads ~170 MB
+  player archives. `.github/workflows/runnable.yml` runs on `build`
+  (and workflow_dispatch). `v*` tags still attach the 7z files via
+  `publish.yml`.
+
 ## 2026-09-19 — 7z dest path is absolute (CI wrote into staging)
 
 - `7z a` runs with `cwd` = the staging tree. A relative `dist/…7z` was

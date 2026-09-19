@@ -356,14 +356,18 @@ On every push/PR:
   `blenderplayer` ~20 seconds. The job **fails** on a crash, a Python
   traceback, a UPVN error/warning, or a missing heartbeat. Host noise
   (ALSA / Mesa / Blender RNA) is ignored. See `tools/ci_player_smoke.sh`.
-- **Dist artifacts** — `.github/workflows/build.yml` builds
-  `upvn_editor_addon_v*.zip`, three game-template zips
-  (`upvn-game-template-{linux-x64,windows-x64,macos-arm64}.zip`), and
-  self-contained `upvn-runnable-{linux,windows}-x64.7z` (bundled player).
+- **Dist artifacts** — `.github/workflows/build.yml` (every push/PR on
+  `main` and `agent/**`) builds `upvn_editor_addon_v*.zip` and three
+  game-template zips (`upvn-game-template-{linux-x64,windows-x64,macos-arm64}.zip`).
+  No bundled player — those jobs stay small.
+- **Runnable players** (~170 MB 7z with blenderplayer) are **not** built
+  on `main` or `agent/*`. Push or merge to branch `build` to run
+  `.github/workflows/runnable.yml` (CI artifacts). A `v*` tag (or
+  **Publish Release**) attaches `upvn-runnable-{linux,windows}-x64.7z`
+  to the GitHub Release via `publish.yml`.
 
-Pushing a `v*` tag (or running **Publish Release**) attaches those zips
-to a GitHub Release. The *template* zips do not bundle UPBGE (download 0.50
-from the URL in each zip's README). The *runnable* 7z archives do.
+The *template* zips do not bundle UPBGE (download 0.50 from the URL in
+each zip's README). The *runnable* 7z archives do.
 
 ```bash
 python tools/package_addon.py dist

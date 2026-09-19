@@ -1,6 +1,9 @@
 # Current Status — 2026-09-19 (GitHub CI: plugin + OS templates + sway smoke)
 
 ## Last completed
+- **Runnable 7z only on `build` + tags**: `main`/`agent/**` stay small
+  (addon + templates). `runnable.yml` on branch `build`; GitHub Release
+  on `v*` tags (`publish.yml`).
 - **Runnable 7z + CJK fonts**: linux/windows runners are
   `upvn-runnable-*-x64.7z` (solid LZMA2). `5.0/datafiles/fonts` is kept.
 - **Runnable windows** (`upvn-runnable-windows-x64.7z`): bundled
