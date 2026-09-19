@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import stat
+import subprocess
 import sys
 import zipfile
 from pathlib import Path
@@ -140,7 +141,7 @@ def test_copy_stripped_player_drops_editor_and_cycles(tmp_path):
     assert (dest / "lib" / "liboslexec.so").lstat().st_size < 40
     assert not (dest / "5.0" / "python" / "lib" / "python3.11" / "site-packages" / "pxr").exists()
     assert not (dest / "5.0" / "python" / "bin").exists()
-    assert not (dest / "5.0" / "datafiles" / "fonts").exists()
+    assert (dest / "5.0" / "datafiles" / "fonts" / "droidsans.ttf").is_file()
     assert not (dest / "lib" / "libvulkan.so.1").exists()
     assert not (dest / "lib" / "libvulkan.so").exists()
     assert not list(dest.glob("lib/libvulkan*"))
@@ -149,13 +150,13 @@ def test_copy_stripped_player_drops_editor_and_cycles(tmp_path):
 def test_runnable_linux_zip_embeds_player(tmp_path):
     src = _fake_upbge(tmp_path / "upbge")
     zpath = pkg.build_platform_zip(tmp_path / "out", "linux", player_src=src)
-    assert zpath.name == "upvn-runnable-linux-x64.zip"
-    with zipfile.ZipFile(zpath) as zf:
-        names = set(zf.namelist())
-        play = zf.read("upvn-game-template/play.sh").decode("utf-8")
-        readme = zf.read("upvn-game-template/README.txt").decode("utf-8")
+    assert zpath.name == "upvn-runnable-linux-x64.7z"
+    names = set(pkg.archive_list(zpath))
+    play = pkg.archive_read(zpath, "upvn-game-template/play.sh").decode("utf-8")
+    readme = pkg.archive_read(zpath, "upvn-game-template/README.txt").decode("utf-8")
     assert "upvn-game-template/player/blenderplayer" in names
     assert "upvn-game-template/player/lib/libtbb.so.12" in names
+    assert "upvn-game-template/player/5.0/datafiles/fonts/droidsans.ttf" in names
     assert not any("addons_core" in n for n in names)
     assert not any(n.endswith("/blender") for n in names)
     assert "player/blenderplayer" in play
@@ -164,10 +165,17 @@ def test_runnable_linux_zip_embeds_player(tmp_path):
     assert not any("libvulkan" in n for n in names)
     assert "file too short" in play
     assert "python3" in play
-    with zipfile.ZipFile(zpath) as zf:
-        info = zf.getinfo("upvn-game-template/player/lib/liboslexec.so")
-        assert (info.external_attr >> 16) & 0o170000 == stat.S_IFLNK
-        assert zf.read(info) == b"liboslexec.so.1.13"
+    ext = tmp_path / "ext"
+    ext.mkdir()
+    subprocess.check_call(
+        ["7z", "x", "-y", f"-o{ext}", str(zpath),
+         "upvn-game-template/player/lib/liboslexec.so",
+         "upvn-game-template/player/lib/liboslexec.so.1.13"],
+        stdout=subprocess.DEVNULL,
+    )
+    link = ext / "upvn-game-template" / "player" / "lib" / "liboslexec.so"
+    assert link.is_symlink()
+    assert os.readlink(link) == "liboslexec.so.1.13"
 
 
 def _fake_upbge_windows(root: Path) -> Path:
@@ -212,11 +220,10 @@ def test_copy_stripped_player_windows_drops_editor(tmp_path):
 def test_runnable_windows_zip_embeds_player(tmp_path):
     src = _fake_upbge_windows(tmp_path / "upbge")
     zpath = pkg.build_platform_zip(tmp_path / "out", "windows", player_src=src)
-    assert zpath.name == "upvn-runnable-windows-x64.zip"
-    with zipfile.ZipFile(zpath) as zf:
-        names = set(zf.namelist())
-        play = zf.read("upvn-game-template/play.bat")
-        readme = zf.read("upvn-game-template/README.txt").decode("utf-8")
+    assert zpath.name == "upvn-runnable-windows-x64.7z"
+    names = set(pkg.archive_list(zpath))
+    play = pkg.archive_read(zpath, "upvn-game-template/play.bat")
+    readme = pkg.archive_read(zpath, "upvn-game-template/README.txt").decode("utf-8")
     assert "upvn-game-template/player/blenderplayer.exe" in names
     assert "upvn-game-template/player/tbb.dll" in names
     assert "upvn-game-template/blend/fonts/DejaVuSans.ttf" in names

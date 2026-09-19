@@ -111,10 +111,10 @@ def _readme(platform: str, version: str, bundled: bool) -> str:
     url = UPBGE_URLS[platform]
     if bundled:
         slug = PLATFORM_SLUG[platform]
-        zipname = f"upvn-runnable-{slug}.zip"
+        zipname = f"upvn-runnable-{slug}.7z"
         if platform == "windows":
             how = (
-                f"  unzip {zipname}\n"
+                f"  7z x {zipname}\n"
                 "  cd upvn-game-template\n"
                 "  play.bat\n"
                 "\n"
@@ -129,7 +129,7 @@ def _readme(platform: str, version: str, bundled: bool) -> str:
             )
         else:
             how = (
-                f"  unzip {zipname}\n"
+                f"  7z x {zipname}\n"
                 "  cd upvn-game-template\n"
                 "  ./play.sh\n"
                 "\n"
@@ -373,9 +373,6 @@ def _drop_player_path(rel: pathlib.Path) -> bool:
         return True
     # 5.0/python/bin is a 28 MB interpreter the player does not exec.
     if len(parts) >= 3 and parts[0] == "5.0" and parts[1] == "python" and parts[2] == "bin":
-        return True
-    # Blender's CJK UI faces — UPVN ships DejaVu next to the .blend.
-    if len(parts) >= 3 and parts[:3] == ("5.0", "datafiles", "fonts"):
         return True
     name = rel.name
     if name in _PLAYER_DROP_TOP:
@@ -672,6 +669,66 @@ def _zip_exec_mode(path: pathlib.Path) -> int:
     return 0o644
 
 
+def _7z_bin() -> str | None:
+    return shutil.which("7z") or shutil.which("7za")
+
+
+def _7z_dir(src: pathlib.Path, dest: pathlib.Path) -> pathlib.Path:
+    """Solid LZMA2 7z — ~25% smaller than zip on the player tree."""
+    exe = _7z_bin()
+    if not exe:
+        raise SystemExit(
+            "7z is required for runnable archives (Debian/Ubuntu: "
+            "sudo apt install p7zip-full)"
+        )
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    if dest.exists():
+        dest.unlink()
+    proc = subprocess.run(
+        [exe, "a", "-t7z", "-mx=7", "-ms=on", "-snl", str(dest), TOP],
+        cwd=src, capture_output=True, text=True, timeout=1800,
+    )
+    if proc.returncode != 0 or not dest.is_file():
+        err = (proc.stderr or proc.stdout or "")[-800:]
+        raise SystemExit(f"7z failed ({proc.returncode}): {err}")
+    return dest
+
+
+def archive_list(path: pathlib.Path) -> list[str]:
+    """Member paths inside a .zip or .7z (forward slashes)."""
+    path = pathlib.Path(path)
+    if path.suffix.lower() == ".zip":
+        return zipfile.ZipFile(path).namelist()
+    exe = _7z_bin()
+    if not exe:
+        raise SystemExit("7z not installed")
+    proc = subprocess.run(
+        [exe, "l", "-slt", str(path)],
+        capture_output=True, text=True, check=True,
+    )
+    names: list[str] = []
+    for line in proc.stdout.splitlines():
+        if line.startswith("Path = "):
+            n = line.split(" = ", 1)[1].replace("\\", "/")
+            if n and n != path.name:
+                names.append(n)
+    return names
+
+
+def archive_read(path: pathlib.Path, member: str) -> bytes:
+    path = pathlib.Path(path)
+    if path.suffix.lower() == ".zip":
+        return zipfile.ZipFile(path).read(member)
+    exe = _7z_bin()
+    if not exe:
+        raise SystemExit("7z not installed")
+    proc = subprocess.run(
+        [exe, "e", "-so", str(path), member],
+        capture_output=True, check=True,
+    )
+    return proc.stdout
+
+
 def _zip_dir(src: pathlib.Path, dest: pathlib.Path) -> pathlib.Path:
     dest.parent.mkdir(parents=True, exist_ok=True)
     if dest.exists():
@@ -715,7 +772,7 @@ def build_platform_zip(out_dir: pathlib.Path, platform: str,
     out_dir = pathlib.Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     bundled = player_src is not None
-    name = (f"upvn-runnable-{PLATFORM_SLUG[platform]}.zip" if bundled
+    name = (f"upvn-runnable-{PLATFORM_SLUG[platform]}.7z" if bundled
             else f"upvn-game-template-{PLATFORM_SLUG[platform]}.zip")
     dest = out_dir / name
     with tempfile.TemporaryDirectory(prefix="upvn_tmpl_") as tmp:
@@ -739,8 +796,10 @@ def build_platform_zip(out_dir: pathlib.Path, platform: str,
             copy_stripped_player(pathlib.Path(player_src), root / "player")
             if platform == "linux":
                 write_portable_userpref(pathlib.Path(player_src), root / "player")
-        _zip_dir(staging, dest)
-    n = len(zipfile.ZipFile(dest).namelist())
+            _7z_dir(staging, dest)
+        else:
+            _zip_dir(staging, dest)
+    n = len(archive_list(dest))
     print(f"[package_template] {dest} — {n} entries, "
           f"{dest.stat().st_size // 1024}KB")
     return dest

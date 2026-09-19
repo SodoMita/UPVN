@@ -1,3 +1,12 @@
+## 2026-09-19 — keep Blender CJK fonts; runnable is 7z not zip
+
+- `5.0/datafiles/fonts` stays in the stripped player (Noto CJK + Inter +
+  DejaVuMono woff2). Dropping it made `blf_load_font_default` fail and
+  default UI drawing fall back to tofu.
+- Runnable linux/windows archives are now solid LZMA2 `.7z` (~166 MB vs
+  ~223 MB zip on the same linux tree). Templates stay zip. Extract with
+  `7z x` (p7zip / 7-Zip).
+
 ## 2026-09-19 — runnable windows zip (bundled blenderplayer.exe)
 
 - `python tools/package_template.py dist --platforms windows --with-player <upbge-win>`

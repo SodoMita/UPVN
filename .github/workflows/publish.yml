@@ -32,6 +32,7 @@ jobs:
           cache: pip
       - name: Install deps
         run: |
+          sudo apt-get update -y && (sudo apt-get install -y 7zip || sudo apt-get install -y p7zip-full)
           python -m pip install --upgrade pip
           pip install -r requirements.txt
       - name: pytest
@@ -100,13 +101,14 @@ jobs:
             mv "$TAR.partial" "$TAR"
           fi
           tar -xJf "$TAR" -C "${{ runner.temp }}/upbge"
+          sudo apt-get update -y && (sudo apt-get install -y 7zip || sudo apt-get install -y p7zip-full)
           python tools/package_template.py dist --platforms linux \
             --with-player "${{ runner.temp }}/upbge/upbge-0.50-linux-x64"
-          ls -lh dist/upvn-runnable-linux-x64.zip
+          ls -lh dist/upvn-runnable-linux-x64.7z
 
       - name: Build runnable windows zip (bundled blenderplayer.exe)
         run: |
-          sudo apt-get update -y && sudo apt-get install -y p7zip-full
+          sudo apt-get update -y && (sudo apt-get install -y 7zip || sudo apt-get install -y p7zip-full)
           mkdir -p "${{ runner.temp }}/upbge-cache-win" "${{ runner.temp }}/upbge-win"
           ARC="${{ runner.temp }}/upbge-cache-win/upbge-0.50-windows-x64.7z"
           if [ ! -f "$ARC" ]; then
@@ -117,7 +119,7 @@ jobs:
           7z x -y -o"${{ runner.temp }}/upbge-win" "$ARC"
           python tools/package_template.py dist --platforms windows \
             --with-player "${{ runner.temp }}/upbge-win"
-          ls -lh dist/upvn-runnable-windows-x64.zip
+          ls -lh dist/upvn-runnable-windows-x64.7z
 
       - name: Build sample game package (optional, non-blocking)
         continue-on-error: true
@@ -157,6 +159,7 @@ jobs:
           name: upvn-dist-${{ steps.ver.outputs.tag }}
           path: |
             dist/*.zip
+            dist/*.7z
             dist/*.md
             dist/*.json
             dist/*.pot
@@ -175,8 +178,8 @@ jobs:
             dist/upvn-game-template-linux-x64.zip
             dist/upvn-game-template-windows-x64.zip
             dist/upvn-game-template-macos-arm64.zip
-            dist/upvn-runnable-linux-x64.zip
-            dist/upvn-runnable-windows-x64.zip
+            dist/upvn-runnable-linux-x64.7z
+            dist/upvn-runnable-windows-x64.7z
           fail_on_unmatched_files: true
           generate_release_notes: true
 

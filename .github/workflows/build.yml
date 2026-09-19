@@ -20,6 +20,7 @@ jobs:
 
       - name: Install deps
         run: |
+          sudo apt-get update -y && (sudo apt-get install -y 7zip || sudo apt-get install -y p7zip-full)
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
@@ -80,6 +81,9 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Install 7-Zip
+        run: sudo apt-get update -y && (sudo apt-get install -y 7zip || sudo apt-get install -y p7zip-full)
+
       - name: Cache UPBGE 0.50 tarball
         uses: actions/cache@v4
         with:
@@ -104,14 +108,14 @@ jobs:
         run: |
           python tools/package_template.py dist --platforms linux \
             --with-player "$RUNNER_TEMP/upbge/upbge-0.50-linux-x64"
-          ls -lh dist/upvn-runnable-linux-x64.zip
-          unzip -l dist/upvn-runnable-linux-x64.zip | head -n 30
+          ls -lh dist/upvn-runnable-linux-x64.7z
+          7z l dist/upvn-runnable-linux-x64.7z | head -n 30
 
       - name: Upload runnable linux zip
         uses: actions/upload-artifact@v4
         with:
           name: upvn-runnable-linux
-          path: dist/upvn-runnable-linux-x64.zip
+          path: dist/upvn-runnable-linux-x64.7z
           if-no-files-found: error
 
   runnable-windows:
@@ -126,7 +130,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install 7-Zip
-        run: sudo apt-get update -y && sudo apt-get install -y p7zip-full
+        run: sudo apt-get update -y && (sudo apt-get install -y 7zip || sudo apt-get install -y p7zip-full)
 
       - name: Cache UPBGE 0.50 windows 7z
         uses: actions/cache@v4
@@ -152,12 +156,12 @@ jobs:
         run: |
           python tools/package_template.py dist --platforms windows \
             --with-player "$RUNNER_TEMP/upbge-win"
-          ls -lh dist/upvn-runnable-windows-x64.zip
-          unzip -l dist/upvn-runnable-windows-x64.zip | head -n 40
+          ls -lh dist/upvn-runnable-windows-x64.7z
+          7z l dist/upvn-runnable-windows-x64.7z | head -n 40
 
       - name: Upload runnable windows zip
         uses: actions/upload-artifact@v4
         with:
           name: upvn-runnable-windows
-          path: dist/upvn-runnable-windows-x64.zip
+          path: dist/upvn-runnable-windows-x64.7z
           if-no-files-found: error

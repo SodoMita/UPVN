@@ -1,15 +1,17 @@
 # Current Status — 2026-09-19 (GitHub CI: plugin + OS templates + sway smoke)
 
 ## Last completed
-- **Runnable windows zip** (`upvn-runnable-windows-x64.zip`): bundled
-  `blenderplayer.exe` + DLLs. Unzip, `play.bat`. CI job `runnable-windows`.
+- **Runnable 7z + CJK fonts**: linux/windows runners are
+  `upvn-runnable-*-x64.7z` (solid LZMA2). `5.0/datafiles/fonts` is kept.
+- **Runnable windows** (`upvn-runnable-windows-x64.7z`): bundled
+  `blenderplayer.exe` + DLLs. `7z x`, `play.bat`. CI job `runnable-windows`.
 - **Host Vulkan / zip-symlink stubs**: `play.sh` repairs flattened `.so`
   symlinks (or drops them so `ld.so` uses the system lib). `libvulkan*` is
   not bundled.
 - **Smaller linux runner + readable type**: player zip no longer copies
   soname `.so` three times; `blenderplayer` is stripped; tofu fonts fixed by
   shipping/binding `blend/fonts/DejaVuSans.ttf`.
-- **Self-contained linux runnable zip** (`upvn-runnable-linux-x64.zip`):
+- **Self-contained linux runnable** (`upvn-runnable-linux-x64.7z`):
   stripped `blenderplayer` + engine + starter. `./play.sh` needs no extra
   download. Built with `--with-player`. Live-run here: heartbeat start/say.
 - **GitHub CI ships the editor plugin, three OS game templates, and a live

@@ -359,11 +359,11 @@ On every push/PR:
 - **Dist artifacts** — `.github/workflows/build.yml` builds
   `upvn_editor_addon_v*.zip`, three game-template zips
   (`upvn-game-template-{linux-x64,windows-x64,macos-arm64}.zip`), and
-  self-contained `upvn-runnable-{linux,windows}-x64.zip` (bundled player).
+  self-contained `upvn-runnable-{linux,windows}-x64.7z` (bundled player).
 
 Pushing a `v*` tag (or running **Publish Release**) attaches those zips
 to a GitHub Release. The *template* zips do not bundle UPBGE (download 0.50
-from the URL in each zip's README). The *runnable* zips do.
+from the URL in each zip's README). The *runnable* 7z archives do.
 
 ```bash
 python tools/package_addon.py dist
@@ -371,10 +371,10 @@ python tools/package_template.py dist
 # self-contained players (need an extracted UPBGE 0.50 tree once, at pack time):
 python tools/package_template.py dist --platforms linux \
   --with-player /path/to/upbge-0.50-linux-x64
-# → dist/upvn-runnable-linux-x64.zip  (unzip, ./play.sh)
+# → dist/upvn-runnable-linux-x64.7z  (7z x, ./play.sh)
 python tools/package_template.py dist --platforms windows \
   --with-player /path/to/upbge-0.50-windows-x64
-# → dist/upvn-runnable-windows-x64.zip  (unzip, play.bat)
+# → dist/upvn-runnable-windows-x64.7z  (7z x, play.bat)
 ```
 
 ## Legal
