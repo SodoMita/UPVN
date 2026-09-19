@@ -1,6 +1,13 @@
-# Current Status — 2026-09-18 (scene-settings + no classroom)
+# Current Status — 2026-09-19 (GitHub CI: plugin + OS templates + sway smoke)
 
 ## Last completed
+- **GitHub CI ships the editor plugin, three OS game templates, and a live
+  player smoke.** `tools/package_addon.py` (existing) + `tools/package_template.py`
+  (linux/windows/macos zips, launchers, no UPBGE binary). Tag publishes attach
+  all four zips. Ubuntu `player-smoke` job: create project → headless sway →
+  blenderplayer 20s → fail on crash / UPVN warning / error / no heartbeat
+  (`tools/ci_player_smoke.sh`, `tools/scan_player_log.py`). Native player in
+  GHA is Linux-only; mac/win templates are the same game data + OS launcher.
 - **Scene generator settings unified** (`engine/render/scene_settings.py`):
   every Setup Scene / make_template / repair-tool knob in one file, including
   Blender factory-equal values (clip 0.1, lens 50 mm, fps 24, gravity −9.81,

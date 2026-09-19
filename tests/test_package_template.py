@@ -1,0 +1,82 @@
+"""Per-OS game-template zips produced by tools/package_template.py."""
+from __future__ import annotations
+
+import stat
+import sys
+import zipfile
+from pathlib import Path
+
+import pytest
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from tools.package_addon import addon_version
+from tools import package_template as pkg
+
+
+def test_builds_three_os_zips(tmp_path):
+    zips = pkg.build_all(tmp_path, ["linux", "windows", "macos"])
+    names = {p.name for p in zips}
+    assert names == {
+        "upvn-game-template-linux-x64.zip",
+        "upvn-game-template-windows-x64.zip",
+        "upvn-game-template-macos-arm64.zip",
+    }
+    version = addon_version(ROOT / "blend" / "upvn_editor_addon.py")
+    for zpath in zips:
+        with zipfile.ZipFile(zpath) as zf:
+            members = set(zf.namelist())
+        top = "upvn-game-template/"
+        assert top + "blend/UPVN_Template.blend" in members
+        assert top + "engine/script/parser.py" in members
+        assert top + "bge_frontend/frontend.py" in members
+        assert top + "game/script.rpy" in members
+        assert top + "LICENSE" in members
+        assert top + "README.txt" in members
+        assert not any("__pycache__" in n or n.endswith(".pyc") for n in members)
+        readme = zipfile.ZipFile(zpath).read(top + "README.txt").decode("utf-8")
+        assert version in readme
+        assert "UPBGE 0.50" in readme
+        script = zipfile.ZipFile(zpath).read(top + "game/script.rpy").decode("utf-8")
+        assert "label start:" in script
+
+
+def test_linux_launcher_is_executable(tmp_path):
+    zpath = pkg.build_platform_zip(tmp_path, "linux")
+    with zipfile.ZipFile(zpath) as zf:
+        info = zf.getinfo("upvn-game-template/play.sh")
+        mode = (info.external_attr >> 16) & 0o777
+        assert mode & stat.S_IXUSR
+        body = zf.read(info).decode("utf-8")
+    assert "blenderplayer" in body
+    assert "unset WAYLAND_DISPLAY" in body
+    assert "play.bat" not in {n.rsplit("/", 1)[-1] for n in zipfile.ZipFile(zpath).namelist()}
+
+
+def test_windows_bat_has_crlf(tmp_path):
+    zpath = pkg.build_platform_zip(tmp_path, "windows")
+    with zipfile.ZipFile(zpath) as zf:
+        names = zf.namelist()
+        bat = zf.read("upvn-game-template/play.bat")
+    assert "upvn-game-template/play.bat" in names
+    assert b"\r\n" in bat
+    assert b"blenderplayer.exe" in bat
+    assert not any(n.endswith("play.sh") for n in names)
+
+
+def test_macos_has_play_command(tmp_path):
+    zpath = pkg.build_platform_zip(tmp_path, "macos")
+    with zipfile.ZipFile(zpath) as zf:
+        names = zf.namelist()
+        cmd = zf.read("upvn-game-template/play.command").decode("utf-8")
+        url = zf.read("upvn-game-template/UPBGE_DOWNLOAD.txt").decode("utf-8")
+    assert "play.command" in "\n".join(names)
+    assert "blenderplayer" in cmd
+    assert "macos-arm64" in url
+    assert url.startswith("https://github.com/UPBGE/upbge/releases/")
+
+
+def test_unknown_platform_exits():
+    with pytest.raises(SystemExit):
+        pkg.build_platform_zip(Path("/tmp"), "amiga")

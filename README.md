@@ -171,7 +171,8 @@ upvn/
     14_renpy_dropin/      (Tier 3 multi-file, stock Ren'Py syntax — see below)
   tests/          # golden trace tests (headless, no bge)
   tools/ run_headless.py, validate.py, check_renpy_project.py,
-         package_game.py, package_addon.py, upvn_game_creator.py
+         package_game.py, package_addon.py, package_template.py,
+         upvn_game_creator.py, ci_player_smoke.sh, scan_player_log.py
   blend/ UPVN_Template.blend + generation script
   docs/           # design notes, Ren'Py criticism inventory
 ```
@@ -343,6 +344,30 @@ Each milestone has `examples/exNN_*/expected_behavior.md` + `tests/test_exNN*.py
 - Ren'Py source: `https://github.com/renpy/renpy` cloned shallow to `~/renpy_src` (150 MB). Inspected `renpy/{lexer,parser,ast,execution}.py`.
 
 ---
+
+## GitHub CI & releases
+
+On every push/PR:
+
+- **Engine tests + examples** — `.github/workflows/ci.yml` (pytest, example
+  validate/play, Ren'Py corpora).
+- **Player smoke (Ubuntu)** — same workflow, `player-smoke` job: create a
+  project (`tools/upvn_game_creator.py`), start headless sway, run
+  `blenderplayer` ~20 seconds. The job **fails** on a crash, a Python
+  traceback, a UPVN error/warning, or a missing heartbeat. Host noise
+  (ALSA / Mesa / Blender RNA) is ignored. See `tools/ci_player_smoke.sh`.
+- **Dist artifacts** — `.github/workflows/build.yml` builds
+  `upvn_editor_addon_v*.zip` and three game-template zips
+  (`upvn-game-template-{linux-x64,windows-x64,macos-arm64}.zip`).
+
+Pushing a `v*` tag (or running **Publish Release**) attaches those four zips
+to a GitHub Release. The templates are playable skeletons + OS launchers;
+they do not bundle UPBGE (download 0.50 from the URL in each zip's README).
+
+```bash
+python tools/package_addon.py dist
+python tools/package_template.py dist
+```
 
 ## Legal
 

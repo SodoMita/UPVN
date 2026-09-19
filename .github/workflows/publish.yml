@@ -73,6 +73,11 @@ jobs:
           python tools/package_addon.py dist
           ls -lh dist/
 
+      - name: Build game templates (linux / windows / macOS)
+        run: |
+          python tools/package_template.py dist
+          ls -lh dist/upvn-game-template-*.zip
+
       - name: Build sample game package (optional, non-blocking)
         continue-on-error: true
         run: |
@@ -125,8 +130,11 @@ jobs:
           body_path: ${{ steps.changelog.outputs.notes_path }}
           prerelease: ${{ inputs.prerelease || false }}
           files: |
-            dist/*.zip
-          fail_on_unmatched_files: false
+            dist/upvn_editor_addon_v*.zip
+            dist/upvn-game-template-linux-x64.zip
+            dist/upvn-game-template-windows-x64.zip
+            dist/upvn-game-template-macos-arm64.zip
+          fail_on_unmatched_files: true
           generate_release_notes: true
 
   # Optional: publish docs / pages if needed in future

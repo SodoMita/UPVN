@@ -2,7 +2,7 @@ name: Build Dist
 
 on:
   push:
-    branches: [main]
+    branches: [main, "agent/**"]
   pull_request:
   workflow_dispatch:
 
@@ -30,7 +30,13 @@ jobs:
         run: |
           python tools/package_addon.py dist
           ls -lh dist/
-          unzip -l dist/*.zip | head -n 100
+          unzip -l dist/upvn_editor_addon_v*.zip | head -n 100
+
+      - name: Build game templates (linux / windows / macOS)
+        run: |
+          python tools/package_template.py dist
+          ls -lh dist/
+          unzip -l dist/upvn-game-template-linux-x64.zip | head -n 40
 
       - name: Validate zip can be imported (self-containment proof)
         run: |
@@ -49,9 +55,16 @@ jobs:
               print(f"OK {len(names)} entries")
           PY
 
-      - name: Upload artifact
+      - name: Upload add-on zip
         uses: actions/upload-artifact@v4
         with:
           name: upvn-addon-dist
-          path: dist/*.zip
+          path: dist/upvn_editor_addon_v*.zip
+          if-no-files-found: error
+
+      - name: Upload game-template zips
+        uses: actions/upload-artifact@v4
+        with:
+          name: upvn-game-templates
+          path: dist/upvn-game-template-*.zip
           if-no-files-found: error

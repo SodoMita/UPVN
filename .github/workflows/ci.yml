@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, "feat/**"]
+    branches: [main, "feat/**", "agent/**"]
   pull_request:
   workflow_dispatch:
 
@@ -154,3 +154,49 @@ jobs:
         with:
           name: renpy-sdk-report
           path: sdk_report.json
+
+  player-smoke:
+    name: Create project + sway player smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Cache UPBGE 0.50 tarball
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/upbge-cache
+          key: upbge-0.50-linux-x64
+
+      - name: Create project, run blenderplayer under sway
+        env:
+          UPVN_UPBGE_CACHE: ${{ runner.temp }}/upbge-cache
+          UPBGE_DIR: /opt/upbge/upbge-0.50-linux-x64
+          UPVN_SMOKE_SECS: "20"
+          UPVN_WL_DIR: ${{ runner.temp }}/wl-upvn
+          UPVN_SMOKE_DIR: ${{ runner.temp }}/upvn_ci_project
+          UPVN_LOG: ${{ runner.temp }}/upvn_ci_player.log
+          UPVN_HEARTBEAT: ${{ runner.temp }}/upvn_ci_hb.json
+          UPVN_DEBUG_TEE: ${{ runner.temp }}/upvn_ci_debug.log
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          # desktop_sway.sh apt-installs sway/xwayland; allow sudo on GHA.
+          sudo mkdir -p /opt/upbge
+          sudo chown "$(id -un)" /opt/upbge
+          bash tools/ci_player_smoke.sh
+
+      - name: Upload player logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: player-smoke-logs
+          path: |
+            ${{ runner.temp }}/upvn_ci_player.log
+            ${{ runner.temp }}/upvn_ci_hb.json
+            ${{ runner.temp }}/upvn_ci_debug.log
+            ${{ runner.temp }}/wl-upvn/sway.log
+          if-no-files-found: warn

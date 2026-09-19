@@ -1,3 +1,19 @@
+## 2026-09-19 — GitHub CI: add-on zip, OS game templates, sway player smoke
+
+- `tools/package_template.py` builds three game-template zips (Linux x64,
+  Windows x64, macOS arm64): `blend/UPVN_Template.blend`, `engine/`,
+  `bge_frontend/`, a starter `game/script.rpy`, and an OS launcher
+  (`play.sh` / `play.bat` / `play.command`). UPBGE itself is **not** bundled
+  (GPL, 300–650 MB); each zip's README points at the matching UPBGE 0.50
+  download.
+- `.github/workflows/build.yml` uploads the add-on zip **and** the three
+  template zips. `publish.yml` attaches them to GitHub Releases on `v*` tags.
+- New `player-smoke` job in `.github/workflows/ci.yml`: create a project with
+  `tools/upvn_game_creator.py`, run `blenderplayer` ~20s under headless sway
+  (XWayland, `unset WAYLAND_DISPLAY`), fail on crash / UPVN error / warning /
+  missing heartbeat. Scanner: `tools/scan_player_log.py`; harness:
+  `tools/ci_player_smoke.sh`. Host/driver noise (ALSA, Mesa, RNA) is allowed.
+
 ## 2026-09-18 — no generated classroom in the default template
 
 - Removed the procedural 3D classroom (floor, walls, desks, chairs, blackboard,
